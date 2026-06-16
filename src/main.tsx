@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   AlertTriangle,
@@ -21,6 +21,20 @@ import "./styles.css";
 
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AlertLevel = "ok" | "warning" | "danger";
+type ConnectorStatus = "idle" | "loading" | "ready" | "error";
+
+type SculptureRow = {
+  group: string;
+  values: string[];
+  record: Record<string, string>;
+};
+
+type SculptureResponse = {
+  headers: string[];
+  rows: SculptureRow[];
+  cid: string;
+  pid: string;
+};
 
 const reports = [
   {
@@ -106,6 +120,36 @@ function alertClass(alert: AlertLevel) {
 }
 
 function App() {
+  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatus>("idle");
+  const [connectorError, setConnectorError] = useState("");
+  const [sculptureData, setSculptureData] = useState<SculptureResponse | null>(null);
+
+  async function loadSculptureRequisition() {
+    setConnectorStatus("loading");
+    setConnectorError("");
+
+    try {
+      const response = await fetch("/api/sculpture/requisition");
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "No se pudo cargar Sculpture.");
+      }
+
+      setSculptureData(payload);
+      setConnectorStatus("ready");
+    } catch (error) {
+      setConnectorError(error instanceof Error ? error.message : "Error desconocido.");
+      setConnectorStatus("error");
+    }
+  }
+
+  useEffect(() => {
+    loadSculptureRequisition();
+  }, []);
+
+  const previewRows = useMemo(() => sculptureData?.rows.slice(0, 8) || [], [sculptureData]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -156,6 +200,50 @@ function App() {
             <strong>2</strong>
             <small>Pagos por gestionar</small>
           </article>
+        </section>
+
+        <section className="panel connector-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Conector activo</p>
+              <h2>Requisition & Transfers</h2>
+            </div>
+            <button className="secondary-button" onClick={loadSculptureRequisition}>
+              <Cloud size={17} /> Sincronizar
+            </button>
+          </div>
+
+          <div className="connector-meta">
+            <span className={`connector-state ${connectorStatus}`}>{connectorStatus}</span>
+            {sculptureData ? (
+              <small>cid {sculptureData.cid} - pid {sculptureData.pid} - {sculptureData.rows.length} filas</small>
+            ) : (
+              <small>Esperando variables SCULPTURE en el servidor</small>
+            )}
+          </div>
+
+          {connectorError ? <p className="connector-error">{connectorError}</p> : null}
+
+          <div className="sculpture-table">
+            <div className="sculpture-row sculpture-head">
+              <span>Grupo</span>
+              <span>Item</span>
+              <span>Unidad</span>
+              <span>Tamano</span>
+              <span>Cocina In</span>
+              <span>Cocina Full OH</span>
+            </div>
+            {previewRows.map((row, index) => (
+              <div className="sculpture-row" key={`${row.values.join("-")}-${index}`}>
+                <span>{row.group || "-"}</span>
+                <span>{row.record.itemName || row.values[0] || "-"}</span>
+                <span>{row.record.unit || row.values[1] || "-"}</span>
+                <span>{row.record.size || row.values[2] || "-"}</span>
+                <span>{row.record.cocinaIn || row.values[3] || "-"}</span>
+                <span>{row.record.cocinaFullOH || row.values[4] || "-"}</span>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="module-grid">

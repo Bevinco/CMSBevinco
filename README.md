@@ -34,6 +34,22 @@ npm run dev
 npm run build
 ```
 
+## Produccion en Render
+
+Usar estos comandos:
+
+```bash
+npm install
+npm run build
+npm run start
+```
+
+El backend Express sirve el sitio compilado y expone el endpoint seguro:
+
+```bash
+GET /api/sculpture/requisition
+```
+
 ## Variables de entorno
 
 Copiar `.env.example` a `.env` y completar las claves cuando esten disponibles.
@@ -48,4 +64,10 @@ VITE_CLICKUP_LIST_ID=
 VITE_SCULPTURE_API_BASE_URL=
 VITE_SCULPTURE_API_KEY=
 VITE_OPENAI_API_KEY=
+SCULPTURE_BASE_URL=https://beta.food.sculpturehospitality.com
+SCULPTURE_SESSION_COOKIE=
+SCULPTURE_DEFAULT_CID=29088
+SCULPTURE_DEFAULT_PID=36
 ```
+
+`SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.

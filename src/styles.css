@@ -293,6 +293,76 @@ button {
   padding-top: 12px;
 }
 
+.connector-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.connector-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.connector-state {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.connector-state.idle,
+.connector-state.loading {
+  background: #edf1f0;
+  color: #46605a;
+}
+
+.connector-state.ready {
+  background: #dff5ea;
+  color: #14633f;
+}
+
+.connector-state.error {
+  background: #fde4df;
+  color: #9b2d22;
+}
+
+.connector-error {
+  background: #fff0c7;
+  border-radius: 8px;
+  color: #725100;
+  margin: 0;
+  padding: 12px;
+}
+
+.sculpture-table {
+  border: 1px solid #edf1f0;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.sculpture-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1.4fr 0.7fr 0.8fr 0.8fr 1fr;
+  min-width: 820px;
+  padding: 12px 14px;
+}
+
+.sculpture-row + .sculpture-row {
+  border-top: 1px solid #edf1f0;
+}
+
+.sculpture-head {
+  background: #f4f6f5;
+  color: #46605a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .dot {
   background: #f4b84a;
   border-radius: 999px;
