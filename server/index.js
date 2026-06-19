@@ -42,6 +42,7 @@ const sampleDefinitions = [
       id: "bardot-barra",
       name: "Bardot Barra",
       cid: "bardot-barra",
+      sculptureCid: defaultCid,
       area: "Beverage",
       recipients: ["operaciones@bardot.cl"],
     },
@@ -53,6 +54,7 @@ const sampleDefinitions = [
       id: "bardot-cocina",
       name: "Bardot Cocina",
       cid: "bardot-cocina",
+      sculptureCid: defaultCid,
       area: "Food",
       recipients: ["operaciones@bardot.cl"],
     },
@@ -184,6 +186,34 @@ function parseSculptureTable(html) {
   });
 
   return { headers, rows };
+}
+
+function configuredIdentifier(...values) {
+  return values.find((value) => /^\d+$/.test(String(value || "").trim())) || "";
+}
+
+function resolveSculptureContext({ client, period, requestBody = {} }) {
+  const cid = configuredIdentifier(
+    requestBody.cid,
+    requestBody.sculptureCid,
+    client?.sculptureCid,
+    client?.cid,
+    defaultCid,
+  );
+  const pid = configuredIdentifier(
+    requestBody.pid,
+    requestBody.sculpturePid,
+    period?.sculpturePid,
+    period?.pid,
+    defaultPid,
+  );
+
+  return {
+    cid,
+    pid,
+    cidSource: cid === String(client?.cid || "") ? "cliente" : "configuracion",
+    pidSource: pid === String(period?.pid || period?.sculpturePid || "") ? "periodo" : "configuracion",
+  };
 }
 
 async function ensureStore() {
@@ -536,6 +566,8 @@ async function buildStoreFromSamples() {
     label: "Jun 4 to Jun 10 2026",
     startsAt: "2026-06-04",
     endsAt: "2026-06-10",
+    pid: defaultPid,
+    sculpturePid: defaultPid,
   };
   const clients = sampleDefinitions.map((sample) => sample.client);
   const reports = [];
@@ -683,6 +715,7 @@ function ensureClient(store, clientInput) {
       id,
       name: clientInput.name || id,
       cid: clientInput.cid || id,
+      sculptureCid: clientInput.sculptureCid || clientInput.cid || "",
       area: clientInput.area || "Food",
       recipients: clientInput.recipients || [],
     };
@@ -691,6 +724,7 @@ function ensureClient(store, clientInput) {
     Object.assign(client, {
       name: clientInput.name || client.name,
       cid: clientInput.cid || client.cid,
+      sculptureCid: clientInput.sculptureCid || client.sculptureCid || clientInput.cid || client.cid,
       area: clientInput.area || client.area,
       recipients: clientInput.recipients || client.recipients,
     });
@@ -709,6 +743,8 @@ function ensurePeriod(store, periodInput) {
       label: periodInput.label || id,
       startsAt: periodInput.startsAt || "",
       endsAt: periodInput.endsAt || "",
+      pid: periodInput.pid || periodInput.sculpturePid || "",
+      sculpturePid: periodInput.sculpturePid || periodInput.pid || "",
     };
     store.periods.push(period);
   } else {
@@ -716,6 +752,8 @@ function ensurePeriod(store, periodInput) {
       label: periodInput.label || period.label,
       startsAt: periodInput.startsAt || period.startsAt,
       endsAt: periodInput.endsAt || period.endsAt,
+      pid: periodInput.pid || period.pid,
+      sculpturePid: periodInput.sculpturePid || period.sculpturePid || periodInput.pid || period.pid,
     });
   }
 
@@ -836,6 +874,67 @@ async function fetchSculptureInternalReport({ type, cid, pid }) {
     pid,
     ...parseSculptureTable(html),
   };
+}
+
+async function syncSculptureSources(store, report, requestBody = {}) {
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const period = store.periods.find((candidate) => candidate.id === report.periodId);
+  const { cid, pid, cidSource, pidSource } = resolveSculptureContext({ client, period, requestBody });
+  const syncResults = {};
+
+  if (!cid || !pid) {
+    const missing = !cid ? "cid" : "pid";
+    const error = `No hay ${missing} numerico configurado para Sculpture.`;
+    for (const type of ["varianceDetailed", "varianceSummary", "intelipar"]) {
+      syncResults[type] = { error, cid, pid };
+      report.sourceStatus[type] = "Por revisar";
+    }
+    return syncResults;
+  }
+
+  for (const type of ["varianceDetailed", "varianceSummary", "intelipar"]) {
+    try {
+      const data = await fetchSculptureInternalReport({ type, cid, pid });
+      syncResults[type] = {
+        ...data,
+        cidSource,
+        pidSource,
+        rowsCount: data.rows?.length || 0,
+      };
+      report.sourceStatus[type] = data.rows?.length ? "Sincronizado" : "Sin datos";
+
+      if (type === "varianceDetailed" || type === "varianceSummary") {
+        const metrics = extractReportMetrics(data);
+        if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
+        if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
+      }
+
+      if (type === "intelipar") {
+        const suggestions = data.rows.slice(0, 12).map((row) => ({
+          item: row.record.itemName || row.record.item || row.values[0] || "",
+          provider: row.record.provider || row.record.vendor || row.record.proveedor || row.values[1] || "Por validar",
+          stock: row.record.stock || row.record.onHand || row.record.stockActual || row.values[2] || "",
+          suggested: row.record.suggested || row.record.order || row.record.sugerido || row.values[3] || "",
+          note: row.record.note || row.record.nota || "Revisar contra proveedor actualizado",
+        }));
+        if (suggestions.length) report.purchaseSuggestions = suggestions;
+      }
+    } catch (error) {
+      syncResults[type] = {
+        error: error.message,
+        details: error.details,
+        cid,
+        pid,
+        cidSource,
+        pidSource,
+      };
+      report.sourceStatus[type] = "Por revisar";
+    }
+  }
+
+  report.updatedAt = new Date().toISOString();
+  report.analysis = null;
+  return syncResults;
 }
 
 function buildReportPayload(store, report) {
@@ -1757,6 +1856,7 @@ app.post("/api/module1/sync", requireAuth, async (request, response) => {
   const store = await readStore();
   const { clientId, periodId } = request.body || {};
   const client = store.clients.find((candidate) => candidate.id === clientId);
+  const period = store.periods.find((candidate) => candidate.id === periodId);
 
   if (!client) {
     response.status(404).json({ error: "Client not found." });
@@ -1764,39 +1864,11 @@ app.post("/api/module1/sync", requireAuth, async (request, response) => {
   }
 
   const report = reportForClientPeriod(store, clientId, periodId);
-  const syncResults = {};
-
-  for (const type of ["varianceDetailed", "varianceSummary", "intelipar"]) {
-    try {
-      const data = await fetchSculptureInternalReport({ type, cid: client.cid, pid: periodId });
-      syncResults[type] = data;
-      report.sourceStatus[type] = "Sincronizado";
-
-      if (type === "varianceDetailed" || type === "varianceSummary") {
-        const metrics = extractReportMetrics(data);
-        if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
-        if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
-      }
-
-      if (type === "intelipar") {
-        report.purchaseSuggestions = data.rows.slice(0, 12).map((row) => ({
-          item: row.record.itemName || row.values[0] || "",
-          provider: row.record.provider || row.record.vendor || row.values[1] || "Por validar",
-          stock: row.record.stock || row.record.onHand || row.values[2] || "",
-          suggested: row.record.suggested || row.record.order || row.values[3] || "",
-          note: "Revisar contra proveedor actualizado",
-        }));
-      }
-    } catch (error) {
-      syncResults[type] = {
-        error: error.message,
-        details: error.details,
-      };
-      report.sourceStatus[type] = "Por revisar";
-    }
-  }
-
-  report.updatedAt = new Date().toISOString();
+  const syncResults = await syncSculptureSources(store, report, {
+    ...request.body,
+    cid: client.sculptureCid || client.cid,
+    pid: period?.sculpturePid || period?.pid,
+  });
   await writeStore(store);
 
   response.json({
@@ -1836,6 +1908,7 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   }
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  await syncSculptureSources(store, report);
   const generatedSummary = generateReportSummary(store, report);
   report.comments = generatedSummary;
   report.analysis = generateReportAnalysis(buildReportPayload(store, report));

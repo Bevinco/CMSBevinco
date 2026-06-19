@@ -33,6 +33,7 @@ type Client = {
   id: string;
   name: string;
   cid: string;
+  sculptureCid?: string;
   area: string;
   recipients: string[];
 };
@@ -42,6 +43,8 @@ type Period = {
   label: string;
   startsAt: string;
   endsAt: string;
+  pid?: string;
+  sculpturePid?: string;
 };
 
 type HistoryPoint = {
@@ -523,10 +526,10 @@ function App() {
   async function syncReport() {
     if (!selectedReport) return;
     setWorkStatus("loading");
-    setError("");
+    setError("Intentando traer Variance e Intelipar desde Sculpture...");
 
     try {
-      const payload = await readJson<{ report: Report }>(
+      const payload = await readJson<{ report: Report; syncResults: Record<string, { error?: string; rowsCount?: number }> }>(
         await fetch("/api/module1/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -537,6 +540,15 @@ function App() {
       setCommentsDraft(payload.report.comments || "");
       setEmailDraft(payload.report.emailDraft || "");
       setReports((current) => current.map((item) => (item.id === payload.report.id ? payload.report : item)));
+      const synced = Object.entries(payload.syncResults || {}).filter(([, result]) => !result.error).length;
+      const failed = Object.entries(payload.syncResults || {})
+        .filter(([, result]) => result.error)
+        .map(([source]) => sourceLabels[source] || source);
+      setError(
+        failed.length
+          ? `Sculpture respondio ${synced} fuente(s). Por revisar: ${failed.join(", ")}.`
+          : "Datos traidos desde Sculpture correctamente.",
+      );
       setWorkStatus("ready");
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Error desconocido.");
@@ -564,7 +576,7 @@ function App() {
   async function generateSummary() {
     if (!selectedReport) return;
     setWorkStatus("loading");
-    setError("");
+    setError("Intentando sincronizar Sculpture antes de generar el reporte...");
 
     try {
       const updated = await readJson<Report>(

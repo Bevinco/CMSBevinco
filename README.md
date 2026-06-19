@@ -85,3 +85,5 @@ CMS_SESSION_SECRET=
 
 `SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
+
+El CMS intenta traer Variance detailed, Variance summary e Intelipar desde los endpoints internos de Sculpture al sincronizar fuentes y antes de generar el reporte. Para clientes o periodos reales, guardar `sculptureCid` en el cliente y `sculpturePid`/`pid` en el periodo; si faltan, usa `SCULPTURE_DEFAULT_CID` y `SCULPTURE_DEFAULT_PID`.
