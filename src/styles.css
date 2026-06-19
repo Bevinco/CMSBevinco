@@ -433,6 +433,34 @@ button:disabled {
   line-height: 1.45;
 }
 
+.agent-analysis-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.agent-analysis-grid article {
+  border: 1px solid #edf1f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.agent-analysis-grid ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.agent-analysis-grid li {
+  color: #526862;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .wrap-actions {
   flex-wrap: wrap;
   justify-content: flex-start;
@@ -1039,6 +1067,7 @@ button:disabled {
   .module-roadmap,
   .source-grid,
   .purchase-grid,
+  .agent-analysis-grid,
   .reservation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1076,6 +1105,7 @@ button:disabled {
   .module-roadmap,
   .source-grid,
   .purchase-grid,
+  .agent-analysis-grid,
   .reservation-grid {
     grid-template-columns: 1fr;
   }

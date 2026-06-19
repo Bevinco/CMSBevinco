@@ -466,6 +466,55 @@ function generateReportSummary(store, report) {
   ].join("\n");
 }
 
+function generateReportAnalysis(payload) {
+  const money = new Intl.NumberFormat("es-CL", {
+    currency: "CLP",
+    maximumFractionDigits: 0,
+    style: "currency",
+  });
+  const bestProducts = (payload.topProducts || [])
+    .filter((item) => item.varianceAmount > 0)
+    .sort((left, right) => right.varianceAmount - left.varianceAmount)
+    .slice(0, 3);
+  const challengeProducts = (payload.topProducts || [])
+    .filter((item) => item.varianceAmount < 0)
+    .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
+    .slice(0, 4);
+  const challengeCategories = (payload.categoryVariances || [])
+    .filter((item) => item.amount < 0)
+    .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))
+    .slice(0, 3);
+  const purchaseItems = (payload.purchaseSuggestions || [])
+    .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
+    .slice(0, 4);
+
+  return {
+    bestOfWeek: bestProducts.map(
+      (item) =>
+        `En ${item.name} (${item.category}) se observa un ahorro o diferencia positiva de ${money.format(item.varianceAmount)} (${item.variancePercent}%), aportando al resultado semanal.`,
+    ),
+    weeklyChallenges: [
+      ...challengeCategories.map(
+        (item) =>
+          `En la categoria ${item.category} se concentra una diferencia negativa de ${money.format(item.amount)} (${item.percent}%), por lo que conviene revisar inventario, merma y registro de ventas.`,
+      ),
+      ...challengeProducts.map(
+        (item) =>
+          `${item.name} presenta una diferencia de ${money.format(item.varianceAmount)} (${item.variancePercent}%) dentro de ${item.category}; revisar conteo, consumo y posibles ajustes operativos.`,
+      ),
+    ].slice(0, 5),
+    stockEfficiency: purchaseItems.map(
+      (item) =>
+        `${item.item}: stock ${item.stock || "s/i"}, compra sugerida ${item.suggested || "por revisar"}, proveedor ${item.provider || "por validar"}. ${item.note || ""}`.trim(),
+    ),
+    agentNotes: (payload.comments || "")
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .slice(0, 5),
+  };
+}
+
 async function buildStoreFromSamples() {
   const period = {
     id: "jun-04-10-2026",
@@ -490,6 +539,7 @@ async function buildStoreFromSamples() {
         categoryVariances: buildCategoryVariances(varianceRows),
         topProducts: buildTopProducts(varianceRows),
         purchaseSuggestions: buildPurchaseSuggestions(inteliparRows),
+        analysis: null,
         comments: "",
         emailDraft:
           "Hola, adjuntamos el reporte semanal de auditoria. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
@@ -584,6 +634,7 @@ function reportForClientPeriod(store, clientId, periodId) {
       categoryVariances: [],
       topProducts: [],
       purchaseSuggestions: [],
+      analysis: null,
       comments: "",
       emailDraft: "",
       sourceStatus: {
@@ -775,12 +826,15 @@ function buildReportPayload(store, report) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
 
-  return {
+  const payload = {
     ...report,
     client,
     period,
     history: historyForReport(store, report),
   };
+  payload.analysis = report.analysis || generateReportAnalysis(payload);
+
+  return payload;
 }
 
 function renderReportHtml(store, report) {
@@ -1293,44 +1347,7 @@ function renderPolishedReportHtml(store, report) {
   const varianceSvg = renderVarianceSvg(payload.categoryVariances, money);
   const productSvg = renderVarianceSvg(payload.topProducts, money);
   const purchaseSvg = renderPurchaseSvg(payload.purchaseSuggestions);
-  const bestProducts = payload.topProducts
-    .filter((item) => item.varianceAmount > 0)
-    .sort((left, right) => right.varianceAmount - left.varianceAmount)
-    .slice(0, 3);
-  const challengeProducts = payload.topProducts
-    .filter((item) => item.varianceAmount < 0)
-    .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
-    .slice(0, 4);
-  const challengeCategories = payload.categoryVariances
-    .filter((item) => item.amount < 0)
-    .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))
-    .slice(0, 3);
-  const purchaseItems = payload.purchaseSuggestions
-    .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
-    .slice(0, 4);
-  const bestNarrative = bestProducts.map(
-    (item) =>
-      `En ${item.name} (${item.category}) se observa un ahorro o diferencia positiva de ${money.format(item.varianceAmount)} (${item.variancePercent}%), aportando al resultado semanal.`,
-  );
-  const challengeNarrative = [
-    ...challengeCategories.map(
-      (item) =>
-        `En la categoria ${item.category} se concentra una diferencia negativa de ${money.format(item.amount)} (${item.percent}%), por lo que conviene revisar inventario, merma y registro de ventas.`,
-    ),
-    ...challengeProducts.map(
-      (item) =>
-        `${item.name} presenta una diferencia de ${money.format(item.varianceAmount)} (${item.variancePercent}%) dentro de ${item.category}; revisar conteo, consumo y posibles ajustes operativos.`,
-    ),
-  ].slice(0, 5);
-  const stockNarrative = purchaseItems.map(
-    (item) =>
-      `${item.item}: stock ${item.stock || "s/i"}, compra sugerida ${item.suggested || "por revisar"}, proveedor ${item.provider || "por validar"}. ${item.note || ""}`.trim(),
-  );
-  const agentSummaryText = (payload.comments || "")
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .slice(0, 5);
+  const analysis = payload.analysis || generateReportAnalysis(payload);
   const categoryRows = payload.categoryVariances.map((item) => `<tr><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="percent-cell">${item.percent}%</td></tr>`).join("");
   const productRows = payload.topProducts.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.name)}</td><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="percent-cell">${item.variancePercent}%</td></tr>`).join("");
   const purchaseRows = payload.purchaseSuggestions.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.item)}</td><td class="text-cell">${escapeHtml(item.provider)}</td><td class="small-number-cell">${escapeHtml(item.stock)}</td><td class="small-number-cell">${escapeHtml(item.suggested)}</td><td class="note-cell">${escapeHtml(item.note)}</td></tr>`).join("");
@@ -1436,11 +1453,11 @@ function renderPolishedReportHtml(store, report) {
       </aside>
     </section>
     <section class="section"><h2>Lectura ejecutiva del periodo</h2><div class="section-body"><div class="analysis-grid">
-      ${renderAnalysisList("Lo mejor de la semana", bestNarrative)}
-      ${renderAnalysisList("Los desafios de la semana", challengeNarrative)}
-      ${renderAnalysisList("Eficiencia de stock y compra", stockNarrative)}
+      ${renderAnalysisList("Lo mejor de la semana", analysis.bestOfWeek || [])}
+      ${renderAnalysisList("Los desafios de la semana", analysis.weeklyChallenges || [])}
+      ${renderAnalysisList("Eficiencia de stock y compra", analysis.stockEfficiency || [])}
     </div></div></section>
-    <section class="section"><h2>Resumen generado por el agente de reportes</h2><div class="section-body"><div class="summary-box"><ul class="agent-list">${agentSummaryText
+    <section class="section"><h2>Resumen generado por el agente de reportes</h2><div class="section-body"><div class="summary-box"><ul class="agent-list">${(analysis.agentNotes || [])
       .map((paragraph) => `<li>${escapeHtml(paragraph)}</li>`)
       .join("")}</ul></div></div></section>
     <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><colgroup><col class="w-category-name"><col class="w-category-money"><col class="w-category-percent"></colgroup><thead><tr><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
@@ -1716,7 +1733,7 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
     return;
   }
 
-  const allowedFields = ["status", "comments", "emailDraft", "summary", "categoryVariances", "topProducts", "purchaseSuggestions"];
+  const allowedFields = ["status", "comments", "emailDraft", "analysis", "summary", "categoryVariances", "topProducts", "purchaseSuggestions"];
   allowedFields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(request.body, field)) {
       report[field] = request.body[field];
@@ -1740,6 +1757,7 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const generatedSummary = generateReportSummary(store, report);
   report.comments = generatedSummary;
+  report.analysis = generateReportAnalysis(buildReportPayload(store, report));
   report.emailDraft = [
     `Hola,`,
     "",

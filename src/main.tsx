@@ -68,6 +68,12 @@ type Report = {
   categoryVariances: Array<{ category: string; amount: number; percent: number }>;
   topProducts: Array<{ name: string; category: string; varianceAmount: number; variancePercent: number }>;
   purchaseSuggestions: Array<{ item: string; provider: string; stock: string; suggested: string; note: string }>;
+  analysis?: {
+    bestOfWeek?: string[];
+    weeklyChallenges?: string[];
+    stockEfficiency?: string[];
+    agentNotes?: string[];
+  };
   comments: string;
   emailDraft: string;
   sourceStatus: Record<string, string>;
@@ -711,6 +717,32 @@ function App() {
             })}
           </div>
         </section>
+
+        {selectedReport?.analysis ? (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Analisis del agente</p>
+                <h2>Lectura ejecutiva del periodo</h2>
+              </div>
+              <Bot size={22} />
+            </div>
+            <div className="agent-analysis-grid">
+              <article>
+                <strong>Lo mejor de la semana</strong>
+                <ul>{(selectedReport.analysis.bestOfWeek || []).map((item) => <li key={item}>{item}</li>)}</ul>
+              </article>
+              <article>
+                <strong>Los desafios de la semana</strong>
+                <ul>{(selectedReport.analysis.weeklyChallenges || []).map((item) => <li key={item}>{item}</li>)}</ul>
+              </article>
+              <article>
+                <strong>Eficiencia de stock y compra</strong>
+                <ul>{(selectedReport.analysis.stockEfficiency || []).map((item) => <li key={item}>{item}</li>)}</ul>
+              </article>
+            </div>
+          </section>
+        ) : null}
 
         <section className="module-grid">
           <div className="panel">
