@@ -1274,6 +1274,14 @@ function renderPurchaseSvg(items) {
   </svg>`;
 }
 
+function renderAnalysisList(title, items) {
+  const fallbackItems = items.length ? items : ["Sin hallazgos relevantes para este bloque en el periodo seleccionado."];
+
+  return `<div class="analysis-block"><h3>${escapeHtml(title)}</h3><ul>${fallbackItems
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("")}</ul></div>`;
+}
+
 function renderPolishedReportHtml(store, report) {
   const payload = buildReportPayload(store, report);
   const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
@@ -1285,6 +1293,44 @@ function renderPolishedReportHtml(store, report) {
   const varianceSvg = renderVarianceSvg(payload.categoryVariances, money);
   const productSvg = renderVarianceSvg(payload.topProducts, money);
   const purchaseSvg = renderPurchaseSvg(payload.purchaseSuggestions);
+  const bestProducts = payload.topProducts
+    .filter((item) => item.varianceAmount > 0)
+    .sort((left, right) => right.varianceAmount - left.varianceAmount)
+    .slice(0, 3);
+  const challengeProducts = payload.topProducts
+    .filter((item) => item.varianceAmount < 0)
+    .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
+    .slice(0, 4);
+  const challengeCategories = payload.categoryVariances
+    .filter((item) => item.amount < 0)
+    .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))
+    .slice(0, 3);
+  const purchaseItems = payload.purchaseSuggestions
+    .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
+    .slice(0, 4);
+  const bestNarrative = bestProducts.map(
+    (item) =>
+      `En ${item.name} (${item.category}) se observa un ahorro o diferencia positiva de ${money.format(item.varianceAmount)} (${item.variancePercent}%), aportando al resultado semanal.`,
+  );
+  const challengeNarrative = [
+    ...challengeCategories.map(
+      (item) =>
+        `En la categoria ${item.category} se concentra una diferencia negativa de ${money.format(item.amount)} (${item.percent}%), por lo que conviene revisar inventario, merma y registro de ventas.`,
+    ),
+    ...challengeProducts.map(
+      (item) =>
+        `${item.name} presenta una diferencia de ${money.format(item.varianceAmount)} (${item.variancePercent}%) dentro de ${item.category}; revisar conteo, consumo y posibles ajustes operativos.`,
+    ),
+  ].slice(0, 5);
+  const stockNarrative = purchaseItems.map(
+    (item) =>
+      `${item.item}: stock ${item.stock || "s/i"}, compra sugerida ${item.suggested || "por revisar"}, proveedor ${item.provider || "por validar"}. ${item.note || ""}`.trim(),
+  );
+  const agentSummaryText = (payload.comments || "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .slice(0, 5);
   const categoryRows = payload.categoryVariances.map((item) => `<tr><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="percent-cell">${item.percent}%</td></tr>`).join("");
   const productRows = payload.topProducts.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.name)}</td><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="percent-cell">${item.variancePercent}%</td></tr>`).join("");
   const purchaseRows = payload.purchaseSuggestions.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.item)}</td><td class="text-cell">${escapeHtml(item.provider)}</td><td class="small-number-cell">${escapeHtml(item.stock)}</td><td class="small-number-cell">${escapeHtml(item.suggested)}</td><td class="note-cell">${escapeHtml(item.note)}</td></tr>`).join("");
@@ -1327,6 +1373,12 @@ function renderPolishedReportHtml(store, report) {
     .report-svg { display: block; height: auto; width: 100%; }
     .two-col { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.7fr) minmax(210px, 0.8fr); }
     .summary-box { border: 1px solid #d8dfdc; color: #555; font-size: 13px; padding: 12px; white-space: pre-wrap; }
+    .analysis-grid { border: 1px solid #d8dfdc; display: grid; gap: 12px; padding: 14px; }
+    .analysis-block h3 { color: #4eb0cf; font-size: 15px; margin: 0 0 7px; }
+    .analysis-block ul { display: grid; gap: 7px; margin: 0; padding: 0 0 0 18px; }
+    .analysis-block li { color: #555; font-size: 12px; padding-left: 4px; }
+    .agent-list { display: grid; gap: 8px; margin: 0; padding-left: 18px; }
+    .agent-list li { color: #555; font-size: 12px; }
     .stat-stack { display: grid; gap: 16px; align-content: start; }
     .stat-box { border: 3px solid #0b2d55; text-align: center; }
     .stat-box h3 { background: #0b2d55; color: #fff; font-size: 13px; margin: 0; padding: 5px; }
@@ -1383,7 +1435,14 @@ function renderPolishedReportHtml(store, report) {
         <div class="stat-box"><h3>Mayor impacto</h3><strong>${escapeHtml(topCategory?.category || "S/I")}</strong></div>
       </aside>
     </section>
-    <section class="section"><h2>Comentarios ejecutivos</h2><div class="section-body"><div class="summary-box">${escapeHtml(payload.comments || "")}</div></div></section>
+    <section class="section"><h2>Lectura ejecutiva del periodo</h2><div class="section-body"><div class="analysis-grid">
+      ${renderAnalysisList("Lo mejor de la semana", bestNarrative)}
+      ${renderAnalysisList("Los desafios de la semana", challengeNarrative)}
+      ${renderAnalysisList("Eficiencia de stock y compra", stockNarrative)}
+    </div></div></section>
+    <section class="section"><h2>Resumen generado por el agente de reportes</h2><div class="section-body"><div class="summary-box"><ul class="agent-list">${agentSummaryText
+      .map((paragraph) => `<li>${escapeHtml(paragraph)}</li>`)
+      .join("")}</ul></div></div></section>
     <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><colgroup><col class="w-category-name"><col class="w-category-money"><col class="w-category-percent"></colgroup><thead><tr><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
     <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><colgroup><col class="w-product-name"><col class="w-product-category"><col class="w-product-money"><col class="w-product-percent"></colgroup><thead><tr><th class="text-cell">Producto</th><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
     <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><p class="chart-note">Azul: stock actual. Verde: compra sugerida por Intelipar.</p><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
