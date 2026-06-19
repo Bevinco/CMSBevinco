@@ -244,11 +244,21 @@ function statusClass(status: ReportStatus) {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json();
+  const rawPayload = await response.text();
+  let payload: { error?: string; message?: string } = {};
+
+  if (rawPayload) {
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
+      payload = { error: rawPayload.slice(0, 240) };
+    }
+  }
+
   if (!response.ok) {
     throw new Error(payload.error || payload.message || "La solicitud fallo.");
   }
-  return payload;
+  return payload as T;
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -397,8 +407,18 @@ function App() {
 
   async function importCsvFiles(files = selectedCsvFiles) {
     if (!files.length || !selectedClientId || !selectedPeriodId) return;
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
+    if (totalSize > 10 * 1024 * 1024) {
+      setError("La carga supera 10 MB. Sube solo CSV descargados desde Sculpture o divide los archivos.");
+      setWorkStatus("error");
+      return;
+    }
+
     setWorkStatus("loading");
-    setError("");
+    setError("Leyendo CSV y actualizando el reporte...");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
 
     try {
       const encodedFiles = await Promise.all(
@@ -411,6 +431,7 @@ function App() {
         await fetch("/api/module1/import-csv", {
           method: "POST",
           headers: { "content-type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             clientId: selectedClientId,
             periodId: selectedPeriodId,
@@ -427,8 +448,16 @@ function App() {
       setSelectedCsvFiles([]);
       setWorkStatus("ready");
     } catch (csvError) {
-      setError(csvError instanceof Error ? csvError.message : "Error desconocido.");
+      setError(
+        csvError instanceof DOMException && csvError.name === "AbortError"
+          ? "La carga demoró demasiado y fue cancelada. Intenta con un CSV a la vez."
+          : csvError instanceof Error
+            ? csvError.message
+            : "Error desconocido.",
+      );
       setWorkStatus("error");
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
@@ -835,7 +864,7 @@ function App() {
                   disabled={!selectedCsvFiles.length || workStatus === "loading"}
                   onClick={() => importCsvFiles()}
                 >
-                  <FileSpreadsheet size={17} /> Cargar datos al reporte
+                  <FileSpreadsheet size={17} /> {workStatus === "loading" ? "Cargando datos..." : "Cargar datos al reporte"}
                 </button>
                 <button
                   className="secondary-button"

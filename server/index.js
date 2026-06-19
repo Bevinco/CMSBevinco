@@ -22,8 +22,19 @@ const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
 const publicDir = path.resolve(__dirname, "public");
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+app.use((error, _request, response, next) => {
+  if (error?.type === "entity.too.large") {
+    response.status(413).json({
+      error: "El archivo es demasiado grande para cargarlo. Usa un CSV descargado desde Sculpture o divide la carga.",
+    });
+    return;
+  }
+
+  next(error);
+});
 
 const sampleDefinitions = [
   {
