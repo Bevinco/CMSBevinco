@@ -28,6 +28,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
+type ActiveView = "dashboard" | "module1" | "reports" | "criteria" | "integrations" | "future";
 
 type Client = {
   id: string;
@@ -250,6 +251,7 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [commentsDraft, setCommentsDraft] = useState("");
   const [emailDraft, setEmailDraft] = useState("");
+  const [activeView, setActiveView] = useState<ActiveView>("module1");
 
   async function checkSession() {
     try {
@@ -418,6 +420,14 @@ function App() {
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
+  const viewMeta = {
+    dashboard: ["CMS modular", "Inicio"],
+    module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
+    reports: ["Bandeja", "Reportes guardados"],
+    criteria: ["Base reusable", "Criterios de auditoria"],
+    integrations: ["Configuracion", "Integraciones"],
+    future: ["Roadmap", "Modulos planificados"],
+  }[activeView];
 
   if (authStatus === "checking") {
     return (
@@ -446,19 +456,20 @@ function App() {
           </div>
         </div>
         <nav className="nav-list" aria-label="Modulos">
-          <a href="#dashboard" className="active"><LayoutDashboard size={18} /> Inicio</a>
-          <a href="#module-reports"><ClipboardList size={18} /> Modulo 1</a>
-          <a href="#sources"><Cloud size={18} /> Fuentes</a>
-          <a href="#comments"><PencilLine size={18} /> Comentarios</a>
-          <a href="#roadmap"><Workflow size={18} /> Roadmap</a>
+          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button>
+          <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button>
+          <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
+          <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><ShieldCheck size={18} /> Criterios</button>
+          <button className={activeView === "integrations" ? "active" : ""} onClick={() => setActiveView("integrations")}><Cloud size={18} /> Integraciones</button>
+          <button className={activeView === "future" ? "active" : ""} onClick={() => setActiveView("future")}><Workflow size={18} /> Roadmap</button>
         </nav>
       </aside>
 
       <section className="workspace">
         <header className="topbar" id="dashboard">
           <div>
-            <p className="eyebrow">CMS modular</p>
-            <h1>Modulo 1: reportes automatizados Bevinco</h1>
+            <p className="eyebrow">{viewMeta[0]}</p>
+            <h1>{viewMeta[1]}</h1>
           </div>
           <div className="topbar-actions">
             <span>{currentUser}</span>
@@ -466,6 +477,41 @@ function App() {
           </div>
         </header>
 
+        {activeView === "dashboard" ? (
+          <>
+            <section className="module-roadmap" aria-label="Roadmap de modulos">
+              {moduleRoadmap.map((module) => (
+                <button
+                  className="module-card module-card-button"
+                  key={module.number}
+                  onClick={() => setActiveView(module.number === "01" ? "module1" : module.number === "02" ? "criteria" : module.number === "03" ? "integrations" : "future")}
+                >
+                  <div className="module-card-top">
+                    <span>{module.number}</span>
+                    <small>{module.status}</small>
+                  </div>
+                  <h2>{module.title}</h2>
+                  <p>{module.description}</p>
+                  <div className="module-tags">
+                    {module.items.map((item) => <span key={item}>{item}</span>)}
+                  </div>
+                </button>
+              ))}
+            </section>
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Modulo activo</p>
+                  <h2>Reportes Bevinco/Sculpture</h2>
+                </div>
+                <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Abrir modulo</button>
+              </div>
+            </section>
+          </>
+        ) : null}
+
+        {activeView === "module1" ? (
+          <>
         <section className="control-bar">
           <label>
             Cliente
@@ -683,39 +729,101 @@ function App() {
             ))}
           </div>
         </section>
+          </>
+        ) : null}
 
-        <section className="split-section">
+        {activeView === "reports" ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Bandeja</p>
+              <h2>Reportes guardados</h2>
+            </div>
+            <ClipboardList size={22} />
+          </div>
+          <div className="report-list">
+            {reportRows.map((report) => (
+              <button
+                key={report.id}
+                onClick={() => {
+                  setSelectedClientId(report.clientId);
+                  setSelectedPeriodId(report.periodId);
+                  setSelectedReport(report);
+                  setCommentsDraft(report.comments || "");
+                  setEmailDraft(report.emailDraft || "");
+                  setActiveView("module1");
+                }}
+              >
+                <span>
+                  <strong>{report.client?.name || report.clientId}</strong>
+                  <small>{report.period?.label || report.periodId}</small>
+                </span>
+                <span className={statusClass(report.status)}>{report.status}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        ) : null}
+
+        {activeView === "criteria" ? (
+        <section className="page-grid">
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Bandeja</p>
-                <h2>Reportes guardados</h2>
+                <p className="eyebrow">Base reusable</p>
+                <h2>Criterios de auditoria</h2>
               </div>
-              <ClipboardList size={22} />
+              <ShieldCheck size={22} />
             </div>
-            <div className="report-list">
-              {reportRows.map((report) => (
-                <button
-                  key={report.id}
-                  onClick={() => {
-                    setSelectedClientId(report.clientId);
-                    setSelectedPeriodId(report.periodId);
-                    setSelectedReport(report);
-                    setCommentsDraft(report.comments || "");
-                    setEmailDraft(report.emailDraft || "");
-                  }}
-                >
-                  <span>
-                    <strong>{report.client?.name || report.clientId}</strong>
-                    <small>{report.period?.label || report.periodId}</small>
+            <ul className="criteria-list">
+              {criteria.map((item) => <li key={item}><CheckCircle2 size={18} /> {item}</li>)}
+            </ul>
+          </div>
+        </section>
+        ) : null}
+
+        {activeView === "integrations" ? (
+        <section className="page-grid">
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Fuentes y servicios</p>
+                <h2>Integraciones</h2>
+              </div>
+              <Cloud size={22} />
+            </div>
+            <div className="source-grid">
+              {Object.entries(sourceLabels).map(([key, label]) => (
+                <article key={key}>
+                  <strong>{label}</strong>
+                  <span className={selectedReport?.sourceStatus[key] === "Sincronizado" || selectedReport?.sourceStatus[key] === "CSV muestra" ? "pill success" : "pill neutral"}>
+                    {selectedReport?.sourceStatus[key] || "Pendiente"}
                   </span>
-                  <span className={statusClass(report.status)}>{report.status}</span>
-                </button>
+                </article>
               ))}
             </div>
           </div>
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Servicios</p>
+                <h2>Infraestructura</h2>
+              </div>
+              <Database size={22} />
+            </div>
+            <div className="mini-roadmap">
+              <article><span>SH</span><div><strong>Sculpture</strong><small>Cookie + endpoints internos configurables</small></div></article>
+              <article><span>DB</span><div><strong>Supabase</strong><small>Pendiente migrar persistencia del JSON local</small></div></article>
+              <article><span>EM</span><div><strong>Resend</strong><small>Preparado para envio de reportes</small></div></article>
+              <article><span>CU</span><div><strong>ClickUp</strong><small>Pendiente automatizar estado listo para reporte</small></div></article>
+            </div>
+          </div>
+        </section>
+        ) : null}
 
-          <div className="panel" id="roadmap">
+        {activeView === "future" ? (
+        <section className="page-grid">
+          <div className="panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Roadmap</p>
@@ -735,22 +843,6 @@ function App() {
               ))}
             </div>
           </div>
-        </section>
-
-        <section className="split-section">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Base reusable</p>
-                <h2>Criterios de auditoria</h2>
-              </div>
-              <ShieldCheck size={22} />
-            </div>
-            <ul className="criteria-list">
-              {criteria.map((item) => <li key={item}><CheckCircle2 size={18} /> {item}</li>)}
-            </ul>
-          </div>
-
           <div className="panel">
             <div className="panel-header">
               <div>
@@ -762,6 +854,7 @@ function App() {
             <p className="muted-copy">Queda separado del modulo 1. Se activara cuando pasemos al flujo de reservas, proveedores, vencimientos y alertas.</p>
           </div>
         </section>
+        ) : null}
       </section>
     </main>
   );

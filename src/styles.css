@@ -173,18 +173,21 @@ button:disabled {
   gap: 6px;
 }
 
-.nav-list a {
+.nav-list button {
   align-items: center;
   border-radius: 8px;
   color: #dce8e4;
   display: flex;
   gap: 10px;
+  justify-content: flex-start;
+  min-height: 44px;
   padding: 12px;
-  text-decoration: none;
+  width: 100%;
+  background: transparent;
 }
 
-.nav-list a:hover,
-.nav-list a.active {
+.nav-list button:hover,
+.nav-list button.active {
   background: #203631;
   color: #ffffff;
 }
@@ -351,6 +354,16 @@ button:disabled {
   padding: 18px;
 }
 
+.module-card-button {
+  align-items: stretch;
+  color: inherit;
+  cursor: pointer;
+  justify-content: stretch;
+  min-height: auto;
+  text-align: left;
+  width: 100%;
+}
+
 .module-card-top {
   align-items: center;
   display: flex;
@@ -406,6 +419,12 @@ button:disabled {
 
 .panel {
   padding: 20px;
+}
+
+.page-grid {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .module-one {
@@ -808,6 +827,7 @@ button:disabled {
 
   .module-grid,
   .split-section,
+  .page-grid,
   .workflow-list {
     grid-template-columns: 1fr;
   }
