@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   BarChart3,
-  Bell,
   Bot,
-  CheckCircle2,
   ClipboardList,
   Cloud,
   Database,
@@ -19,7 +17,6 @@ import {
   Printer,
   RefreshCw,
   Send,
-  ShieldCheck,
   ShoppingCart,
   Workflow,
 } from "lucide-react";
@@ -28,7 +25,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "reports" | "criteria" | "integrations" | "future";
+type ActiveView = "dashboard" | "module1" | "reports";
 
 type Client = {
   id: string;
@@ -82,37 +79,6 @@ type BootstrapPayload = {
   reports: Report[];
   selectedReport: Report | null;
 };
-
-const moduleRoadmap = [
-  {
-    number: "01",
-    title: "Reportes Bevinco",
-    status: "MVP activo",
-    description: "Automatiza el reporte semanal que hoy se descarga de Sculpture, se pega en Excel y se comenta manualmente.",
-    items: ["Variance detailed y summary", "Intelipar", "Historico 4 periodos", "PDF y email"],
-  },
-  {
-    number: "02",
-    title: "Clientes y criterios",
-    status: "Base inicial",
-    description: "Define reglas por cliente para mantener criterio operativo sin perder flexibilidad.",
-    items: ["Clientes", "Categorias", "Reglas", "Formatos"],
-  },
-  {
-    number: "03",
-    title: "Comunicaciones",
-    status: "En preparacion",
-    description: "Centraliza avisos, destinatarios y seguimiento de reportes enviados.",
-    items: ["Emails", "Destinatarios", "Seguimiento", "Historial"],
-  },
-  {
-    number: "04",
-    title: "Reservas y pagos",
-    status: "Futuro",
-    description: "Gestiona reservas, proveedores, codigos, pasajeros, vencimientos y alertas visuales.",
-    items: ["Reservas", "Pagos", "Alertas", "Proveedores"],
-  },
-];
 
 const reportWorkflow = [
   {
@@ -214,14 +180,6 @@ function taskStatusClass(status: string) {
   if (status === "Preparado") return "task-status prepared";
   return "task-status done";
 }
-
-const criteria = [
-  "Comparar ventas, inventario y compras por categoria.",
-  "Mantener comparacion de los ultimos cuatro periodos.",
-  "Marcar proveedores desactualizados antes de sugerir compras.",
-  "Mantener comentarios editables antes del envio.",
-  "Respetar el formato historico de graficos y resumen semanal.",
-];
 
 const sourceLabels: Record<string, string> = {
   varianceDetailed: "Variance detailed",
@@ -583,12 +541,9 @@ function App() {
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const viewMeta = {
-    dashboard: ["CMS modular", "Inicio"],
+    dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
     reports: ["Bandeja", "Reportes guardados"],
-    criteria: ["Base reusable", "Criterios de auditoria"],
-    integrations: ["Configuracion", "Integraciones"],
-    future: ["Proximos modulos", "Operaciones futuras"],
   }[activeView];
 
   if (authStatus === "checking") {
@@ -621,9 +576,6 @@ function App() {
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button>
           <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button>
           <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
-          <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><ShieldCheck size={18} /> Criterios</button>
-          <button className={activeView === "integrations" ? "active" : ""} onClick={() => setActiveView("integrations")}><Cloud size={18} /> Integraciones</button>
-          <button className={activeView === "future" ? "active" : ""} onClick={() => setActiveView("future")}><Workflow size={18} /> Proximos</button>
         </nav>
       </aside>
 
@@ -642,23 +594,20 @@ function App() {
         {activeView === "dashboard" ? (
           <>
             <section className="module-roadmap" aria-label="Modulos del CMS">
-              {moduleRoadmap.map((module) => (
-                <button
-                  className="module-card module-card-button"
-                  key={module.number}
-                  onClick={() => setActiveView(module.number === "01" ? "module1" : module.number === "02" ? "criteria" : module.number === "03" ? "integrations" : "future")}
-                >
-                  <div className="module-card-top">
-                    <span>{module.number}</span>
-                    <small>{module.status}</small>
-                  </div>
-                  <h2>{module.title}</h2>
-                  <p>{module.description}</p>
-                  <div className="module-tags">
-                    {module.items.map((item) => <span key={item}>{item}</span>)}
-                  </div>
-                </button>
-              ))}
+              <button className="module-card module-card-button" onClick={() => setActiveView("module1")}>
+                <div className="module-card-top">
+                  <span>01</span>
+                  <small>Activo</small>
+                </div>
+                <h2>Reportes Bevinco</h2>
+                <p>Genera el reporte semanal con Variance, Intelipar, resumen ejecutivo, export PDF y email.</p>
+                <div className="module-tags">
+                  <span>Variance detailed</span>
+                  <span>Intelipar</span>
+                  <span>Historico 4 periodos</span>
+                  <span>PDF y email</span>
+                </div>
+              </button>
             </section>
             <section className="panel">
               <div className="panel-header">
@@ -1030,96 +979,6 @@ function App() {
         </section>
         ) : null}
 
-        {activeView === "criteria" ? (
-        <section className="page-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Base reusable</p>
-                <h2>Criterios de auditoria</h2>
-              </div>
-              <ShieldCheck size={22} />
-            </div>
-            <ul className="criteria-list">
-              {criteria.map((item) => <li key={item}><CheckCircle2 size={18} /> {item}</li>)}
-            </ul>
-          </div>
-        </section>
-        ) : null}
-
-        {activeView === "integrations" ? (
-        <section className="page-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Fuentes y servicios</p>
-                <h2>Integraciones</h2>
-              </div>
-              <Cloud size={22} />
-            </div>
-            <div className="source-grid">
-              {Object.entries(sourceLabels).map(([key, label]) => (
-                <article key={key}>
-                  <strong>{label}</strong>
-                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
-                    {selectedReport?.sourceStatus[key] || "Por revisar"}
-                  </span>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Operacion</p>
-                <h2>Flujo del equipo</h2>
-              </div>
-              <Database size={22} />
-            </div>
-            <div className="mini-roadmap">
-              <article><span>DA</span><div><strong>Datos</strong><small>Reportes semanales por cliente y periodo</small></div></article>
-              <article><span>RE</span><div><strong>Revision</strong><small>Comentarios y proveedores validados por el equipo</small></div></article>
-              <article><span>EN</span><div><strong>Envio</strong><small>PDF y email preparados para el cliente</small></div></article>
-              <article><span>HI</span><div><strong>Historial</strong><small>Seguimiento de estados y periodos anteriores</small></div></article>
-            </div>
-          </div>
-        </section>
-        ) : null}
-
-        {activeView === "future" ? (
-        <section className="page-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Proximos pasos</p>
-                <h2>Operaciones futuras</h2>
-              </div>
-              <Workflow size={22} />
-            </div>
-            <div className="mini-roadmap">
-              {moduleRoadmap.map((module) => (
-                <article key={module.number}>
-                  <span>{module.number}</span>
-                  <div>
-                    <strong>{module.title}</strong>
-                    <small>{module.status}</small>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Modulo futuro</p>
-                <h2>Reservas y pagos</h2>
-              </div>
-              <Bell size={22} />
-            </div>
-            <p className="muted-copy">Queda separado del modulo 1. Se activara cuando pasemos al flujo de reservas, proveedores, vencimientos y alertas.</p>
-          </div>
-        </section>
-        ) : null}
       </section>
     </main>
   );
