@@ -1139,13 +1139,35 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function compactMoney(value) {
+  const absValue = Math.abs(value || 0);
+  const sign = (value || 0) < 0 ? "-" : "";
+  if (absValue >= 1000000) return `${sign}$${(absValue / 1000000).toFixed(1)}M`;
+  if (absValue >= 1000) return `${sign}$${(absValue / 1000).toFixed(0)}K`;
+  return `${sign}$${Math.round(absValue)}`;
+}
+
+function shortPeriodLabel(label) {
+  return String(label || "")
+    .replace(/\s*2026/i, "")
+    .replace(/Jun\s+/i, "")
+    .replace(/May\s+/i, "")
+    .replace(/\s+to\s+/i, "-")
+    .trim();
+}
+
+function truncateLabel(value, maxLength = 24) {
+  const label = String(value || "");
+  return label.length > maxLength ? `${label.slice(0, maxLength - 1)}…` : label;
+}
+
 function renderCostSvg(history, money) {
-  const width = 920;
-  const height = 300;
-  const left = 64;
-  const right = 34;
-  const top = 28;
-  const bottom = 48;
+  const width = 1080;
+  const height = 320;
+  const left = 72;
+  const right = 48;
+  const top = 34;
+  const bottom = 58;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const maxRevenue = Math.max(...history.map((item) => item.revenue || 0), 1);
@@ -1163,17 +1185,19 @@ function renderCostSvg(history, money) {
       const ideal = Math.max(0, real - ((item.varianceAmount || 0) / Math.max(item.revenue || 1, 1)) * 100);
       const realY = top + chartHeight - (real / maxPercent) * chartHeight;
       const idealY = top + chartHeight - (ideal / maxPercent) * chartHeight;
+      const realBadgeY = Math.max(top + 4, realY - 30);
+      const idealBadgeY = Math.min(top + chartHeight - 22, idealY + 10);
       realPoints.push(`${x},${realY}`);
       idealPoints.push(`${x},${idealY}`);
 
       return `
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#88c8bf" />
-        <text x="${x}" y="${top + chartHeight + 24}" text-anchor="middle" class="axis-label">${escapeHtml(item.label.replace(/\s*2026/i, ""))}</text>
-        <text x="${x}" y="${barY - 7}" text-anchor="middle" class="bar-value">${money.format(item.revenue)}</text>
-        <rect x="${x - 22}" y="${realY - 13}" width="44" height="20" rx="4" fill="#05264d" />
-        <text x="${x}" y="${realY + 1}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
-        <rect x="${x - 22}" y="${idealY - 13}" width="44" height="20" rx="4" fill="#8cc24a" />
-        <text x="${x}" y="${idealY + 1}" text-anchor="middle" class="point-label">${ideal.toFixed(1)}%</text>`;
+        <text x="${x}" y="${top + chartHeight + 24}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
+        <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
+        <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#05264d" />
+        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
+        <rect x="${x - 24}" y="${idealBadgeY}" width="48" height="20" rx="4" fill="#8cc24a" />
+        <text x="${x}" y="${idealBadgeY + 14}" text-anchor="middle" class="point-label">${ideal.toFixed(1)}%</text>`;
     })
     .join("");
   const grid = [0, 15, 30, 45, 60].map((tick) => {
@@ -1182,12 +1206,12 @@ function renderCostSvg(history, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Costo real versus costo ideal">
-    <style>.axis-label{font:11px Arial;fill:#8b918f}.bar-value{font:700 11px Arial;fill:#5f6865}.point-label{font:700 10px Arial;fill:#fff}</style>
+    <style>.axis-label{font:12px Arial;fill:#8b918f}.bar-value{font:700 12px Arial;fill:#fff}.point-label{font:700 10px Arial;fill:#fff}</style>
     ${grid}
     ${bars}
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#05264d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
     <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#8cc24a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <g transform="translate(${left + 260},${height - 12})">
+    <g transform="translate(${left + 290},${height - 12})">
       <rect width="14" height="4" fill="#88c8bf" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
       <line x1="170" x2="196" y1="2" y2="2" stroke="#05264d" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
       <line x1="330" x2="356" y1="2" y2="2" stroke="#8cc24a" stroke-width="4" /><text x="364" y="4" class="axis-label">% costo ideal</text>
@@ -1197,13 +1221,12 @@ function renderCostSvg(history, money) {
 
 function renderVarianceSvg(items, money) {
   const rows = items.slice(0, 10);
-  const width = 680;
-  const rowHeight = 30;
-  const height = 72 + rows.length * rowHeight;
-  const left = 170;
-  const center = 360;
+  const width = 980;
+  const rowHeight = 34;
+  const height = 76 + rows.length * rowHeight;
+  const center = 520;
   const maxValue = Math.max(...rows.map((item) => Math.abs(item.amount || item.varianceAmount || 0)), 1);
-  const maxBarWidth = 250;
+  const maxBarWidth = 360;
   const rowMarkup = rows.map((item, index) => {
     const amount = item.amount ?? item.varianceAmount ?? 0;
     const label = item.name || item.category || "Sin nombre";
@@ -1215,13 +1238,13 @@ function renderVarianceSvg(items, money) {
     const textX = isNegative ? x - 6 : x + barWidth + 6;
     const textAnchor = isNegative ? "end" : "start";
     return `
-      <text x="18" y="${y + 5}" class="category-label">${escapeHtml(label)}</text>
+      <text x="18" y="${y + 5}" class="category-label">${escapeHtml(truncateLabel(label, 34))}</text>
       <rect x="${x}" y="${y - 12}" width="${barWidth}" height="18" rx="3" fill="${color}" />
-      <text x="${textX}" y="${y + 2}" text-anchor="${textAnchor}" class="amount-label">${money.format(amount)}</text>`;
+      <text x="${textX}" y="${y + 2}" text-anchor="${textAnchor}" class="amount-label">${compactMoney(amount)}</text>`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
-    <style>.category-label{font:12px Arial;fill:#565d5a}.amount-label{font:700 11px Arial;fill:#172026}</style>
+    <style>.category-label{font:13px Arial;fill:#565d5a}.amount-label{font:700 12px Arial;fill:#172026}</style>
     <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
     <text x="${center - 92}" y="22" text-anchor="middle" class="category-label">Faltantes</text>
     <text x="${center + 92}" y="22" text-anchor="middle" class="category-label">Ahorros</text>
@@ -1235,26 +1258,26 @@ function renderPurchaseSvg(items) {
     stock: parseNumber(item.stock),
     suggested: parseNumber(item.suggested),
   }));
-  const width = 540;
-  const rowHeight = 36;
-  const height = 64 + rows.length * rowHeight;
-  const left = 190;
+  const width = 980;
+  const rowHeight = 38;
+  const height = 76 + rows.length * rowHeight;
+  const left = 300;
+  const maxBarWidth = 460;
   const maxValue = Math.max(...rows.map((item) => Math.max(item.stock, item.suggested)), 1);
   const rowMarkup = rows.map((item, index) => {
     const y = 50 + index * rowHeight;
-    const stockWidth = Math.max(4, (item.stock / maxValue) * 260);
-    const suggestedWidth = Math.max(4, (item.suggested / maxValue) * 260);
+    const stockWidth = Math.max(5, (item.stock / maxValue) * maxBarWidth);
+    const suggestedWidth = Math.max(5, (item.suggested / maxValue) * maxBarWidth);
     return `
-      <text x="16" y="${y + 6}" class="purchase-label">${escapeHtml(item.label)}</text>
+      <text x="16" y="${y + 6}" class="purchase-label">${escapeHtml(truncateLabel(item.label, 32))}</text>
       <rect x="${left}" y="${y - 12}" width="${stockWidth}" height="10" rx="3" fill="#05264d" opacity="0.78" />
-      <rect x="${left}" y="${y + 3}" width="${suggestedWidth}" height="10" rx="3" fill="#8cc24a" opacity="0.9" />
-      <text x="${left + 270}" y="${y + 6}" class="purchase-value">Stock ${item.stock || 0} / Sug. ${item.suggested || 0}</text>`;
+      <rect x="${left}" y="${y + 3}" width="${suggestedWidth}" height="10" rx="3" fill="#8cc24a" opacity="0.9" />`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stock versus compra sugerida">
-    <style>.purchase-label{font:12px Arial;fill:#565d5a}.purchase-value{font:700 11px Arial;fill:#565d5a}</style>
-    <text x="${left}" y="22" class="purchase-value">Stock actual</text>
-    <text x="${left + 120}" y="22" class="purchase-value" fill="#8cc24a">Compra sugerida</text>
+    <style>.purchase-label{font:13px Arial;fill:#565d5a}.purchase-value{font:700 12px Arial;fill:#565d5a}</style>
+    <text x="${left}" y="24" class="purchase-value">Stock actual</text>
+    <text x="${left + 150}" y="24" class="purchase-value" fill="#8cc24a">Compra sugerida</text>
     ${rowMarkup}
   </svg>`;
 }
