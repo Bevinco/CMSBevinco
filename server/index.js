@@ -700,74 +700,285 @@ function buildReportPayload(store, report) {
 function renderReportHtml(store, report) {
   const payload = buildReportPayload(store, report);
   const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+  const generatedAt = new Intl.DateTimeFormat("es-CL", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date());
+  const statusClassName = payload.status === "Enviado" ? "ok" : payload.status === "Listo para revisar" ? "warn" : "neutral";
+  const varianceClassName = payload.summary.varianceAmount < 0 ? "bad" : "ok";
 
   const categoryRows = payload.categoryVariances
     .map(
       (item) =>
-        `<tr><td>${item.category}</td><td>${money.format(item.amount)}</td><td>${item.percent}%</td></tr>`,
+        `<tr><td>${item.category}</td><td class="numeric ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="numeric">${item.percent}%</td></tr>`,
     )
     .join("");
   const productRows = payload.topProducts
     .map(
       (item) =>
-        `<tr><td>${item.name}</td><td>${item.category}</td><td>${money.format(item.varianceAmount)}</td><td>${item.variancePercent}%</td></tr>`,
+        `<tr><td><strong>${item.name}</strong></td><td>${item.category}</td><td class="numeric ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="numeric">${item.variancePercent}%</td></tr>`,
     )
     .join("");
   const purchaseRows = payload.purchaseSuggestions
     .map(
       (item) =>
-        `<tr><td>${item.item}</td><td>${item.provider}</td><td>${item.stock}</td><td>${item.suggested}</td><td>${item.note}</td></tr>`,
+        `<tr><td><strong>${item.item}</strong></td><td>${item.provider}</td><td class="numeric">${item.stock}</td><td class="numeric">${item.suggested}</td><td>${item.note}</td></tr>`,
     )
     .join("");
   const historyRows = payload.history
     .map(
       (item) =>
-        `<tr><td>${item.label}</td><td>${money.format(item.revenue)}</td><td>${item.costPercent}%</td><td>${money.format(item.varianceAmount)}</td></tr>`,
+        `<tr><td>${item.label}</td><td class="numeric">${money.format(item.revenue)}</td><td class="numeric">${item.costPercent}%</td><td class="numeric ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td></tr>`,
     )
     .join("");
   const sourceRows = Object.entries(payload.sourceStatus || {})
-    .map(([source, status]) => `<tr><td>${sourceLabelsForPdf[source] || source}</td><td>${status}</td></tr>`)
+    .map(([source, status]) => `<tr><td>${sourceLabelsForPdf[source] || source}</td><td><span class="badge neutral">${status}</span></td></tr>`)
     .join("");
 
   return `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reporte ${payload.client?.name || report.clientId}</title>
   <style>
-    body { color: #172026; font-family: Arial, sans-serif; margin: 32px; }
-    header { border-bottom: 3px solid #176b5a; margin-bottom: 24px; padding-bottom: 16px; }
-    h1, h2 { margin: 0 0 10px; }
-    section { margin: 24px 0; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border-bottom: 1px solid #dce4e2; padding: 10px; text-align: left; }
-    th { background: #f4f6f5; }
-    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-    .metric { border: 1px solid #dce4e2; border-radius: 8px; padding: 14px; }
-    .metric strong { display: block; font-size: 22px; margin-top: 8px; }
-    .comments { background: #f4f6f5; border-radius: 8px; padding: 16px; white-space: pre-wrap; }
-    .status { color: #176b5a; font-weight: 700; }
-    @media print { button { display: none; } body { margin: 18mm; } }
+    @page { margin: 14mm; size: A4; }
+    * { box-sizing: border-box; }
+    body {
+      background: #eef3f1;
+      color: #172026;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.42;
+      margin: 0;
+      padding: 24px;
+    }
+    .report {
+      background: #ffffff;
+      border: 1px solid #d8e2df;
+      margin: 0 auto;
+      max-width: 1100px;
+      min-height: 100vh;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin: 0 auto 14px;
+      max-width: 1100px;
+    }
+    button {
+      background: #176b5a;
+      border: 0;
+      border-radius: 8px;
+      color: #ffffff;
+      cursor: pointer;
+      font-weight: 700;
+      min-height: 40px;
+      padding: 0 14px;
+    }
+    header {
+      background: #10201d;
+      color: #ffffff;
+      padding: 28px 32px;
+    }
+    .brand-row {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+    }
+    .brand-mark {
+      align-items: center;
+      background: #f4b84a;
+      border-radius: 8px;
+      color: #10201d;
+      display: flex;
+      font-size: 20px;
+      font-weight: 800;
+      height: 42px;
+      justify-content: center;
+      width: 42px;
+    }
+    .meta {
+      color: #b9c9c4;
+      font-size: 12px;
+      text-align: right;
+    }
+    h1 {
+      font-size: 34px;
+      line-height: 1.05;
+      margin: 0 0 10px;
+    }
+    h2 {
+      font-size: 18px;
+      margin: 0;
+    }
+    .subtitle {
+      color: #dce8e4;
+      margin: 0;
+    }
+    .content {
+      display: grid;
+      gap: 22px;
+      padding: 26px 32px 34px;
+    }
+    .metrics {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .metric {
+      background: #f6f8f7;
+      border: 1px solid #dce4e2;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric span {
+      color: #526862;
+      display: block;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      margin-top: 8px;
+    }
+    .section {
+      border: 1px solid #dce4e2;
+      border-radius: 8px;
+      overflow: hidden;
+      page-break-inside: avoid;
+    }
+    .section-header {
+      align-items: center;
+      background: #f6f8f7;
+      border-bottom: 1px solid #dce4e2;
+      display: flex;
+      justify-content: space-between;
+      padding: 14px 16px;
+    }
+    .section-body {
+      padding: 16px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border-bottom: 1px solid #e8eeee;
+      font-size: 12px;
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #fbfcfc;
+      color: #526862;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    tbody tr:nth-child(even) td {
+      background: #fbfcfc;
+    }
+    .numeric {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .comments {
+      background: #f6f8f7;
+      border-left: 4px solid #176b5a;
+      border-radius: 8px;
+      font-size: 14px;
+      padding: 16px;
+      white-space: pre-wrap;
+    }
+    .badge {
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 5px 9px;
+    }
+    .badge.ok, .ok { color: #14633f; }
+    .badge.warn { background: #fff0c7; color: #825a00; }
+    .badge.neutral { background: #edf1f0; color: #46605a; }
+    .badge.ok { background: #dff5ea; }
+    .bad { color: #9b2d22; }
+    .two-col {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 0.85fr 1.15fr;
+    }
+    footer {
+      border-top: 1px solid #dce4e2;
+      color: #6f7d79;
+      font-size: 11px;
+      padding: 16px 32px 24px;
+    }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .toolbar { display: none; }
+      .report { border: 0; max-width: none; }
+      header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .section { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
-  <button onclick="window.print()">Guardar como PDF</button>
-  <header>
-    <h1>Reporte semanal Bevinco</h1>
-    <p>${payload.client?.name || report.clientId} - ${payload.period?.label || report.periodId} - <span class="status">${payload.status}</span></p>
-  </header>
-  <section class="metrics">
-    <div class="metric">Ingresos<strong>${money.format(payload.summary.revenue)}</strong></div>
-    <div class="metric">% Costo<strong>${payload.summary.costPercent}%</strong></div>
-    <div class="metric">Variance<strong>${payload.summary.variancePercent}%</strong></div>
-    <div class="metric">Diferencia<strong>${money.format(payload.summary.varianceAmount)}</strong></div>
-  </section>
-  <section><h2>Fuentes</h2><table><thead><tr><th>Fuente</th><th>Estado</th></tr></thead><tbody>${sourceRows}</tbody></table></section>
-  <section><h2>Historico ultimos 4 periodos</h2><table><thead><tr><th>Periodo</th><th>Ingresos</th><th>% Costo</th><th>Variance</th></tr></thead><tbody>${historyRows}</tbody></table></section>
-  <section><h2>Comentarios</h2><div class="comments">${payload.comments || ""}</div></section>
-  <section><h2>Variaciones por categoria</h2><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></section>
-  <section><h2>Top productos</h2><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></section>
-  <section><h2>Sugerencia de compra</h2><table><thead><tr><th>Item</th><th>Proveedor</th><th>Stock</th><th>Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></section>
+  <div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>
+  <article class="report">
+    <header>
+      <div class="brand-row">
+        <div class="brand"><div class="brand-mark">B</div><div><strong>Bevinco</strong><br><span>Reporte semanal de auditoria</span></div></div>
+        <div class="meta">Generado ${generatedAt}<br>Estado <span class="badge ${statusClassName}">${payload.status}</span></div>
+      </div>
+      <h1>${payload.client?.name || report.clientId}</h1>
+      <p class="subtitle">${payload.period?.label || report.periodId} · ${payload.client?.area || ""}</p>
+    </header>
+    <main class="content">
+      <section class="metrics">
+        <div class="metric"><span>Ingresos</span><strong>${money.format(payload.summary.revenue)}</strong></div>
+        <div class="metric"><span>% costo</span><strong>${payload.summary.costPercent}%</strong></div>
+        <div class="metric"><span>Variance</span><strong>${payload.summary.variancePercent}%</strong></div>
+        <div class="metric"><span>Diferencia</span><strong class="${varianceClassName}">${money.format(payload.summary.varianceAmount)}</strong></div>
+      </section>
+      <section class="section">
+        <div class="section-header"><h2>Comentarios ejecutivos</h2></div>
+        <div class="section-body"><div class="comments">${payload.comments || ""}</div></div>
+      </section>
+      <section class="two-col">
+        <div class="section">
+          <div class="section-header"><h2>Fuentes</h2></div>
+          <div class="section-body"><table><thead><tr><th>Fuente</th><th>Estado</th></tr></thead><tbody>${sourceRows}</tbody></table></div>
+        </div>
+        <div class="section">
+          <div class="section-header"><h2>Historico ultimos 4 periodos</h2></div>
+          <div class="section-body"><table><thead><tr><th>Periodo</th><th>Ingresos</th><th>% Costo</th><th>Variance</th></tr></thead><tbody>${historyRows}</tbody></table></div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-header"><h2>Variaciones por categoria</h2></div>
+        <div class="section-body"><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></div>
+      </section>
+      <section class="section">
+        <div class="section-header"><h2>Top productos con mayor variacion</h2></div>
+        <div class="section-body"><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></div>
+      </section>
+      <section class="section">
+        <div class="section-header"><h2>Sugerencia de compra Intelipar</h2></div>
+        <div class="section-body"><table><thead><tr><th>Item</th><th>Proveedor</th><th>Stock</th><th>Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div>
+      </section>
+    </main>
+    <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
+  </article>
 </body>
 </html>`;
 }
