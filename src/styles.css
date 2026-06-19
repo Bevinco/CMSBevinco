@@ -332,6 +332,39 @@ button:disabled {
   padding: 0 10px;
 }
 
+.upload-box {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.upload-box label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.upload-box input,
+.upload-box select {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.upload-box small {
+  color: #6f7d79;
+  line-height: 1.45;
+}
+
+.wrap-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
 .module-grid,
 .split-section {
   display: grid;

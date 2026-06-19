@@ -50,6 +50,12 @@ const sampleDefinitions = [
   },
 ];
 
+const sourceLabelsForPdf = {
+  varianceDetailed: "Variance detailed",
+  varianceSummary: "Variance summary",
+  intelipar: "Intelipar",
+};
+
 function timingSafeEqual(left, right) {
   const leftBuffer = Buffer.from(left || "");
   const rightBuffer = Buffer.from(right || "");
@@ -533,6 +539,78 @@ function reportForClientPeriod(store, clientId, periodId) {
   return report;
 }
 
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function ensureClient(store, clientInput) {
+  const id = clientInput.id || slugify(clientInput.name);
+  let client = store.clients.find((candidate) => candidate.id === id);
+
+  if (!client) {
+    client = {
+      id,
+      name: clientInput.name || id,
+      cid: clientInput.cid || id,
+      area: clientInput.area || "Food",
+      recipients: clientInput.recipients || [],
+    };
+    store.clients.push(client);
+  } else {
+    Object.assign(client, {
+      name: clientInput.name || client.name,
+      cid: clientInput.cid || client.cid,
+      area: clientInput.area || client.area,
+      recipients: clientInput.recipients || client.recipients,
+    });
+  }
+
+  return client;
+}
+
+function ensurePeriod(store, periodInput) {
+  const id = periodInput.id || slugify(periodInput.label);
+  let period = store.periods.find((candidate) => candidate.id === id);
+
+  if (!period) {
+    period = {
+      id,
+      label: periodInput.label || id,
+      startsAt: periodInput.startsAt || "",
+      endsAt: periodInput.endsAt || "",
+    };
+    store.periods.push(period);
+  } else {
+    Object.assign(period, {
+      label: periodInput.label || period.label,
+      startsAt: periodInput.startsAt || period.startsAt,
+      endsAt: periodInput.endsAt || period.endsAt,
+    });
+  }
+
+  return period;
+}
+
+function applyCsvToReport(report, sourceType, rows) {
+  if (sourceType === "varianceDetailed" || sourceType === "varianceSummary") {
+    report.summary = buildSummary(rows);
+    report.categoryVariances = buildCategoryVariances(rows);
+    report.topProducts = buildTopProducts(rows);
+  }
+
+  if (sourceType === "intelipar") {
+    report.purchaseSuggestions = buildPurchaseSuggestions(rows);
+  }
+
+  report.sourceStatus[sourceType] = "CSV cargado";
+  report.updatedAt = new Date().toISOString();
+}
+
 async function fetchSculptureInternalReport({ type, cid, pid }) {
   const cookie = process.env.SCULPTURE_SESSION_COOKIE;
   if (!cookie) {
@@ -641,6 +719,15 @@ function renderReportHtml(store, report) {
         `<tr><td>${item.item}</td><td>${item.provider}</td><td>${item.stock}</td><td>${item.suggested}</td><td>${item.note}</td></tr>`,
     )
     .join("");
+  const historyRows = payload.history
+    .map(
+      (item) =>
+        `<tr><td>${item.label}</td><td>${money.format(item.revenue)}</td><td>${item.costPercent}%</td><td>${money.format(item.varianceAmount)}</td></tr>`,
+    )
+    .join("");
+  const sourceRows = Object.entries(payload.sourceStatus || {})
+    .map(([source, status]) => `<tr><td>${sourceLabelsForPdf[source] || source}</td><td>${status}</td></tr>`)
+    .join("");
 
   return `<!doctype html>
 <html lang="es">
@@ -659,6 +746,7 @@ function renderReportHtml(store, report) {
     .metric { border: 1px solid #dce4e2; border-radius: 8px; padding: 14px; }
     .metric strong { display: block; font-size: 22px; margin-top: 8px; }
     .comments { background: #f4f6f5; border-radius: 8px; padding: 16px; white-space: pre-wrap; }
+    .status { color: #176b5a; font-weight: 700; }
     @media print { button { display: none; } body { margin: 18mm; } }
   </style>
 </head>
@@ -666,7 +754,7 @@ function renderReportHtml(store, report) {
   <button onclick="window.print()">Guardar como PDF</button>
   <header>
     <h1>Reporte semanal Bevinco</h1>
-    <p>${payload.client?.name || report.clientId} - ${payload.period?.label || report.periodId}</p>
+    <p>${payload.client?.name || report.clientId} - ${payload.period?.label || report.periodId} - <span class="status">${payload.status}</span></p>
   </header>
   <section class="metrics">
     <div class="metric">Ingresos<strong>${money.format(payload.summary.revenue)}</strong></div>
@@ -674,6 +762,8 @@ function renderReportHtml(store, report) {
     <div class="metric">Variance<strong>${payload.summary.variancePercent}%</strong></div>
     <div class="metric">Diferencia<strong>${money.format(payload.summary.varianceAmount)}</strong></div>
   </section>
+  <section><h2>Fuentes</h2><table><thead><tr><th>Fuente</th><th>Estado</th></tr></thead><tbody>${sourceRows}</tbody></table></section>
+  <section><h2>Historico ultimos 4 periodos</h2><table><thead><tr><th>Periodo</th><th>Ingresos</th><th>% Costo</th><th>Variance</th></tr></thead><tbody>${historyRows}</tbody></table></section>
   <section><h2>Comentarios</h2><div class="comments">${payload.comments || ""}</div></section>
   <section><h2>Variaciones por categoria</h2><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></section>
   <section><h2>Top productos</h2><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></section>
@@ -805,6 +895,57 @@ app.post("/api/module1/import-samples", requireAuth, async (_request, response) 
     periods: sampleStore.periods,
     reports: sampleStore.reports.map((item) => buildReportPayload(sampleStore, item)),
     selectedReport: report ? buildReportPayload(sampleStore, report) : null,
+  });
+});
+
+app.post("/api/module1/clients", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = ensureClient(store, request.body || {});
+  await writeStore(store);
+  response.json({ client, clients: store.clients });
+});
+
+app.post("/api/module1/periods", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const period = ensurePeriod(store, request.body || {});
+  await writeStore(store);
+  response.json({ period, periods: store.periods });
+});
+
+app.post("/api/module1/import-csv", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const { clientId, periodId, sourceType, csvText, client, period } = request.body || {};
+
+  const resolvedClient = client ? ensureClient(store, client) : store.clients.find((candidate) => candidate.id === clientId);
+  const resolvedPeriod = period ? ensurePeriod(store, period) : store.periods.find((candidate) => candidate.id === periodId);
+
+  if (!resolvedClient || !resolvedPeriod) {
+    response.status(400).json({ error: "Client and period are required." });
+    return;
+  }
+
+  if (!["varianceDetailed", "varianceSummary", "intelipar"].includes(sourceType)) {
+    response.status(400).json({ error: "Invalid sourceType." });
+    return;
+  }
+
+  if (!csvText) {
+    response.status(400).json({ error: "csvText is required." });
+    return;
+  }
+
+  const rows = parseCsv(csvText);
+  const report = reportForClientPeriod(store, resolvedClient.id, resolvedPeriod.id);
+  applyCsvToReport(report, sourceType, rows);
+  if (!report.comments) report.comments = commentsForReport(resolvedClient.name, report);
+
+  await writeStore(store);
+  response.json({
+    clients: store.clients,
+    periods: store.periods,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    selectedReport: buildReportPayload(store, report),
+    importedRows: rows.length,
   });
 });
 

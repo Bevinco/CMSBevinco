@@ -178,13 +178,13 @@ const moduleOneProcess = [
 const moduleOnePending = [
   {
     title: "Capturar endpoints internos",
-    detail: "Reemplazar rutas configurables por requests reales de Variance detailed, Variance summary e Intelipar desde DevTools.",
+    detail: "Reemplazar rutas configurables por requests reales de Variance detailed, Variance summary e Intelipar desde DevTools. Mientras tanto se pueden cargar CSV.",
     status: "Pendiente",
   },
   {
     title: "Mapeo completo cliente/periodo",
-    detail: "Obtener IDs reales de Sculpture para todos los clientes, locales food/barra y periodos semanales.",
-    status: "Pendiente",
+    detail: "El CMS ya permite trabajar por cliente/periodo; falta completar IDs reales de Sculpture para todos los locales.",
+    status: "En curso",
   },
   {
     title: "Persistencia Supabase",
@@ -205,6 +205,11 @@ const moduleOnePending = [
     title: "ClickUp",
     detail: "Disparar creacion de borrador cuando una auditoria pase a listo para reporte.",
     status: "Pendiente",
+  },
+  {
+    title: "Carga manual CSV",
+    detail: "Variance detailed, Variance summary e Intelipar se pueden importar desde el modulo para operar sin endpoint oficial.",
+    status: "Preparado",
   },
 ];
 
@@ -325,6 +330,7 @@ function App() {
   const [commentsDraft, setCommentsDraft] = useState("");
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("module1");
+  const [csvSourceType, setCsvSourceType] = useState("varianceDetailed");
 
   async function checkSession() {
     try {
@@ -389,6 +395,33 @@ function App() {
       setWorkStatus("ready");
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function importCsvFile(file: File | null) {
+    if (!file || !selectedClientId || !selectedPeriodId) return;
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const csvText = await file.text();
+      const payload = await readJson<BootstrapPayload>(
+        await fetch("/api/module1/import-csv", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            clientId: selectedClientId,
+            periodId: selectedPeriodId,
+            sourceType: csvSourceType,
+            csvText,
+          }),
+        }),
+      );
+      applyBootstrapPayload(payload);
+      setWorkStatus("ready");
+    } catch (csvError) {
+      setError(csvError instanceof Error ? csvError.message : "Error desconocido.");
       setWorkStatus("error");
     }
   }
@@ -738,16 +771,45 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Acciones</p>
-                <h2>Revision y envio</h2>
+                <p className="eyebrow">Carga manual</p>
+                <h2>CSV de Sculpture</h2>
               </div>
-              <Mail size={22} />
+              <FileSpreadsheet size={22} />
             </div>
-            <div className="action-stack">
-              <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
-              <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
-              <button className="primary-button" onClick={sendEmail}><Send size={17} /> Preparar/enviar email</button>
+            <div className="upload-box">
+              <label>
+                Fuente
+                <select value={csvSourceType} onChange={(event) => setCsvSourceType(event.target.value)}>
+                  <option value="varianceDetailed">Variance detailed</option>
+                  <option value="varianceSummary">Variance summary</option>
+                  <option value="intelipar">Intelipar</option>
+                </select>
+              </label>
+              <label>
+                Archivo CSV
+                <input
+                  accept=".csv,text/csv"
+                  type="file"
+                  onChange={(event) => importCsvFile(event.target.files?.[0] || null)}
+                />
+              </label>
+              <small>Permite cerrar el modulo con archivos reales mientras se capturan endpoints internos de Sculpture.</small>
             </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Acciones</p>
+              <h2>Revision y envio</h2>
+            </div>
+            <Mail size={22} />
+          </div>
+          <div className="action-row wrap-actions">
+            <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
+            <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
+            <button className="primary-button" onClick={sendEmail}><Send size={17} /> Preparar/enviar email</button>
           </div>
         </section>
 
