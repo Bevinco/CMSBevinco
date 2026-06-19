@@ -1148,12 +1148,13 @@ function compactMoney(value) {
 }
 
 function shortPeriodLabel(label) {
-  return String(label || "")
-    .replace(/\s*2026/i, "")
-    .replace(/Jun\s+/i, "")
-    .replace(/May\s+/i, "")
-    .replace(/\s+to\s+/i, "-")
-    .trim();
+  const text = String(label || "").replace(/\s*2026/i, "").trim();
+  const match = text.match(/^([A-Za-z]+)\s+(\d+)\s+to\s+([A-Za-z]+)?\s*(\d+)$/i);
+  if (!match) return text.replace(/\s+to\s+/i, " - ");
+
+  const [, startMonth, startDay, endMonth, endDay] = match;
+  const finalEndMonth = endMonth || startMonth;
+  return `${startDay} ${startMonth.slice(0, 3)} - ${endDay} ${finalEndMonth.slice(0, 3)}`;
 }
 
 function truncateLabel(value, maxLength = 24) {
@@ -1163,18 +1164,17 @@ function truncateLabel(value, maxLength = 24) {
 
 function renderCostSvg(history, money) {
   const width = 1080;
-  const height = 320;
+  const height = 340;
   const left = 72;
   const right = 48;
-  const top = 34;
-  const bottom = 58;
+  const top = 36;
+  const bottom = 78;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const maxRevenue = Math.max(...history.map((item) => item.revenue || 0), 1);
-  const maxPercent = Math.max(60, ...history.map((item) => Math.max(item.costPercent || 0, (item.costPercent || 0) - ((item.varianceAmount || 0) / Math.max(item.revenue || 1, 1)) * 100) + 8));
+  const maxPercent = Math.max(60, ...history.map((item) => (item.costPercent || 0) + 8));
   const step = history.length > 1 ? chartWidth / (history.length - 1) : chartWidth;
   const realPoints = [];
-  const idealPoints = [];
   const bars = history
     .map((item, index) => {
       const x = left + index * step;
@@ -1182,22 +1182,16 @@ function renderCostSvg(history, money) {
       const barWidth = Math.min(78, chartWidth / Math.max(history.length, 1) * 0.36);
       const barY = top + chartHeight - barHeight;
       const real = item.costPercent || 0;
-      const ideal = Math.max(0, real - ((item.varianceAmount || 0) / Math.max(item.revenue || 1, 1)) * 100);
       const realY = top + chartHeight - (real / maxPercent) * chartHeight;
-      const idealY = top + chartHeight - (ideal / maxPercent) * chartHeight;
       const realBadgeY = Math.max(top + 4, realY - 30);
-      const idealBadgeY = Math.min(top + chartHeight - 22, idealY + 10);
       realPoints.push(`${x},${realY}`);
-      idealPoints.push(`${x},${idealY}`);
 
       return `
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#88c8bf" />
-        <text x="${x}" y="${top + chartHeight + 24}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
+        <text x="${x}" y="${top + chartHeight + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
         <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
         <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#05264d" />
-        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
-        <rect x="${x - 24}" y="${idealBadgeY}" width="48" height="20" rx="4" fill="#8cc24a" />
-        <text x="${x}" y="${idealBadgeY + 14}" text-anchor="middle" class="point-label">${ideal.toFixed(1)}%</text>`;
+        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>`;
     })
     .join("");
   const grid = [0, 15, 30, 45, 60].map((tick) => {
@@ -1205,16 +1199,14 @@ function renderCostSvg(history, money) {
     return `<line x1="${left}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#e4e8e6" /><text x="${left - 12}" y="${y + 4}" text-anchor="end" class="axis-label">${tick}%</text>`;
   }).join("");
 
-  return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Costo real versus costo ideal">
+  return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
     <style>.axis-label{font:12px Arial;fill:#8b918f}.bar-value{font:700 12px Arial;fill:#fff}.point-label{font:700 10px Arial;fill:#fff}</style>
     ${grid}
     ${bars}
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#05264d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#8cc24a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <g transform="translate(${left + 290},${height - 12})">
+    <g transform="translate(${left + 320},${height - 16})">
       <rect width="14" height="4" fill="#88c8bf" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
       <line x1="170" x2="196" y1="2" y2="2" stroke="#05264d" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
-      <line x1="330" x2="356" y1="2" y2="2" stroke="#8cc24a" stroke-width="4" /><text x="364" y="4" class="axis-label">% costo ideal</text>
     </g>
   </svg>`;
 }
@@ -1330,6 +1322,7 @@ function renderPolishedReportHtml(store, report) {
     .section-body { padding: 14px 16px 16px; }
     .chart-card { border: 1px solid #e2e7e5; margin-bottom: 14px; padding: 10px; overflow: hidden; }
     .chart-card h3 { color: #909090; font-size: 18px; margin: 0 0 8px; text-align: center; }
+    .chart-note { color: #5b6763; font-size: 12px; margin: 0 0 8px; }
     .report-svg { display: block; height: auto; width: 100%; }
     .two-col { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.7fr) minmax(210px, 0.8fr); }
     .summary-box { border: 1px solid #d8dfdc; color: #555; font-size: 13px; padding: 12px; white-space: pre-wrap; }
@@ -1380,7 +1373,7 @@ function renderPolishedReportHtml(store, report) {
       <div class="metric"><span>Variance</span><strong>${payload.summary.variancePercent}%</strong></div>
       <div class="metric"><span>Diferencia</span><strong class="${payload.summary.varianceAmount < 0 ? "bad" : "ok"}">${money.format(payload.summary.varianceAmount)}</strong></div>
     </section>
-    <section class="section"><h2>Costo real vs costo ideal</h2><div class="section-body"><div class="chart-card">${costSvg}</div></div></section>
+    <section class="section"><h2>Ingresos y % costo real</h2><div class="section-body"><div class="chart-card">${costSvg}</div></div></section>
     <section class="two-col">
       <div class="section"><h2>Ahorro/faltantes inventario ($)</h2><div class="section-body"><div class="chart-card">${varianceSvg}</div></div></section>
       <aside class="stat-stack">
@@ -1392,7 +1385,7 @@ function renderPolishedReportHtml(store, report) {
     <section class="section"><h2>Comentarios ejecutivos</h2><div class="section-body"><div class="summary-box">${escapeHtml(payload.comments || "")}</div></div></section>
     <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><colgroup><col class="w-category-name"><col class="w-category-money"><col class="w-category-percent"></colgroup><thead><tr><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
     <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><colgroup><col class="w-product-name"><col class="w-product-category"><col class="w-product-money"><col class="w-product-percent"></colgroup><thead><tr><th class="text-cell">Producto</th><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
-    <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
+    <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><p class="chart-note">Azul: stock actual. Verde: compra sugerida por Intelipar.</p><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
     <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
   </main>
 </body>
