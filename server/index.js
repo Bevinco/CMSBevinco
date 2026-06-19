@@ -14,6 +14,13 @@ const sculptureBaseUrl =
   process.env.SCULPTURE_BASE_URL || "https://beta.food.sculpturehospitality.com";
 const defaultCid = process.env.SCULPTURE_DEFAULT_CID || "29088";
 const defaultPid = process.env.SCULPTURE_DEFAULT_PID || "36";
+const sculptureUsername =
+  process.env.SCULPTURE_USERNAME || process.env.SCULPTURE_USER || process.env.SCULPTURE_AUTH_USERNAME || "";
+const sculpturePassword =
+  process.env.SCULPTURE_PASSWORD || process.env.SCULPTURE_PASS || process.env.SCULPTURE_AUTH_PASSWORD || "";
+const sculptureLoginPath = process.env.SCULPTURE_LOGIN_PATH || "/login/";
+const sculptureLoginUsernameField = process.env.SCULPTURE_LOGIN_USERNAME_FIELD || "";
+const sculptureLoginPasswordField = process.env.SCULPTURE_LOGIN_PASSWORD_FIELD || "";
 const authUsername = process.env.CMS_AUTH_USERNAME;
 const authPassword = process.env.CMS_AUTH_PASSWORD;
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -21,6 +28,7 @@ const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
 const publicDir = path.resolve(__dirname, "public");
+let sculptureSessionCookieCache = "";
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -186,6 +194,124 @@ function parseSculptureTable(html) {
   });
 
   return { headers, rows };
+}
+
+function getSetCookieHeaders(response) {
+  if (typeof response.headers.getSetCookie === "function") return response.headers.getSetCookie();
+  const singleHeader = response.headers.get("set-cookie");
+  return singleHeader ? [singleHeader] : [];
+}
+
+function mergeCookieHeaders(...cookieInputs) {
+  const cookies = new Map();
+
+  cookieInputs
+    .flat()
+    .filter(Boolean)
+    .forEach((cookieInput) => {
+      String(cookieInput)
+        .split(/,(?=\s*[^;,]+=)/)
+        .map((cookiePart) => cookiePart.trim().split(";")[0])
+        .filter((cookiePart) => cookiePart.includes("="))
+        .forEach((cookiePart) => {
+          const [name, ...valueParts] = cookiePart.split("=");
+          cookies.set(name.trim(), valueParts.join("=").trim());
+        });
+    });
+
+  return Array.from(cookies.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join("; ");
+}
+
+function looksLikeSculptureLogin(html) {
+  const body = String(html || "").toLowerCase();
+  return body.includes("password") && (body.includes("login") || body.includes("sign in") || body.includes("usuario"));
+}
+
+async function fetchSculptureLoginCookie() {
+  if (!sculptureUsername || !sculpturePassword) return "";
+
+  const loginUrl = new URL(sculptureLoginPath, sculptureBaseUrl).toString();
+  const loginPageResponse = await fetch(loginUrl, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      referer: `${sculptureBaseUrl}/`,
+    },
+    redirect: "manual",
+  });
+  const loginPageHtml = await loginPageResponse.text();
+  const loginPageCookie = mergeCookieHeaders(getSetCookieHeaders(loginPageResponse));
+  const $ = cheerio.load(loginPageHtml);
+  const form = $("form").first();
+  const formAction = form.attr("action");
+  const postUrl = formAction ? new URL(formAction, loginUrl).toString() : loginUrl;
+  const usernameField =
+    sculptureLoginUsernameField ||
+    form.find('input[type="email"]').attr("name") ||
+    form.find('input[name*="email" i]').attr("name") ||
+    form.find('input[name*="user" i]').attr("name") ||
+    "email";
+  const passwordField =
+    sculptureLoginPasswordField ||
+    form.find('input[type="password"]').attr("name") ||
+    form.find('input[name*="password" i]').attr("name") ||
+    "password";
+  const body = new URLSearchParams();
+
+  form.find("input[name]").each((_, input) => {
+    const name = $(input).attr("name");
+    if (!name) return;
+    body.set(name, $(input).attr("value") || "");
+  });
+  body.set(usernameField, sculptureUsername);
+  body.set(passwordField, sculpturePassword);
+
+  const loginResponse = await fetch(postUrl, {
+    method: "POST",
+    headers: {
+      accept: "text/html, */*; q=0.01",
+      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+      cookie: loginPageCookie,
+      origin: sculptureBaseUrl,
+      referer: loginUrl,
+    },
+    body,
+    redirect: "manual",
+  });
+
+  let cookie = mergeCookieHeaders(loginPageCookie, getSetCookieHeaders(loginResponse));
+  const redirectLocation = loginResponse.headers.get("location");
+
+  if (redirectLocation && loginResponse.status >= 300 && loginResponse.status < 400) {
+    const redirectResponse = await fetch(new URL(redirectLocation, postUrl).toString(), {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        cookie,
+        referer: postUrl,
+      },
+      redirect: "manual",
+    });
+    await redirectResponse.arrayBuffer();
+    cookie = mergeCookieHeaders(cookie, getSetCookieHeaders(redirectResponse));
+  } else {
+    await loginResponse.arrayBuffer();
+  }
+
+  sculptureSessionCookieCache = cookie;
+  return cookie;
+}
+
+async function getSculptureCookie({ forceLogin = false } = {}) {
+  if (!forceLogin && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
+  if (!forceLogin && sculptureSessionCookieCache) return sculptureSessionCookieCache;
+
+  const cookie = await fetchSculptureLoginCookie();
+  if (cookie) return cookie;
+
+  const error = new Error("SCULPTURE_SESSION_COOKIE or SCULPTURE_USERNAME/SCULPTURE_PASSWORD must be configured.");
+  error.status = 503;
+  throw error;
 }
 
 function configuredIdentifier(...values) {
@@ -803,13 +929,6 @@ function detectCsvSourceType(rows, fileName = "") {
 }
 
 async function fetchSculptureInternalReport({ type, cid, pid }) {
-  const cookie = process.env.SCULPTURE_SESSION_COOKIE;
-  if (!cookie) {
-    const error = new Error("SCULPTURE_SESSION_COOKIE is not configured.");
-    error.status = 503;
-    throw error;
-  }
-
   const reportConfig = {
     varianceDetailed: {
       path: process.env.SCULPTURE_VARIANCE_DETAILED_PATH || "/reports/variance/",
@@ -846,23 +965,41 @@ async function fetchSculptureInternalReport({ type, cid, pid }) {
   }
 
   const body = new URLSearchParams(reportConfig.payload);
-  const response = await fetch(`${sculptureBaseUrl}${reportConfig.path}`, {
-    method: "POST",
-    headers: {
-      accept: "text/html, */*; q=0.01",
-      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      cookie,
-      origin: sculptureBaseUrl,
-      referer: `${sculptureBaseUrl}/`,
-      "x-requested-with": "XMLHttpRequest",
-    },
-    body,
-  });
+  const requestReport = async (cookie) => {
+    const response = await fetch(`${sculptureBaseUrl}${reportConfig.path}`, {
+      method: "POST",
+      headers: {
+        accept: "text/html, */*; q=0.01",
+        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        cookie,
+        origin: sculptureBaseUrl,
+        referer: `${sculptureBaseUrl}/`,
+        "x-requested-with": "XMLHttpRequest",
+      },
+      body,
+    });
+    const html = await response.text();
+    return { response, html };
+  };
 
-  const html = await response.text();
+  let cookie = await getSculptureCookie();
+  let { response, html } = await requestReport(cookie);
+
+  if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
+    cookie = await getSculptureCookie({ forceLogin: true });
+    ({ response, html } = await requestReport(cookie));
+  }
+
   if (!response.ok) {
     const error = new Error(`Sculpture returned ${response.status} for ${type}.`);
     error.status = response.status;
+    error.details = html.slice(0, 500);
+    throw error;
+  }
+
+  if (looksLikeSculptureLogin(html)) {
+    const error = new Error(`Sculpture login is required for ${type}.`);
+    error.status = 401;
     error.details = html.slice(0, 500);
     throw error;
   }

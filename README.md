@@ -70,6 +70,11 @@ VITE_SCULPTURE_API_KEY=
 VITE_OPENAI_API_KEY=
 SCULPTURE_BASE_URL=https://beta.food.sculpturehospitality.com
 SCULPTURE_SESSION_COOKIE=
+SCULPTURE_USERNAME=
+SCULPTURE_PASSWORD=
+SCULPTURE_LOGIN_PATH=/login/
+SCULPTURE_LOGIN_USERNAME_FIELD=
+SCULPTURE_LOGIN_PASSWORD_FIELD=
 SCULPTURE_DEFAULT_CID=29088
 SCULPTURE_DEFAULT_PID=36
 SCULPTURE_VARIANCE_DETAILED_PATH=/reports/variance/
@@ -83,7 +88,7 @@ CMS_AUTH_PASSWORD=
 CMS_SESSION_SECRET=
 ```
 
-`SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.
+`SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture. Si la cookie falta o vence, el servidor intenta iniciar sesion con `SCULPTURE_USERNAME` y `SCULPTURE_PASSWORD`.
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
 
 El CMS intenta traer Variance detailed, Variance summary e Intelipar desde los endpoints internos de Sculpture al sincronizar fuentes y antes de generar el reporte. Para clientes o periodos reales, guardar `sculptureCid` en el cliente y `sculpturePid`/`pid` en el periodo; si faltan, usa `SCULPTURE_DEFAULT_CID` y `SCULPTURE_DEFAULT_PID`.
