@@ -1130,6 +1130,234 @@ function renderReportHtml(store, report) {
 </html>`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderCostSvg(history, money) {
+  const width = 920;
+  const height = 300;
+  const left = 64;
+  const right = 34;
+  const top = 28;
+  const bottom = 48;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const maxRevenue = Math.max(...history.map((item) => item.revenue || 0), 1);
+  const maxPercent = Math.max(60, ...history.map((item) => Math.max(item.costPercent || 0, (item.costPercent || 0) - ((item.varianceAmount || 0) / Math.max(item.revenue || 1, 1)) * 100) + 8));
+  const step = history.length > 1 ? chartWidth / (history.length - 1) : chartWidth;
+  const realPoints = [];
+  const idealPoints = [];
+  const bars = history
+    .map((item, index) => {
+      const x = left + index * step;
+      const barHeight = ((item.revenue || 0) / maxRevenue) * (chartHeight * 0.72);
+      const barWidth = Math.min(78, chartWidth / Math.max(history.length, 1) * 0.36);
+      const barY = top + chartHeight - barHeight;
+      const real = item.costPercent || 0;
+      const ideal = Math.max(0, real - ((item.varianceAmount || 0) / Math.max(item.revenue || 1, 1)) * 100);
+      const realY = top + chartHeight - (real / maxPercent) * chartHeight;
+      const idealY = top + chartHeight - (ideal / maxPercent) * chartHeight;
+      realPoints.push(`${x},${realY}`);
+      idealPoints.push(`${x},${idealY}`);
+
+      return `
+        <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#88c8bf" />
+        <text x="${x}" y="${top + chartHeight + 24}" text-anchor="middle" class="axis-label">${escapeHtml(item.label.replace(/\s*2026/i, ""))}</text>
+        <text x="${x}" y="${barY - 7}" text-anchor="middle" class="bar-label">${money.format(item.revenue).replace(/\$/g, "$")}</text>
+        <rect x="${x - 22}" y="${realY - 13}" width="44" height="20" rx="4" fill="#05264d" />
+        <text x="${x}" y="${realY + 1}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
+        <rect x="${x - 22}" y="${idealY - 13}" width="44" height="20" rx="4" fill="#8cc24a" />
+        <text x="${x}" y="${idealY + 1}" text-anchor="middle" class="point-label">${ideal.toFixed(1)}%</text>`;
+    })
+    .join("");
+  const grid = [0, 15, 30, 45, 60].map((tick) => {
+    const y = top + chartHeight - (tick / maxPercent) * chartHeight;
+    return `<line x1="${left}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#e4e8e6" /><text x="${left - 12}" y="${y + 4}" text-anchor="end" class="axis-label">${tick}%</text>`;
+  }).join("");
+
+  return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Costo real versus costo ideal">
+    <style>.axis-label{font:11px Arial;fill:#8b918f}.bar-label{font:700 11px Arial;fill:#fff}.point-label{font:700 10px Arial;fill:#fff}</style>
+    ${grid}
+    ${bars}
+    <polyline points="${realPoints.join(" ")}" fill="none" stroke="#05264d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+    <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#8cc24a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+    <g transform="translate(${left + 260},${height - 12})">
+      <rect width="14" height="4" fill="#88c8bf" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
+      <line x1="170" x2="196" y1="2" y2="2" stroke="#05264d" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
+      <line x1="330" x2="356" y1="2" y2="2" stroke="#8cc24a" stroke-width="4" /><text x="364" y="4" class="axis-label">% costo ideal</text>
+    </g>
+  </svg>`;
+}
+
+function renderVarianceSvg(items, money) {
+  const rows = items.slice(0, 10);
+  const width = 680;
+  const rowHeight = 30;
+  const height = 72 + rows.length * rowHeight;
+  const left = 170;
+  const center = 360;
+  const maxValue = Math.max(...rows.map((item) => Math.abs(item.amount || item.varianceAmount || 0)), 1);
+  const maxBarWidth = 250;
+  const rowMarkup = rows.map((item, index) => {
+    const amount = item.amount ?? item.varianceAmount ?? 0;
+    const label = item.category || item.name || "Sin nombre";
+    const y = 52 + index * rowHeight;
+    const barWidth = Math.max(10, (Math.abs(amount) / maxValue) * maxBarWidth);
+    const isNegative = amount < 0;
+    const x = isNegative ? center - barWidth : center;
+    const color = isNegative ? "#6b4539" : "#4b9086";
+    const textX = isNegative ? x - 6 : x + barWidth + 6;
+    const textAnchor = isNegative ? "end" : "start";
+    return `
+      <text x="18" y="${y + 5}" class="category-label">${escapeHtml(label)}</text>
+      <rect x="${x}" y="${y - 12}" width="${barWidth}" height="18" rx="3" fill="${color}" />
+      <text x="${textX}" y="${y + 2}" text-anchor="${textAnchor}" class="amount-label">${money.format(amount)}</text>`;
+  }).join("");
+
+  return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
+    <style>.category-label{font:12px Arial;fill:#565d5a}.amount-label{font:700 11px Arial;fill:#172026}</style>
+    <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
+    <text x="${center - 92}" y="22" text-anchor="middle" class="category-label">Faltantes</text>
+    <text x="${center + 92}" y="22" text-anchor="middle" class="category-label">Ahorros</text>
+    ${rowMarkup}
+  </svg>`;
+}
+
+function renderPurchaseSvg(items) {
+  const rows = items.slice(0, 8).map((item) => ({
+    label: item.item,
+    stock: parseNumber(item.stock),
+    suggested: parseNumber(item.suggested),
+  }));
+  const width = 540;
+  const rowHeight = 36;
+  const height = 64 + rows.length * rowHeight;
+  const left = 190;
+  const maxValue = Math.max(...rows.map((item) => Math.max(item.stock, item.suggested)), 1);
+  const rowMarkup = rows.map((item, index) => {
+    const y = 50 + index * rowHeight;
+    const stockWidth = Math.max(4, (item.stock / maxValue) * 260);
+    const suggestedWidth = Math.max(4, (item.suggested / maxValue) * 260);
+    return `
+      <text x="16" y="${y + 6}" class="purchase-label">${escapeHtml(item.label)}</text>
+      <rect x="${left}" y="${y - 12}" width="${stockWidth}" height="10" rx="3" fill="#05264d" opacity="0.78" />
+      <rect x="${left}" y="${y + 3}" width="${suggestedWidth}" height="10" rx="3" fill="#8cc24a" opacity="0.9" />
+      <text x="${left + 270}" y="${y + 6}" class="purchase-value">Stock ${item.stock || 0} / Sug. ${item.suggested || 0}</text>`;
+  }).join("");
+
+  return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stock versus compra sugerida">
+    <style>.purchase-label{font:12px Arial;fill:#565d5a}.purchase-value{font:700 11px Arial;fill:#565d5a}</style>
+    <text x="${left}" y="22" class="purchase-value">Stock actual</text>
+    <text x="${left + 120}" y="22" class="purchase-value" fill="#8cc24a">Compra sugerida</text>
+    ${rowMarkup}
+  </svg>`;
+}
+
+function renderPolishedReportHtml(store, report) {
+  const payload = buildReportPayload(store, report);
+  const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+  const generatedAt = new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short" }).format(new Date());
+  const positiveTotal = payload.categoryVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
+  const negativeTotal = payload.categoryVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
+  const topCategory = [...payload.categoryVariances].sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))[0];
+  const costSvg = renderCostSvg(payload.history, money);
+  const varianceSvg = renderVarianceSvg(payload.categoryVariances, money);
+  const productSvg = renderVarianceSvg(payload.topProducts, money);
+  const purchaseSvg = renderPurchaseSvg(payload.purchaseSuggestions);
+  const categoryRows = payload.categoryVariances.map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="numeric ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="numeric">${item.percent}%</td></tr>`).join("");
+  const productRows = payload.topProducts.map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.category)}</td><td class="numeric ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="numeric">${item.variancePercent}%</td></tr>`).join("");
+  const purchaseRows = payload.purchaseSuggestions.map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong></td><td>${escapeHtml(item.provider)}</td><td class="numeric">${escapeHtml(item.stock)}</td><td class="numeric">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
+
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
+  <style>
+    @page { margin: 10mm; size: A4; }
+    * { box-sizing: border-box; }
+    body { background: #e9efed; color: #16211f; font-family: Arial, Helvetica, sans-serif; line-height: 1.35; margin: 0; padding: 22px; }
+    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 14px; max-width: 1040px; }
+    button { background: #0b2d55; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 40px; padding: 0 16px; }
+    .sheet { background: #fff; border: 1px solid #d9e1df; margin: 0 auto; max-width: 1040px; min-height: 100vh; padding: 28px 34px; }
+    .cover { display: grid; grid-template-columns: 120px 1fr 150px; align-items: start; gap: 24px; margin-bottom: 22px; }
+    .mark-grid { display: grid; grid-template-columns: repeat(2, 48px); gap: 6px; }
+    .mark-grid span { border: 3px solid #8cc24a; border-radius: 12px; height: 48px; }
+    .mark-grid span:nth-child(2) { background: #8cc24a; }
+    .mark-grid span:nth-child(3) { background: #8ac8c2; border-color: #8ac8c2; }
+    .mark-grid span:nth-child(4) { background: #d8d8d8; border-color: #d8d8d8; }
+    h1 { color: #535353; font-size: 42px; letter-spacing: 0; line-height: 1; margin: 0; text-align: center; }
+    .green-rule { background: #7bb344; height: 4px; margin: 10px auto 0; max-width: 470px; }
+    .period-box { border: 3px solid #7bb344; color: #535353; display: grid; font-size: 12px; grid-template-columns: 1fr 1fr; margin-left: auto; padding: 6px; row-gap: 3px; text-align: right; }
+    .period-box strong { text-align: center; grid-column: span 2; }
+    .meta-line { color: #7d8582; font-size: 12px; text-align: center; margin-top: 8px; }
+    .metrics { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin: 18px 0 22px; }
+    .metric { border: 1px solid #dde5e2; border-radius: 6px; padding: 12px; text-align: center; }
+    .metric span { color: #61706c; display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .metric strong { display: block; font-size: 22px; margin-top: 5px; }
+    .section { border: 1px solid #dce4e2; border-radius: 6px; margin-bottom: 18px; overflow: hidden; page-break-inside: avoid; }
+    .section h2 { background: #f6f8f7; border-bottom: 1px solid #dce4e2; color: #1c2724; font-size: 20px; margin: 0; padding: 14px 18px; }
+    .section-body { padding: 16px 18px 18px; }
+    .chart-card { border: 1px solid #e2e7e5; margin-bottom: 16px; padding: 12px; }
+    .chart-card h3 { color: #909090; font-size: 18px; margin: 0 0 8px; text-align: center; }
+    .report-svg { display: block; height: auto; width: 100%; }
+    .two-col { display: grid; gap: 18px; grid-template-columns: 1.7fr 0.8fr; }
+    .summary-box { border: 1px solid #d8dfdc; color: #555; font-size: 13px; padding: 12px; white-space: pre-wrap; }
+    .stat-stack { display: grid; gap: 16px; align-content: start; }
+    .stat-box { border: 3px solid #0b2d55; text-align: center; }
+    .stat-box h3 { background: #0b2d55; color: #fff; font-size: 13px; margin: 0; padding: 5px; }
+    .stat-box strong { color: #555; display: block; font-size: 22px; padding: 8px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #e5ebe8; font-size: 12px; padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: #fbfcfc; color: #465c56; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    tbody tr:nth-child(even) td { background: #fbfcfc; }
+    .numeric { text-align: right; white-space: nowrap; }
+    .ok { color: #006b4f; }
+    .bad { color: #a22a22; }
+    footer { border-top: 1px solid #dce4e2; color: #777; font-size: 11px; margin-top: 24px; padding-top: 12px; text-align: center; }
+    @media print { body { background: #fff; padding: 0; } .toolbar { display: none; } .sheet { border: 0; max-width: none; padding: 12mm; } .section { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>
+  <main class="sheet">
+    <header class="cover">
+      <div class="mark-grid"><span></span><span></span><span></span><span></span></div>
+      <div><h1>${escapeHtml(payload.client?.name || report.clientId)}</h1><div class="green-rule"></div><p class="meta-line">Reporte semanal generado ${escapeHtml(generatedAt)} · ${escapeHtml(payload.client?.area || "")}</p></div>
+      <div class="period-box"><strong>Periodo</strong><span>del:</span><b>${escapeHtml(payload.period?.startsAt || "")}</b><span>al:</span><b>${escapeHtml(payload.period?.endsAt || "")}</b></div>
+    </header>
+    <section class="metrics">
+      <div class="metric"><span>Ingresos</span><strong>${money.format(payload.summary.revenue)}</strong></div>
+      <div class="metric"><span>% costo</span><strong>${payload.summary.costPercent}%</strong></div>
+      <div class="metric"><span>Variance</span><strong>${payload.summary.variancePercent}%</strong></div>
+      <div class="metric"><span>Diferencia</span><strong class="${payload.summary.varianceAmount < 0 ? "bad" : "ok"}">${money.format(payload.summary.varianceAmount)}</strong></div>
+    </section>
+    <section class="section"><h2>Costo real vs costo ideal</h2><div class="section-body"><div class="chart-card">${costSvg}</div></div></section>
+    <section class="two-col">
+      <div class="section"><h2>Ahorro/faltantes inventario ($)</h2><div class="section-body"><div class="chart-card">${varianceSvg}</div></div></section>
+      <aside class="stat-stack">
+        <div class="stat-box"><h3>Suma de ahorros</h3><strong>${money.format(positiveTotal)}</strong></div>
+        <div class="stat-box"><h3>Suma de faltantes</h3><strong>${money.format(negativeTotal)}</strong></div>
+        <div class="stat-box"><h3>Mayor impacto</h3><strong>${escapeHtml(topCategory?.category || "S/I")}</strong></div>
+      </aside>
+    </section>
+    <section class="section"><h2>Comentarios ejecutivos</h2><div class="section-body"><div class="summary-box">${escapeHtml(payload.comments || "")}</div></div></section>
+    <section class="section"><h2>Variaciones por categoria</h2><div class="section-body"><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
+    <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
+    <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><div class="chart-card">${purchaseSvg}</div><table><thead><tr><th>Item</th><th>Proveedor</th><th>Stock</th><th>Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
+    <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
+  </main>
+</body>
+</html>`;
+}
+
 async function fetchRequisition({ cid, pid }) {
   const cookie = process.env.SCULPTURE_SESSION_COOKIE;
 
@@ -1443,7 +1671,7 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
   }
 
   response.setHeader("content-type", "text/html; charset=utf-8");
-  response.send(renderReportHtml(store, report));
+  response.send(renderPolishedReportHtml(store, report));
 });
 
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
@@ -1480,7 +1708,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       from: process.env.REPORTS_FROM_EMAIL || "reportes@bevinco.local",
       to: recipients,
       subject: `Reporte semanal Bevinco - ${client?.name || report.clientId}`,
-      html: renderReportHtml(store, report),
+      html: renderPolishedReportHtml(store, report),
     }),
   });
 
