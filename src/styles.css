@@ -388,6 +388,21 @@ button:disabled {
   flex: 1 1 180px;
 }
 
+.summary-help {
+  background: #f6f8f7;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 12px;
+}
+
+.summary-help small {
+  color: #6f7d79;
+  line-height: 1.45;
+}
+
 .wrap-actions {
   flex-wrap: wrap;
   justify-content: flex-start;

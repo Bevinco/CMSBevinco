@@ -496,6 +496,27 @@ function App() {
     if (patch.emailDraft !== undefined) setEmailDraft(updated.emailDraft || "");
   }
 
+  async function generateSummary() {
+    if (!selectedReport) return;
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const updated = await readJson<Report>(
+        await fetch(`/api/module1/reports/${selectedReport.id}/summary`, { method: "POST" }),
+      );
+      setSelectedReport(updated);
+      setReports((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setCommentsDraft(updated.comments || "");
+      setEmailDraft(updated.emailDraft || "");
+      setError("Resumen ejecutivo generado con los datos cargados del reporte.");
+      setWorkStatus("ready");
+    } catch (summaryError) {
+      setError(summaryError instanceof Error ? summaryError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
   async function sendEmail() {
     if (!selectedReport) return;
     setWorkStatus("loading");
@@ -870,15 +891,22 @@ function App() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Editable</p>
-                <h2>Comentarios del reporte</h2>
+                <h2>Resumen ejecutivo del reporte</h2>
               </div>
               <Bot size={22} />
             </div>
-            <textarea aria-label="Comentarios" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
-            <textarea aria-label="Email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
+            <div className="summary-help">
+              <strong>Agente de resumen</strong>
+              <small>Genera un analisis editable usando ingresos, costo, variance, categorias, top productos e Intelipar del CSV cargado.</small>
+            </div>
+            <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
+            <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
             <div className="action-row wrap-actions">
+              <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
+                <Bot size={17} /> Generar resumen del reporte
+              </button>
               <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
-                <PencilLine size={17} /> Guardar comentarios y email
+                <PencilLine size={17} /> Guardar resumen y email
               </button>
             </div>
           </div>

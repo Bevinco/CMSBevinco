@@ -407,6 +407,54 @@ function moneyPlain(value) {
   }).format(value || 0);
 }
 
+function topByAbsoluteValue(items, field, limit = 3) {
+  return [...(items || [])]
+    .sort((left, right) => Math.abs(right[field] || 0) - Math.abs(left[field] || 0))
+    .slice(0, limit);
+}
+
+function generateReportSummary(store, report) {
+  const payload = buildReportPayload(store, report);
+  const clientName = payload.client?.name || report.clientId;
+  const periodLabel = payload.period?.label || report.periodId;
+  const summary = payload.summary || {};
+  const categories = topByAbsoluteValue(payload.categoryVariances, "amount", 3);
+  const products = topByAbsoluteValue(payload.topProducts, "varianceAmount", 4);
+  const purchaseItems = (payload.purchaseSuggestions || [])
+    .filter((item) => item.suggested || item.note)
+    .slice(0, 5);
+  const missingProviders = (payload.purchaseSuggestions || [])
+    .filter((item) => /validar|por validar/i.test(`${item.provider} ${item.note}`))
+    .slice(0, 4);
+  const varianceTone = (summary.varianceAmount || 0) < 0 ? "faltantes" : "sobrantes";
+  const categoryText = categories.length
+    ? categories.map((item) => `${item.category} (${moneyPlain(item.amount)}, ${item.percent}%)`).join(", ")
+    : "sin categorias con variacion relevante";
+  const productText = products.length
+    ? products.map((item) => `${item.name} en ${item.category} (${moneyPlain(item.varianceAmount)}, ${item.variancePercent}%)`).join("; ")
+    : "sin productos con diferencias relevantes";
+  const purchaseText = purchaseItems.length
+    ? purchaseItems.map((item) => `${item.item}: sugerido ${item.suggested || "por revisar"}, stock ${item.stock || "s/i"}, proveedor ${item.provider || "por validar"}`).join("; ")
+    : "sin sugerencias de compra relevantes";
+  const providerText = missingProviders.length
+    ? `Validar proveedor o dato de compra en: ${missingProviders.map((item) => item.item).join(", ")}.`
+    : "No se detectan proveedores marcados para validacion prioritaria.";
+
+  return [
+    `Resumen ejecutivo ${clientName} - ${periodLabel}`,
+    "",
+    `El periodo registra ingresos por ${moneyPlain(summary.revenue)} y un costo de ${summary.costPercent || 0}%. La diferencia acumulada es ${moneyPlain(summary.varianceAmount)} (${summary.variancePercent || 0}%), asociada principalmente a ${varianceTone} o diferencias operativas que deben revisarse antes del envio.`,
+    "",
+    `Categorias con mayor impacto: ${categoryText}.`,
+    "",
+    `Productos a revisar: ${productText}.`,
+    "",
+    `Sugerencia de compra Intelipar: ${purchaseText}. ${providerText}`,
+    "",
+    "Recomendacion: revisar los productos con mayor variacion, confirmar proveedores sugeridos y validar si las diferencias corresponden a merma, registro de venta, compra no actualizada o ajuste operativo.",
+  ].join("\n");
+}
+
 async function buildStoreFromSamples() {
   const period = {
     id: "jun-04-10-2026",
@@ -1282,6 +1330,33 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
   });
 
   report.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  response.json(buildReportPayload(store, report));
+});
+
+app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+
+  if (!report) {
+    response.status(404).json({ error: "Report not found." });
+    return;
+  }
+
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const generatedSummary = generateReportSummary(store, report);
+  report.comments = generatedSummary;
+  report.emailDraft = [
+    `Hola,`,
+    "",
+    `Compartimos el reporte semanal de auditoria de ${client?.name || report.clientId}.`,
+    "",
+    generatedSummary,
+    "",
+    "Quedamos atentos a cualquier duda o comentario.",
+  ].join("\n");
+  report.updatedAt = new Date().toISOString();
+
   await writeStore(store);
   response.json(buildReportPayload(store, report));
 });
