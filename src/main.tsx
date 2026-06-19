@@ -17,6 +17,8 @@ import {
   Printer,
   RefreshCw,
   Send,
+  Trash2,
+  Upload,
   ShoppingCart,
   Workflow,
 } from "lucide-react";
@@ -25,7 +27,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "reports";
+type ActiveView = "dashboard" | "module1" | "reports" | "criteria";
 
 type Client = {
   id: string;
@@ -72,6 +74,7 @@ type Report = {
     bestOfWeek?: string[];
     weeklyChallenges?: string[];
     stockEfficiency?: string[];
+    criteriaApplied?: string[];
     agentNotes?: string[];
   };
   comments: string;
@@ -79,9 +82,19 @@ type Report = {
   sourceStatus: Record<string, string>;
 };
 
+type CriteriaDocument = {
+  id: string;
+  name: string;
+  type: string;
+  text: string;
+  size: number;
+  uploadedAt: string;
+};
+
 type BootstrapPayload = {
   clients: Client[];
   periods: Period[];
+  criteriaDocuments: CriteriaDocument[];
   reports: Report[];
   selectedReport: Report | null;
 };
@@ -301,6 +314,8 @@ function App() {
   const [activeView, setActiveView] = useState<ActiveView>("module1");
   const [csvSourceType, setCsvSourceType] = useState("auto");
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
+  const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
+  const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
 
   async function checkSession() {
     try {
@@ -331,6 +346,7 @@ function App() {
     setClients(payload.clients);
     setPeriods(payload.periods);
     setReports(payload.reports);
+    setCriteriaDocuments(payload.criteriaDocuments || []);
     const report = payload.selectedReport;
     setSelectedReport(report);
     setSelectedClientId(report?.clientId || payload.clients[0]?.id || "");
@@ -422,6 +438,62 @@ function App() {
       setWorkStatus("error");
     } finally {
       window.clearTimeout(timeoutId);
+    }
+  }
+
+  async function importCriteriaFiles(files = selectedCriteriaFiles) {
+    if (!files.length) return;
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
+    if (totalSize > 5 * 1024 * 1024) {
+      setError("La carga de criterios supera 5 MB. Sube documentos mas pequenos o divididos por tema.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Leyendo criterios para alimentar el agente de reportes...");
+
+    try {
+      const encodedFiles = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type || "text/plain",
+          size: file.size,
+          text: await file.text(),
+        })),
+      );
+      const payload = await readJson<BootstrapPayload>(
+        await fetch("/api/module1/criteria-documents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ files: encodedFiles }),
+        }),
+      );
+      applyBootstrapPayload(payload);
+      setSelectedCriteriaFiles([]);
+      setError("Criterios cargados. El agente los tomara en cuenta al generar los reportes.");
+      setWorkStatus("ready");
+    } catch (criteriaError) {
+      setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function deleteCriteriaDocument(documentId: string) {
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const payload = await readJson<BootstrapPayload>(
+        await fetch(`/api/module1/criteria-documents/${documentId}`, { method: "DELETE" }),
+      );
+      applyBootstrapPayload(payload);
+      setError("Criterio eliminado. El agente recalculara el analisis con la biblioteca actual.");
+      setWorkStatus("ready");
+    } catch (criteriaError) {
+      setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
+      setWorkStatus("error");
     }
   }
 
@@ -552,6 +624,7 @@ function App() {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
     reports: ["Bandeja", "Reportes guardados"],
+    criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
   }[activeView];
 
   if (authStatus === "checking") {
@@ -584,6 +657,7 @@ function App() {
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button>
           <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button>
           <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
+          <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><Upload size={18} /> Criterios</button>
         </nav>
       </aside>
 
@@ -614,6 +688,20 @@ function App() {
                   <span>Intelipar</span>
                   <span>Historico 4 periodos</span>
                   <span>PDF y email</span>
+                </div>
+              </button>
+              <button className="module-card module-card-button" onClick={() => setActiveView("criteria")}>
+                <div className="module-card-top">
+                  <span>02</span>
+                  <small>Base</small>
+                </div>
+                <h2>Criterios del agente</h2>
+                <p>Sube documentos internos para que el generador de reportes use reglas, tono, observaciones y aprendizajes del equipo.</p>
+                <div className="module-tags">
+                  <span>TXT</span>
+                  <span>Markdown</span>
+                  <span>CSV</span>
+                  <span>JSON</span>
                 </div>
               </button>
             </section>
@@ -739,6 +827,15 @@ function App() {
               <article>
                 <strong>Eficiencia de stock y compra</strong>
                 <ul>{(selectedReport.analysis.stockEfficiency || []).map((item) => <li key={item}>{item}</li>)}</ul>
+              </article>
+              <article>
+                <strong>Criterios aplicados</strong>
+                <ul>
+                  {(selectedReport.analysis.criteriaApplied?.length
+                    ? selectedReport.analysis.criteriaApplied
+                    : ["Sin criterios adicionales cargados para este reporte."])
+                    .map((item) => <li key={item}>{item}</li>)}
+                </ul>
               </article>
             </div>
           </section>
@@ -1031,6 +1128,90 @@ function App() {
             ))}
           </div>
         </section>
+        ) : null}
+
+        {activeView === "criteria" ? (
+          <section className="page-grid">
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Alimentar al agente</p>
+                  <h2>Subir criterios de reporte</h2>
+                </div>
+                <Upload size={22} />
+              </div>
+              {error ? <p className="connector-error">{error}</p> : null}
+              <div className="upload-box criteria-uploader">
+                <label>
+                  Archivos de criterio
+                  <input
+                    accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                    multiple
+                    type="file"
+                    onChange={(event) => setSelectedCriteriaFiles(Array.from(event.target.files || []))}
+                  />
+                </label>
+                {selectedCriteriaFiles.length ? (
+                  <div className="selected-files">
+                    {selectedCriteriaFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
+                  </div>
+                ) : (
+                  <small>Sube guias internas, criterios de analisis, ejemplos de comentarios o reglas comerciales del equipo.</small>
+                )}
+                <div className="upload-actions">
+                  <button
+                    className="primary-button"
+                    disabled={!selectedCriteriaFiles.length || workStatus === "loading"}
+                    onClick={() => importCriteriaFiles()}
+                  >
+                    <Upload size={17} /> {workStatus === "loading" ? "Cargando criterios..." : "Cargar criterios"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={!selectedCriteriaFiles.length || workStatus === "loading"}
+                    onClick={() => setSelectedCriteriaFiles([])}
+                  >
+                    Limpiar seleccion
+                  </button>
+                </div>
+                <small>Estos documentos quedan guardados en la biblioteca del CMS y el agente los usa al generar el resumen del reporte.</small>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Biblioteca</p>
+                  <h2>Criterios disponibles</h2>
+                </div>
+                <FileText size={22} />
+              </div>
+              <p className="muted-copy">La biblioteca funciona como memoria operativa: mientras mas criterios reales carguen, mas consistente sera la lectura del reporte semanal.</p>
+              <div className="criteria-doc-list">
+                {criteriaDocuments.length ? criteriaDocuments.map((document) => (
+                  <article key={document.id}>
+                    <div>
+                      <strong>{document.name}</strong>
+                      <small>
+                        {new Date(document.uploadedAt).toLocaleDateString("es-CL")} - {Math.max(1, Math.round(document.size / 1024))} KB
+                      </small>
+                      <p>{document.text.slice(0, 240)}{document.text.length > 240 ? "..." : ""}</p>
+                    </div>
+                    <button
+                      aria-label={`Eliminar ${document.name}`}
+                      className="icon-button"
+                      disabled={workStatus === "loading"}
+                      onClick={() => deleteCriteriaDocument(document.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </article>
+                )) : (
+                  <p className="muted-copy">Aun no hay criterios cargados. Sube el primer archivo para que el agente empiece a usar esa informacion.</p>
+                )}
+              </div>
+            </div>
+          </section>
         ) : null}
 
       </section>

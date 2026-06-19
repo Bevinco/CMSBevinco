@@ -200,7 +200,12 @@ async function ensureStore() {
 async function readStore() {
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
-  return JSON.parse(raw);
+  const store = JSON.parse(raw);
+  store.clients ||= [];
+  store.periods ||= [];
+  store.reports ||= [];
+  store.criteriaDocuments ||= [];
+  return store;
 }
 
 async function writeStore(store) {
@@ -487,6 +492,15 @@ function generateReportAnalysis(payload) {
   const purchaseItems = (payload.purchaseSuggestions || [])
     .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
     .slice(0, 4);
+  const criteriaApplied = (payload.criteriaDocuments || [])
+    .slice(0, 4)
+    .map((document) => {
+      const excerpt = String(document.text || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 180);
+      return `${document.name}: ${excerpt || "criterio disponible para revisar al preparar el reporte."}`;
+    });
 
   return {
     bestOfWeek: bestProducts.map(
@@ -507,6 +521,7 @@ function generateReportAnalysis(payload) {
       (item) =>
         `${item.item}: stock ${item.stock || "s/i"}, compra sugerida ${item.suggested || "por revisar"}, proveedor ${item.provider || "por validar"}. ${item.note || ""}`.trim(),
     ),
+    criteriaApplied,
     agentNotes: (payload.comments || "")
       .split(/\n{2,}/)
       .map((paragraph) => paragraph.trim())
@@ -565,6 +580,7 @@ async function buildStoreFromSamples() {
       { id: "may-14-20-2026", label: "May 14 to May 20 2026", startsAt: "2026-05-14", endsAt: "2026-05-20" },
     ],
     reports,
+    criteriaDocuments: [],
   };
 }
 
@@ -831,6 +847,7 @@ function buildReportPayload(store, report) {
     client,
     period,
     history: historyForReport(store, report),
+    criteriaDocuments: store.criteriaDocuments || [],
   };
   payload.analysis = report.analysis || generateReportAnalysis(payload);
 
@@ -1460,6 +1477,7 @@ function renderPolishedReportHtml(store, report) {
       ${renderAnalysisList("Lo mejor de la semana", analysis.bestOfWeek || [])}
       ${renderAnalysisList("Los desafios de la semana", analysis.weeklyChallenges || [])}
       ${renderAnalysisList("Eficiencia de stock y compra", analysis.stockEfficiency || [])}
+      ${renderAnalysisList("Criterios aplicados al reporte", analysis.criteriaApplied || [])}
     </div></div></section>
     <section class="section"><h2>Resumen generado por el agente de reportes</h2><div class="section-body"><div class="summary-box"><ul class="agent-list">${(analysis.agentNotes || [])
       .map((paragraph) => `<li>${escapeHtml(paragraph)}</li>`)
@@ -1582,20 +1600,79 @@ app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   response.json({
     clients: store.clients,
     periods: store.periods,
+    criteriaDocuments: store.criteriaDocuments || [],
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: report ? buildReportPayload(store, report) : null,
   });
 });
 
 app.post("/api/module1/import-samples", requireAuth, async (_request, response) => {
+  const existingStore = await readStore();
   const sampleStore = await buildStoreFromSamples();
+  sampleStore.criteriaDocuments = existingStore.criteriaDocuments || [];
   await writeStore(sampleStore);
   const report = sampleStore.reports[0];
   response.json({
     clients: sampleStore.clients,
     periods: sampleStore.periods,
+    criteriaDocuments: sampleStore.criteriaDocuments || [],
     reports: sampleStore.reports.map((item) => buildReportPayload(sampleStore, item)),
     selectedReport: report ? buildReportPayload(sampleStore, report) : null,
+  });
+});
+
+app.post("/api/module1/criteria-documents", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const files = Array.isArray(request.body?.files) ? request.body.files : [];
+
+  if (!files.length) {
+    response.status(400).json({ error: "At least one criteria file is required." });
+    return;
+  }
+
+  const documents = files.map((file) => {
+    const text = String(file.text || "").replace(/\0/g, "").trim();
+    const name = String(file.name || "criterio.txt").trim();
+
+    return {
+      id: `${Date.now()}-${crypto.randomUUID()}`,
+      name,
+      type: String(file.type || "text/plain"),
+      text: text.slice(0, 30000),
+      size: Number(file.size || text.length || 0),
+      uploadedAt: new Date().toISOString(),
+    };
+  });
+
+  store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 30);
+  store.reports.forEach((report) => {
+    report.analysis = null;
+  });
+  await writeStore(store);
+
+  response.json({
+    clients: store.clients,
+    periods: store.periods,
+    criteriaDocuments: store.criteriaDocuments,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
+  });
+});
+
+app.delete("/api/module1/criteria-documents/:documentId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  store.criteriaDocuments = (store.criteriaDocuments || []).filter((document) => document.id !== request.params.documentId);
+  store.reports.forEach((report) => {
+    report.analysis = null;
+  });
+  await writeStore(store);
+
+  response.json({
+    clients: store.clients,
+    periods: store.periods,
+    criteriaDocuments: store.criteriaDocuments,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
   });
 });
 
