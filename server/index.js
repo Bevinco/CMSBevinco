@@ -20,74 +20,35 @@ const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).t
 const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
+const publicDir = path.resolve(__dirname, "public");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const defaultStore = {
-  clients: [
-    {
-      id: "azotea-cocina",
-      name: "3820 Azotea cocina",
-      cid: defaultCid,
-      area: "Food",
-      recipients: ["operaciones@cliente.cl"],
-    },
-    {
-      id: "barra-demo",
-      name: "Bar demo",
-      cid: "pending",
+const sampleDefinitions = [
+  {
+    client: {
+      id: "bardot-barra",
+      name: "Bardot Barra",
+      cid: "bardot-barra",
       area: "Beverage",
-      recipients: ["bar@cliente.cl"],
+      recipients: ["operaciones@bardot.cl"],
     },
-  ],
-  periods: [
-    { id: defaultPid, label: "Jun 12 to Jun 15 2026", startsAt: "2026-06-12", endsAt: "2026-06-15" },
-    { id: "35", label: "Jun 04 to Jun 10 2026", startsAt: "2026-06-04", endsAt: "2026-06-10" },
-    { id: "34", label: "May 28 to Jun 03 2026", startsAt: "2026-05-28", endsAt: "2026-06-03" },
-    { id: "33", label: "May 21 to May 27 2026", startsAt: "2026-05-21", endsAt: "2026-05-27" },
-  ],
-  reports: [
-    {
-      id: "azotea-cocina-36",
-      clientId: "azotea-cocina",
-      periodId: defaultPid,
-      status: "Borrador",
-      updatedAt: new Date().toISOString(),
-      summary: {
-        revenue: 12450000,
-        costPercent: 28.4,
-        variancePercent: -3.1,
-        varianceAmount: -385000,
-      },
-      categoryVariances: [
-        { category: "Carnes", amount: -128000, percent: -2.2 },
-        { category: "Pescado", amount: -94000, percent: -1.8 },
-        { category: "Mariscos", amount: 62000, percent: 1.1 },
-        { category: "Aves", amount: -47000, percent: -0.8 },
-      ],
-      topProducts: [
-        { name: "Filete", category: "Carnes", varianceAmount: -82000, variancePercent: -4.4 },
-        { name: "Atun Lomo", category: "Pescado", varianceAmount: -54000, variancePercent: -3.2 },
-        { name: "Corvina", category: "Pescado Blanco", varianceAmount: 38000, variancePercent: 2.5 },
-      ],
-      purchaseSuggestions: [
-        { item: "Foie Gras", provider: "Proveedor por validar", stock: "0 kg", suggested: "1 kg", note: "Revisar proveedor actualizado" },
-        { item: "Filete", provider: "Carnes Sur", stock: "0 UND", suggested: "12 UND", note: "Compra sugerida por par stock" },
-        { item: "Corvina", provider: "Pesquera Central", stock: "1 kg", suggested: "3 kg", note: "Mantener cobertura semanal" },
-      ],
-      comments:
-        "El costo semanal se mantiene bajo control, con variaciones relevantes en categorias de alto volumen. Revisar compras sugeridas antes del envio final y validar proveedores asociados a productos con cambios recientes.",
-      emailDraft:
-        "Hola, adjuntamos el reporte semanal de auditoria. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
-      sourceStatus: {
-        varianceDetailed: "Pendiente",
-        varianceSummary: "Pendiente",
-        intelipar: "Pendiente",
-      },
+    varianceFile: "Bardot barra-Detailed Variance Report for Jun 4 to Jun 10 2026.csv",
+    inteliparFile: "Bardot barra - inteliPar Report for Jun 4 to Jun 10 2026.csv",
+  },
+  {
+    client: {
+      id: "bardot-cocina",
+      name: "Bardot Cocina",
+      cid: "bardot-cocina",
+      area: "Food",
+      recipients: ["operaciones@bardot.cl"],
     },
-  ],
-};
+    varianceFile: "Bardot cocina-Detailed Variance Report for Jun 4 to Jun 10 2026.csv",
+    inteliparFile: "Bardot cocina - inteliPar Report for Jun 4 to Jun 10 2026.csv",
+  },
+];
 
 function timingSafeEqual(left, right) {
   const leftBuffer = Buffer.from(left || "");
@@ -214,7 +175,8 @@ async function ensureStore() {
   try {
     await fs.access(moduleStorePath);
   } catch {
-    await fs.writeFile(moduleStorePath, JSON.stringify(defaultStore, null, 2));
+    const sampleStore = await buildStoreFromSamples();
+    await fs.writeFile(moduleStorePath, JSON.stringify(sampleStore, null, 2));
   }
 }
 
@@ -258,13 +220,237 @@ function historyForReport(store, report) {
 }
 
 function parseNumber(value) {
-  const normalized = String(value || "")
+  let normalized = String(value || "")
     .replace(/[$,%]/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".")
+    .replace(/\s/g, "")
     .trim();
+
+  const isNegative = normalized.startsWith("-") || normalized.startsWith("(");
+  normalized = normalized.replace(/[()+-]/g, "");
+
+  if (normalized.includes(",") && normalized.includes(".")) {
+    normalized = normalized.replace(/,/g, "");
+  } else if (normalized.includes(",") && !normalized.includes(".")) {
+    normalized = normalized.replace(",", ".");
+  }
+
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (!Number.isFinite(parsed)) return 0;
+  return isNegative ? -parsed : parsed;
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let insideQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"' && next === '"') {
+      cell += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+      continue;
+    }
+
+    if (char === "," && !insideQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !insideQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell);
+      if (row.some((value) => value !== "")) rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  row.push(cell);
+  if (row.some((value) => value !== "")) rows.push(row);
+
+  const [headers = [], ...body] = rows;
+  return body.map((values) =>
+    headers.reduce((record, header, index) => {
+      record[header.trim()] = (values[index] || "").trim();
+      return record;
+    }, {}),
+  );
+}
+
+async function readSampleCsv(fileName) {
+  const filePath = path.join(publicDir, fileName);
+  const content = await fs.readFile(filePath, "utf8");
+  return parseCsv(content);
+}
+
+function isTotalRow(name) {
+  return /^Total\s.+:$/i.test(name || "");
+}
+
+function cleanTotalName(name) {
+  return String(name || "")
+    .replace(/^Total\s+/i, "")
+    .replace(/:$/, "")
+    .trim();
+}
+
+function currentCategoryFromTotal(name, fallback) {
+  if (!isTotalRow(name)) return fallback;
+  return cleanTotalName(name);
+}
+
+function buildCategoryVariances(varianceRows) {
+  return varianceRows
+    .filter((row) => isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => ({
+      category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
+      amount: parseNumber(row["Diferencia (Costo)"]),
+      percent: parseNumber(row["% Diferencia"]),
+    }))
+    .filter((row) => row.amount || row.percent)
+    .slice(0, 10);
+}
+
+function buildTopProducts(varianceRows) {
+  let category = "Sin categoria";
+
+  return varianceRows
+    .map((row) => {
+      const name = row["Nombre Artículo"] || row["Nombre ArtÃ­culo"] || "";
+      if (isTotalRow(name)) {
+        category = currentCategoryFromTotal(name, category);
+        return null;
+      }
+
+      return {
+        name,
+        category,
+        varianceAmount: parseNumber(row["Diferencia (Costo)"]),
+        variancePercent: parseNumber(row["% Diferencia"]),
+      };
+    })
+    .filter(Boolean)
+    .filter((row) => row.name && (row.varianceAmount || row.variancePercent))
+    .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
+    .slice(0, 10);
+}
+
+function buildPurchaseSuggestions(inteliparRows) {
+  return inteliparRows
+    .filter((row) => !isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => {
+      const order = row["Orden"] || row["Compras realizadas"] || "";
+      const provider = row["Proveedor"] || "Por validar";
+      const excess = row["Exceso de Inventario"] || "";
+      const daysRemaining = row["Días Restantes"] || row["DÃ­as Restantes"] || "";
+
+      return {
+        item: row["Nombre Artículo"] || row["Nombre ArtÃ­culo"] || "",
+        provider,
+        stock: row["Existencia"] || "",
+        suggested: order,
+        note: excess
+          ? `Exceso ${excess}${daysRemaining ? `, ${daysRemaining} dias restantes` : ""}`
+          : "Validar proveedor y sugerencia antes del envio",
+      };
+    })
+    .filter((row) => row.item && (row.suggested || row.stock))
+    .slice(0, 12);
+}
+
+function buildSummary(varianceRows) {
+  const productRows = varianceRows.filter((row) => !isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]));
+  const revenue = productRows.reduce((total, row) => total + parseNumber(row["Ingresos"]), 0);
+  const usedCost = productRows.reduce((total, row) => total + parseNumber(row["Usado (Costo)"]), 0);
+  const soldCost = productRows.reduce((total, row) => total + parseNumber(row["Vendido (Costo)"]), 0);
+  const varianceAmount = productRows.reduce((total, row) => total + parseNumber(row["Diferencia (Costo)"]), 0);
+
+  return {
+    revenue,
+    costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
+    variancePercent: soldCost ? Number(((varianceAmount / soldCost) * 100).toFixed(1)) : 0,
+    varianceAmount,
+  };
+}
+
+function commentsForReport(clientName, report) {
+  const direction = report.summary.varianceAmount < 0 ? "faltantes" : "sobrantes";
+  const biggestCategory = report.categoryVariances[0]?.category || "las categorias principales";
+
+  return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. Revisar los productos con mayor variacion y validar la sugerencia de compra antes del envio al cliente, especialmente proveedores marcados como por validar.`;
+}
+
+function moneyPlain(value) {
+  return new Intl.NumberFormat("es-CL", {
+    currency: "CLP",
+    maximumFractionDigits: 0,
+    style: "currency",
+  }).format(value || 0);
+}
+
+async function buildStoreFromSamples() {
+  const period = {
+    id: "jun-04-10-2026",
+    label: "Jun 4 to Jun 10 2026",
+    startsAt: "2026-06-04",
+    endsAt: "2026-06-10",
+  };
+  const clients = sampleDefinitions.map((sample) => sample.client);
+  const reports = [];
+
+  for (const sample of sampleDefinitions) {
+    try {
+      const varianceRows = await readSampleCsv(sample.varianceFile);
+      const inteliparRows = await readSampleCsv(sample.inteliparFile);
+      const report = {
+        id: `${sample.client.id}-${period.id}`,
+        clientId: sample.client.id,
+        periodId: period.id,
+        status: "Borrador",
+        updatedAt: new Date().toISOString(),
+        summary: buildSummary(varianceRows),
+        categoryVariances: buildCategoryVariances(varianceRows),
+        topProducts: buildTopProducts(varianceRows),
+        purchaseSuggestions: buildPurchaseSuggestions(inteliparRows),
+        comments: "",
+        emailDraft:
+          "Hola, adjuntamos el reporte semanal de auditoria. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
+        sourceStatus: {
+          varianceDetailed: "CSV muestra",
+          varianceSummary: "Pendiente endpoint",
+          intelipar: "CSV muestra",
+        },
+      };
+      report.comments = commentsForReport(sample.client.name, report);
+      reports.push(report);
+    } catch (error) {
+      console.warn(`Could not load sample files for ${sample.client.name}: ${error.message}`);
+    }
+  }
+
+  return {
+    clients,
+    periods: [
+      period,
+      { id: "may-28-jun-03-2026", label: "May 28 to Jun 3 2026", startsAt: "2026-05-28", endsAt: "2026-06-03" },
+      { id: "may-21-27-2026", label: "May 21 to May 27 2026", startsAt: "2026-05-21", endsAt: "2026-05-27" },
+      { id: "may-14-20-2026", label: "May 14 to May 20 2026", startsAt: "2026-05-14", endsAt: "2026-05-20" },
+    ],
+    reports,
+  };
 }
 
 function extractReportMetrics(parsedTable) {
@@ -607,6 +793,18 @@ app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
     periods: store.periods,
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: report ? buildReportPayload(store, report) : null,
+  });
+});
+
+app.post("/api/module1/import-samples", requireAuth, async (_request, response) => {
+  const sampleStore = await buildStoreFromSamples();
+  await writeStore(sampleStore);
+  const report = sampleStore.reports[0];
+  response.json({
+    clients: sampleStore.clients,
+    periods: sampleStore.periods,
+    reports: sampleStore.reports.map((item) => buildReportPayload(sampleStore, item)),
+    selectedReport: report ? buildReportPayload(sampleStore, report) : null,
   });
 });
 

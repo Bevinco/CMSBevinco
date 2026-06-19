@@ -276,24 +276,44 @@ function App() {
     setSelectedReport(null);
   }
 
+  function applyBootstrapPayload(payload: BootstrapPayload) {
+    setClients(payload.clients);
+    setPeriods(payload.periods);
+    setReports(payload.reports);
+    const report = payload.selectedReport;
+    setSelectedReport(report);
+    setSelectedClientId(report?.clientId || payload.clients[0]?.id || "");
+    setSelectedPeriodId(report?.periodId || payload.periods[0]?.id || "");
+    setCommentsDraft(report?.comments || "");
+    setEmailDraft(report?.emailDraft || "");
+  }
+
   async function loadModule() {
     setWorkStatus("loading");
     setError("");
 
     try {
       const payload = await readJson<BootstrapPayload>(await fetch("/api/module1/bootstrap"));
-      setClients(payload.clients);
-      setPeriods(payload.periods);
-      setReports(payload.reports);
-      const report = payload.selectedReport;
-      setSelectedReport(report);
-      setSelectedClientId(report?.clientId || payload.clients[0]?.id || "");
-      setSelectedPeriodId(report?.periodId || payload.periods[0]?.id || "");
-      setCommentsDraft(report?.comments || "");
-      setEmailDraft(report?.emailDraft || "");
+      applyBootstrapPayload(payload);
       setWorkStatus("ready");
     } catch (moduleError) {
       setError(moduleError instanceof Error ? moduleError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function importSamples() {
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const payload = await readJson<BootstrapPayload>(
+        await fetch("/api/module1/import-samples", { method: "POST" }),
+      );
+      applyBootstrapPayload(payload);
+      setWorkStatus("ready");
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Error desconocido.");
       setWorkStatus("error");
     }
   }
@@ -473,6 +493,9 @@ function App() {
           </label>
           <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={syncReport}>
             <RefreshCw size={17} /> Sincronizar fuentes
+          </button>
+          <button className="secondary-button" disabled={workStatus === "loading"} onClick={importSamples}>
+            <Database size={17} /> Cargar muestras
           </button>
           {selectedReport ? (
             <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
