@@ -1293,9 +1293,9 @@ function renderPolishedReportHtml(store, report) {
   const varianceSvg = renderVarianceSvg(payload.categoryVariances, money);
   const productSvg = renderVarianceSvg(payload.topProducts, money);
   const purchaseSvg = renderPurchaseSvg(payload.purchaseSuggestions);
-  const categoryRows = payload.categoryVariances.map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="numeric ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="numeric">${item.percent}%</td></tr>`).join("");
-  const productRows = payload.topProducts.map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.category)}</td><td class="numeric ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="numeric">${item.variancePercent}%</td></tr>`).join("");
-  const purchaseRows = payload.purchaseSuggestions.map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong></td><td>${escapeHtml(item.provider)}</td><td class="numeric">${escapeHtml(item.stock)}</td><td class="numeric">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
+  const categoryRows = payload.categoryVariances.map((item) => `<tr><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="percent-cell">${item.percent}%</td></tr>`).join("");
+  const productRows = payload.topProducts.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.name)}</td><td class="text-cell">${escapeHtml(item.category)}</td><td class="money-cell ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="percent-cell">${item.variancePercent}%</td></tr>`).join("");
+  const purchaseRows = payload.purchaseSuggestions.map((item) => `<tr><td class="text-cell strong-cell">${escapeHtml(item.item)}</td><td class="text-cell">${escapeHtml(item.provider)}</td><td class="small-number-cell">${escapeHtml(item.stock)}</td><td class="small-number-cell">${escapeHtml(item.suggested)}</td><td class="note-cell">${escapeHtml(item.note)}</td></tr>`).join("");
 
   return `<!doctype html>
 <html lang="es">
@@ -1338,10 +1338,27 @@ function renderPolishedReportHtml(store, report) {
     .stat-box h3 { background: #0b2d55; color: #fff; font-size: 13px; margin: 0; padding: 5px; }
     .stat-box strong { color: #555; display: block; font-size: 22px; padding: 8px; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    th, td { border-bottom: 1px solid #e5ebe8; font-size: 11px; overflow-wrap: anywhere; padding: 8px 9px; text-align: left; vertical-align: top; }
+    th, td { border-bottom: 1px solid #e5ebe8; font-size: 11px; overflow-wrap: anywhere; padding: 8px 10px; vertical-align: middle; }
     th { background: #fbfcfc; color: #465c56; font-size: 10px; font-weight: 800; text-transform: uppercase; }
     tbody tr:nth-child(even) td { background: #fbfcfc; }
-    .numeric { text-align: right; white-space: nowrap; }
+    .text-cell { text-align: left; }
+    .strong-cell { font-weight: 800; }
+    .money-cell,
+    .percent-cell,
+    .small-number-cell { text-align: center; white-space: nowrap; }
+    .note-cell { text-align: left; }
+    .w-category-name { width: 54%; }
+    .w-category-money { width: 26%; }
+    .w-category-percent { width: 20%; }
+    .w-product-name { width: 32%; }
+    .w-product-category { width: 25%; }
+    .w-product-money { width: 25%; }
+    .w-product-percent { width: 18%; }
+    .w-purchase-item { width: 28%; }
+    .w-purchase-provider { width: 20%; }
+    .w-purchase-stock { width: 11%; }
+    .w-purchase-suggested { width: 11%; }
+    .w-purchase-note { width: 30%; }
     .ok { color: #006b4f; }
     .bad { color: #a22a22; }
     footer { border-top: 1px solid #dce4e2; color: #777; font-size: 11px; margin-top: 24px; padding-top: 12px; text-align: center; }
@@ -1373,9 +1390,9 @@ function renderPolishedReportHtml(store, report) {
       </aside>
     </section>
     <section class="section"><h2>Comentarios ejecutivos</h2><div class="section-body"><div class="summary-box">${escapeHtml(payload.comments || "")}</div></div></section>
-    <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
-    <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
-    <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><div class="chart-card">${purchaseSvg}</div><table><thead><tr><th>Item</th><th>Proveedor</th><th>Stock</th><th>Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
+    <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><colgroup><col class="w-category-name"><col class="w-category-money"><col class="w-category-percent"></colgroup><thead><tr><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
+    <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><colgroup><col class="w-product-name"><col class="w-product-category"><col class="w-product-money"><col class="w-product-percent"></colgroup><thead><tr><th class="text-cell">Producto</th><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
+    <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
     <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
   </main>
 </body>
