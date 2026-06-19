@@ -326,6 +326,7 @@ function App() {
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("module1");
   const [csvSourceType, setCsvSourceType] = useState("auto");
+  const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
 
   async function checkSession() {
     try {
@@ -394,8 +395,7 @@ function App() {
     }
   }
 
-  async function importCsvFiles(fileList: FileList | null) {
-    const files = Array.from(fileList || []);
+  async function importCsvFiles(files = selectedCsvFiles) {
     if (!files.length || !selectedClientId || !selectedPeriodId) return;
     setWorkStatus("loading");
     setError("");
@@ -424,6 +424,7 @@ function App() {
         ?.map((item) => `${item.fileName}: ${sourceLabels[item.sourceType] || item.sourceType} (${item.rows} filas)`)
         .join(" | ");
       setError(importedText ? `Datos importados: ${importedText}` : "");
+      setSelectedCsvFiles([]);
       setWorkStatus("ready");
     } catch (csvError) {
       setError(csvError instanceof Error ? csvError.message : "Error desconocido.");
@@ -797,10 +798,33 @@ function App() {
                   accept=".csv,text/csv"
                   multiple
                   type="file"
-                  onChange={(event) => importCsvFiles(event.target.files)}
+                  onChange={(event) => setSelectedCsvFiles(Array.from(event.target.files || []))}
                 />
               </label>
-              <small>Sube uno o varios CSV descargados del sistema de auditoria. El CMS detecta la fuente, recalcula el resumen y actualiza el reporte.</small>
+              {selectedCsvFiles.length ? (
+                <div className="selected-files">
+                  {selectedCsvFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
+                </div>
+              ) : (
+                <small>Selecciona uno o varios CSV descargados del sistema de auditoria.</small>
+              )}
+              <div className="upload-actions">
+                <button
+                  className="primary-button"
+                  disabled={!selectedCsvFiles.length || workStatus === "loading"}
+                  onClick={() => importCsvFiles()}
+                >
+                  <FileSpreadsheet size={17} /> Cargar datos al reporte
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!selectedCsvFiles.length || workStatus === "loading"}
+                  onClick={() => setSelectedCsvFiles([])}
+                >
+                  Limpiar seleccion
+                </button>
+              </div>
+              <small>Al cargar, el CMS detecta la fuente, recalcula el resumen y actualiza el reporte seleccionado.</small>
             </div>
           </div>
         </section>
@@ -852,9 +876,9 @@ function App() {
             </div>
             <textarea aria-label="Comentarios" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
             <textarea aria-label="Email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
-            <div className="action-row">
-              <button className="secondary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
-                <PencilLine size={17} /> Guardar
+            <div className="action-row wrap-actions">
+              <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
+                <PencilLine size={17} /> Guardar comentarios y email
               </button>
             </div>
           </div>

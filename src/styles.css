@@ -360,6 +360,34 @@ button:disabled {
   line-height: 1.45;
 }
 
+.selected-files {
+  display: grid;
+  gap: 8px;
+}
+
+.selected-files span {
+  background: #edf1f0;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  color: #172026;
+  font-size: 0.86rem;
+  font-weight: 700;
+  overflow: hidden;
+  padding: 9px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.upload-actions button {
+  flex: 1 1 180px;
+}
+
 .wrap-actions {
   flex-wrap: wrap;
   justify-content: flex-start;
