@@ -100,10 +100,10 @@ const moduleRoadmap = [
   },
   {
     number: "03",
-    title: "Integraciones",
+    title: "Comunicaciones",
     status: "En preparacion",
-    description: "Centraliza conexiones con Sculpture, ClickUp, Supabase, Resend y futuras fuentes.",
-    items: ["Sculpture", "ClickUp", "Supabase", "Resend"],
+    description: "Centraliza avisos, destinatarios y seguimiento de reportes enviados.",
+    items: ["Emails", "Destinatarios", "Seguimiento", "Historial"],
   },
   {
     number: "04",
@@ -151,12 +151,12 @@ const moduleOneProcess = [
   {
     title: "2. Variance Report",
     detail: "Se obtiene el detalle y resumen de diferencias, ingresos, costo real e ideal.",
-    status: "Activo con CSV",
+    status: "Datos cargados",
   },
   {
     title: "3. Intelipar",
     detail: "Se revisa sugerencia de compra, stock, par, orden, proveedor y excesos.",
-    status: "Activo con CSV",
+    status: "Datos cargados",
   },
   {
     title: "4. Reporte Bevinco",
@@ -175,46 +175,41 @@ const moduleOneProcess = [
   },
 ];
 
-const moduleOnePending = [
+const moduleOneChecklist = [
   {
-    title: "Capturar endpoints internos",
-    detail: "Reemplazar rutas configurables por requests reales de Variance detailed, Variance summary e Intelipar desde DevTools. Mientras tanto se pueden cargar CSV.",
-    status: "Pendiente",
+    title: "Datos semanales cargados",
+    detail: "Variance e Intelipar ya alimentan el reporte seleccionado.",
+    status: "Listo",
   },
   {
-    title: "Mapeo completo cliente/periodo",
-    detail: "El CMS ya permite trabajar por cliente/periodo; falta completar IDs reales de Sculpture para todos los locales.",
-    status: "En curso",
+    title: "Cliente y periodo seleccionados",
+    detail: "El equipo puede cambiar entre clientes, barra/cocina y semana auditada.",
+    status: "Listo",
   },
   {
-    title: "Persistencia Supabase",
-    detail: "Migrar data/module1.json a tablas reales para no depender del filesystem de Render.",
-    status: "Pendiente",
+    title: "Comentarios revisables",
+    detail: "El comentario ejecutivo queda editable antes del envio.",
+    status: "Listo",
   },
   {
-    title: "PDF final fiel a plantilla",
-    detail: "Ajustar export al formato visual exacto de las plantillas Bardot Barra/Cocina.",
-    status: "En curso",
+    title: "PDF preparado",
+    detail: "El reporte se puede abrir e imprimir como PDF con formato ejecutivo.",
+    status: "Listo",
   },
   {
-    title: "Envio real con Resend",
-    detail: "Configurar RESEND_API_KEY, remitente y destinatarios reales por cliente.",
+    title: "Envio al cliente",
+    detail: "El equipo prepara el email y registra el estado del reporte.",
     status: "Preparado",
   },
   {
-    title: "ClickUp",
-    detail: "Disparar creacion de borrador cuando una auditoria pase a listo para reporte.",
-    status: "Pendiente",
-  },
-  {
-    title: "Carga manual CSV",
-    detail: "Variance detailed, Variance summary e Intelipar se pueden importar desde el modulo para operar sin endpoint oficial.",
-    status: "Preparado",
+    title: "Validacion de proveedores",
+    detail: "Las sugerencias de compra quedan visibles para revisar proveedor, stock y orden antes del envio.",
+    status: "Por revisar",
   },
 ];
 
 function taskStatusClass(status: string) {
-  if (status === "Pendiente") return "task-status pending";
+  if (status === "Por revisar") return "task-status pending";
   if (status === "En curso") return "task-status working";
   if (status === "Preparado") return "task-status prepared";
   return "task-status done";
@@ -532,7 +527,7 @@ function App() {
     reports: ["Bandeja", "Reportes guardados"],
     criteria: ["Base reusable", "Criterios de auditoria"],
     integrations: ["Configuracion", "Integraciones"],
-    future: ["Roadmap", "Modulos planificados"],
+    future: ["Proximos modulos", "Operaciones futuras"],
   }[activeView];
 
   if (authStatus === "checking") {
@@ -567,7 +562,7 @@ function App() {
           <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
           <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><ShieldCheck size={18} /> Criterios</button>
           <button className={activeView === "integrations" ? "active" : ""} onClick={() => setActiveView("integrations")}><Cloud size={18} /> Integraciones</button>
-          <button className={activeView === "future" ? "active" : ""} onClick={() => setActiveView("future")}><Workflow size={18} /> Roadmap</button>
+          <button className={activeView === "future" ? "active" : ""} onClick={() => setActiveView("future")}><Workflow size={18} /> Proximos</button>
         </nav>
       </aside>
 
@@ -585,7 +580,7 @@ function App() {
 
         {activeView === "dashboard" ? (
           <>
-            <section className="module-roadmap" aria-label="Roadmap de modulos">
+            <section className="module-roadmap" aria-label="Modulos del CMS">
               {moduleRoadmap.map((module) => (
                 <button
                   className="module-card module-card-button"
@@ -647,7 +642,7 @@ function App() {
             <RefreshCw size={17} /> Sincronizar fuentes
           </button>
           <button className="secondary-button" disabled={workStatus === "loading"} onClick={importSamples}>
-            <Database size={17} /> Cargar muestras
+            <Database size={17} /> Restaurar Bardot
           </button>
           {selectedReport ? (
             <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
@@ -730,13 +725,13 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Pendientes</p>
-                <h2>Para cerrar el modulo 1</h2>
+                <p className="eyebrow">Checklist</p>
+                <h2>Preparacion del reporte</h2>
               </div>
               <ListChecks size={22} />
             </div>
             <div className="pending-list">
-              {moduleOnePending.map((item) => (
+              {moduleOneChecklist.map((item) => (
                 <article key={item.title}>
                   <span className={taskStatusClass(item.status)}>{item.status}</span>
                   <strong>{item.title}</strong>
@@ -760,8 +755,8 @@ function App() {
               {Object.entries(sourceLabels).map(([key, label]) => (
                 <article key={key}>
                   <strong>{label}</strong>
-                  <span className={selectedReport?.sourceStatus[key] === "Sincronizado" ? "pill success" : "pill neutral"}>
-                    {selectedReport?.sourceStatus[key] || "Pendiente"}
+                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
+                    {selectedReport?.sourceStatus[key] || "Por revisar"}
                   </span>
                 </article>
               ))}
@@ -771,8 +766,8 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Carga manual</p>
-                <h2>CSV de Sculpture</h2>
+                <p className="eyebrow">Importar datos</p>
+                <h2>Reportes descargados</h2>
               </div>
               <FileSpreadsheet size={22} />
             </div>
@@ -786,14 +781,14 @@ function App() {
                 </select>
               </label>
               <label>
-                Archivo CSV
+                Archivo
                 <input
                   accept=".csv,text/csv"
                   type="file"
                   onChange={(event) => importCsvFile(event.target.files?.[0] || null)}
                 />
               </label>
-              <small>Permite cerrar el modulo con archivos reales mientras se capturan endpoints internos de Sculpture.</small>
+              <small>Usa los archivos descargados del sistema de auditoria para alimentar el reporte semanal.</small>
             </div>
           </div>
         </section>
@@ -973,8 +968,8 @@ function App() {
               {Object.entries(sourceLabels).map(([key, label]) => (
                 <article key={key}>
                   <strong>{label}</strong>
-                  <span className={selectedReport?.sourceStatus[key] === "Sincronizado" || selectedReport?.sourceStatus[key] === "CSV muestra" ? "pill success" : "pill neutral"}>
-                    {selectedReport?.sourceStatus[key] || "Pendiente"}
+                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
+                    {selectedReport?.sourceStatus[key] || "Por revisar"}
                   </span>
                 </article>
               ))}
@@ -983,16 +978,16 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Servicios</p>
-                <h2>Infraestructura</h2>
+                <p className="eyebrow">Operacion</p>
+                <h2>Flujo del equipo</h2>
               </div>
               <Database size={22} />
             </div>
             <div className="mini-roadmap">
-              <article><span>SH</span><div><strong>Sculpture</strong><small>Cookie + endpoints internos configurables</small></div></article>
-              <article><span>DB</span><div><strong>Supabase</strong><small>Pendiente migrar persistencia del JSON local</small></div></article>
-              <article><span>EM</span><div><strong>Resend</strong><small>Preparado para envio de reportes</small></div></article>
-              <article><span>CU</span><div><strong>ClickUp</strong><small>Pendiente automatizar estado listo para reporte</small></div></article>
+              <article><span>DA</span><div><strong>Datos</strong><small>Reportes semanales por cliente y periodo</small></div></article>
+              <article><span>RE</span><div><strong>Revision</strong><small>Comentarios y proveedores validados por el equipo</small></div></article>
+              <article><span>EN</span><div><strong>Envio</strong><small>PDF y email preparados para el cliente</small></div></article>
+              <article><span>HI</span><div><strong>Historial</strong><small>Seguimiento de estados y periodos anteriores</small></div></article>
             </div>
           </div>
         </section>
@@ -1003,8 +998,8 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Roadmap</p>
-                <h2>Modulos planificados</h2>
+                <p className="eyebrow">Proximos pasos</p>
+                <h2>Operaciones futuras</h2>
               </div>
               <Workflow size={22} />
             </div>

@@ -435,9 +435,9 @@ async function buildStoreFromSamples() {
         emailDraft:
           "Hola, adjuntamos el reporte semanal de auditoria. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
         sourceStatus: {
-          varianceDetailed: "CSV muestra",
-          varianceSummary: "Pendiente endpoint",
-          intelipar: "CSV muestra",
+          varianceDetailed: "Datos cargados",
+          varianceSummary: "Por revisar",
+          intelipar: "Datos cargados",
         },
       };
       report.comments = commentsForReport(sample.client.name, report);
@@ -528,9 +528,9 @@ function reportForClientPeriod(store, clientId, periodId) {
       comments: "",
       emailDraft: "",
       sourceStatus: {
-        varianceDetailed: "Pendiente",
-        varianceSummary: "Pendiente",
-        intelipar: "Pendiente",
+        varianceDetailed: "Por revisar",
+        varianceSummary: "Por revisar",
+        intelipar: "Por revisar",
       },
     };
     store.reports.unshift(report);
@@ -607,7 +607,7 @@ function applyCsvToReport(report, sourceType, rows) {
     report.purchaseSuggestions = buildPurchaseSuggestions(rows);
   }
 
-  report.sourceStatus[sourceType] = "CSV cargado";
+  report.sourceStatus[sourceType] = "Datos cargados";
   report.updatedAt = new Date().toISOString();
 }
 
@@ -1208,7 +1208,7 @@ app.post("/api/module1/sync", requireAuth, async (request, response) => {
         error: error.message,
         details: error.details,
       };
-      report.sourceStatus[type] = "Pendiente endpoint";
+      report.sourceStatus[type] = "Por revisar";
     }
   }
 

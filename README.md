@@ -8,7 +8,7 @@ CMS modular para automatizar los reportes semanales de auditoria y preparar futu
 - Modulo de reportes con estados: borrador, listo para revisar y enviado.
 - Borrador editable para comentarios asistidos por IA.
 - Base inicial de criterios de auditoria por cliente.
-- Panel de integraciones pendientes: Sculpture Hospitality, ClickUp, Supabase y Resend.
+- Panel de operacion para fuentes de datos, revision y envio.
 - Vista futura de reservas y pagos con alertas visuales.
 
 ## Requisitos levantados de la reunion
@@ -44,10 +44,12 @@ npm run build
 npm run start
 ```
 
-El backend Express sirve el sitio compilado y expone el endpoint seguro:
+El backend Express sirve el sitio compilado y expone endpoints seguros para autenticacion, reportes e importacion de datos:
 
 ```bash
-GET /api/sculpture/requisition
+GET /api/module1/bootstrap
+POST /api/module1/import-csv
+GET /api/module1/reports/:reportId/export
 ```
 
 El CMS requiere login por usuario y contrasena. Las credenciales se leen desde variables de entorno del servidor.
@@ -83,5 +85,3 @@ CMS_SESSION_SECRET=
 
 `SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
-
-Las rutas `SCULPTURE_VARIANCE_*` e `SCULPTURE_INTELIPAR_*` son configurables porque Sculpture no publica una API abierta. Deben reemplazarse por los endpoints internos reales capturados desde DevTools.
