@@ -1200,7 +1200,7 @@ function renderCostSvg(history, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
-    <style>.axis-label{font:12px Arial;fill:#8b918f}.bar-value{font:700 12px Arial;fill:#fff}.point-label{font:700 10px Arial;fill:#fff}</style>
+    <style>.axis-label{font:12px Poppins,Arial;fill:#8b918f}.bar-value{font:700 12px Poppins,Arial;fill:#fff}.point-label{font:700 10px Poppins,Arial;fill:#fff}</style>
     ${grid}
     ${bars}
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#05264d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
@@ -1236,7 +1236,7 @@ function renderVarianceSvg(items, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
-    <style>.category-label{font:13px Arial;fill:#565d5a}.amount-label{font:700 12px Arial;fill:#172026}</style>
+    <style>.category-label{font:13px Poppins,Arial;fill:#565d5a}.amount-label{font:700 12px Poppins,Arial;fill:#172026}</style>
     <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
     <text x="${center - 92}" y="22" text-anchor="middle" class="category-label">Faltantes</text>
     <text x="${center + 92}" y="22" text-anchor="middle" class="category-label">Ahorros</text>
@@ -1267,7 +1267,7 @@ function renderPurchaseSvg(items) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stock versus compra sugerida">
-    <style>.purchase-label{font:13px Arial;fill:#565d5a}.purchase-value{font:700 12px Arial;fill:#565d5a}</style>
+    <style>.purchase-label{font:13px Poppins,Arial;fill:#565d5a}.purchase-value{font:700 12px Poppins,Arial;fill:#565d5a}</style>
     <text x="${left}" y="24" class="purchase-value">Stock actual</text>
     <text x="${left + 150}" y="24" class="purchase-value" fill="#8cc24a">Compra sugerida</text>
     ${rowMarkup}
@@ -1296,9 +1296,10 @@ function renderPolishedReportHtml(store, report) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
   <style>
+    @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap");
     @page { margin: 9mm; size: A4 landscape; }
     * { box-sizing: border-box; }
-    body { background: #e9efed; color: #16211f; font-family: Arial, Helvetica, sans-serif; line-height: 1.35; margin: 0; padding: 18px; }
+    body { background: #e9efed; color: #16211f; font-family: "Poppins", Arial, Helvetica, sans-serif; line-height: 1.35; margin: 0; padding: 18px; }
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 14px; max-width: 1120px; }
     button { background: #0b2d55; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 40px; padding: 0 16px; }
     .sheet { background: #fff; border: 1px solid #d9e1df; margin: 0 auto; max-width: 1120px; min-height: 100vh; padding: 24px 30px; }
