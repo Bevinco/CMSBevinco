@@ -1225,32 +1225,36 @@ function renderCostSvg(history, money) {
   const bottom = 78;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
+  const baseline = top + chartHeight;
+  const revenueBarHeight = chartHeight * 0.62;
+  const percentTop = top + 18;
+  const percentHeight = 92;
   const maxRevenue = Math.max(...history.map((item) => item.revenue || 0), 1);
-  const maxPercent = Math.max(60, ...history.map((item) => (item.costPercent || 0) + 8));
+  const maxPercent = Math.max(40, ...history.map((item) => (item.costPercent || 0) + 8));
   const step = history.length > 1 ? chartWidth / (history.length - 1) : chartWidth;
   const realPoints = [];
   const bars = history
     .map((item, index) => {
       const x = left + index * step;
-      const barHeight = ((item.revenue || 0) / maxRevenue) * (chartHeight * 0.72);
+      const barHeight = ((item.revenue || 0) / maxRevenue) * revenueBarHeight;
       const barWidth = Math.min(78, chartWidth / Math.max(history.length, 1) * 0.36);
-      const barY = top + chartHeight - barHeight;
+      const barY = baseline - barHeight;
       const real = item.costPercent || 0;
-      const realY = top + chartHeight - (real / maxPercent) * chartHeight;
-      const realBadgeY = Math.max(top + 4, realY - 30);
+      const realY = percentTop + percentHeight - (real / maxPercent) * percentHeight;
+      const realBadgeY = Math.max(top + 2, realY - 28);
       realPoints.push(`${x},${realY}`);
 
       return `
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#88c8bf" />
-        <text x="${x}" y="${top + chartHeight + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
+        <text x="${x}" y="${baseline + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
         <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
         <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#05264d" />
         <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>`;
     })
     .join("");
   const grid = [0, 15, 30, 45, 60].map((tick) => {
-    const y = top + chartHeight - (tick / maxPercent) * chartHeight;
-    return `<line x1="${left}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#e4e8e6" /><text x="${left - 12}" y="${y + 4}" text-anchor="end" class="axis-label">${tick}%</text>`;
+    const y = percentTop + percentHeight - (tick / 60) * percentHeight;
+    return `<line x1="${left}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#edf1f0" /><text x="${left - 12}" y="${y + 4}" text-anchor="end" class="axis-label">${tick}%</text>`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
