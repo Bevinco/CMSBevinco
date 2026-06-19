@@ -325,7 +325,7 @@ function App() {
   const [commentsDraft, setCommentsDraft] = useState("");
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("module1");
-  const [csvSourceType, setCsvSourceType] = useState("varianceDetailed");
+  const [csvSourceType, setCsvSourceType] = useState("auto");
 
   async function checkSession() {
     try {
@@ -394,14 +394,20 @@ function App() {
     }
   }
 
-  async function importCsvFile(file: File | null) {
-    if (!file || !selectedClientId || !selectedPeriodId) return;
+  async function importCsvFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || []);
+    if (!files.length || !selectedClientId || !selectedPeriodId) return;
     setWorkStatus("loading");
     setError("");
 
     try {
-      const csvText = await file.text();
-      const payload = await readJson<BootstrapPayload>(
+      const encodedFiles = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          csvText: await file.text(),
+        })),
+      );
+      const payload = await readJson<BootstrapPayload & { imported?: Array<{ fileName: string; sourceType: string; rows: number }> }>(
         await fetch("/api/module1/import-csv", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -409,11 +415,15 @@ function App() {
             clientId: selectedClientId,
             periodId: selectedPeriodId,
             sourceType: csvSourceType,
-            csvText,
+            files: encodedFiles,
           }),
         }),
       );
       applyBootstrapPayload(payload);
+      const importedText = payload.imported
+        ?.map((item) => `${item.fileName}: ${sourceLabels[item.sourceType] || item.sourceType} (${item.rows} filas)`)
+        .join(" | ");
+      setError(importedText ? `Datos importados: ${importedText}` : "");
       setWorkStatus("ready");
     } catch (csvError) {
       setError(csvError instanceof Error ? csvError.message : "Error desconocido.");
@@ -775,6 +785,7 @@ function App() {
               <label>
                 Fuente
                 <select value={csvSourceType} onChange={(event) => setCsvSourceType(event.target.value)}>
+                  <option value="auto">Detectar automaticamente</option>
                   <option value="varianceDetailed">Variance detailed</option>
                   <option value="varianceSummary">Variance summary</option>
                   <option value="intelipar">Intelipar</option>
@@ -784,11 +795,12 @@ function App() {
                 Archivo
                 <input
                   accept=".csv,text/csv"
+                  multiple
                   type="file"
-                  onChange={(event) => importCsvFile(event.target.files?.[0] || null)}
+                  onChange={(event) => importCsvFiles(event.target.files)}
                 />
               </label>
-              <small>Usa los archivos descargados del sistema de auditoria para alimentar el reporte semanal.</small>
+              <small>Sube uno o varios CSV descargados del sistema de auditoria. El CMS detecta la fuente, recalcula el resumen y actualiza el reporte.</small>
             </div>
           </div>
         </section>

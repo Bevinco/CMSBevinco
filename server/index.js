@@ -611,6 +611,33 @@ function applyCsvToReport(report, sourceType, rows) {
   report.updatedAt = new Date().toISOString();
 }
 
+function detectCsvSourceType(rows, fileName = "") {
+  const headers = Object.keys(rows[0] || {}).join(" ").toLowerCase();
+  const name = String(fileName).toLowerCase();
+
+  if (
+    name.includes("intelipar") ||
+    headers.includes("orden") ||
+    headers.includes("proveedor") ||
+    headers.includes("par") ||
+    headers.includes("exceso de inventario")
+  ) {
+    return "intelipar";
+  }
+
+  if (
+    name.includes("variance") ||
+    headers.includes("diferencia") ||
+    headers.includes("vendido") ||
+    headers.includes("porcentaje de costo") ||
+    headers.includes("costo de alimentos")
+  ) {
+    return "varianceDetailed";
+  }
+
+  return "varianceDetailed";
+}
+
 async function fetchSculptureInternalReport({ type, cid, pid }) {
   const cookie = process.env.SCULPTURE_SESSION_COOKIE;
   if (!cookie) {
@@ -1125,7 +1152,7 @@ app.post("/api/module1/periods", requireAuth, async (request, response) => {
 
 app.post("/api/module1/import-csv", requireAuth, async (request, response) => {
   const store = await readStore();
-  const { clientId, periodId, sourceType, csvText, client, period } = request.body || {};
+  const { clientId, periodId, sourceType = "auto", csvText, files, client, period } = request.body || {};
 
   const resolvedClient = client ? ensureClient(store, client) : store.clients.find((candidate) => candidate.id === clientId);
   const resolvedPeriod = period ? ensurePeriod(store, period) : store.periods.find((candidate) => candidate.id === periodId);
@@ -1135,19 +1162,36 @@ app.post("/api/module1/import-csv", requireAuth, async (request, response) => {
     return;
   }
 
-  if (!["varianceDetailed", "varianceSummary", "intelipar"].includes(sourceType)) {
+  if (!["auto", "varianceDetailed", "varianceSummary", "intelipar"].includes(sourceType)) {
     response.status(400).json({ error: "Invalid sourceType." });
     return;
   }
 
-  if (!csvText) {
-    response.status(400).json({ error: "csvText is required." });
+  const incomingFiles = Array.isArray(files)
+    ? files
+    : csvText
+      ? [{ name: "uploaded.csv", csvText }]
+      : [];
+
+  if (!incomingFiles.length) {
+    response.status(400).json({ error: "At least one CSV file is required." });
     return;
   }
 
-  const rows = parseCsv(csvText);
   const report = reportForClientPeriod(store, resolvedClient.id, resolvedPeriod.id);
-  applyCsvToReport(report, sourceType, rows);
+  const imported = [];
+
+  incomingFiles.forEach((file) => {
+    const rows = parseCsv(file.csvText || "");
+    const detectedSourceType = sourceType === "auto" ? detectCsvSourceType(rows, file.name) : sourceType;
+    applyCsvToReport(report, detectedSourceType, rows);
+    imported.push({
+      fileName: file.name || "uploaded.csv",
+      sourceType: detectedSourceType,
+      rows: rows.length,
+    });
+  });
+
   if (!report.comments) report.comments = commentsForReport(resolvedClient.name, report);
 
   await writeStore(store);
@@ -1156,7 +1200,7 @@ app.post("/api/module1/import-csv", requireAuth, async (request, response) => {
     periods: store.periods,
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: buildReportPayload(store, report),
-    importedRows: rows.length,
+    imported,
   });
 });
 
