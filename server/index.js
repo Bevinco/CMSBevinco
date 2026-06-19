@@ -1696,6 +1696,10 @@ app.get("/api/sculpture/requisition", requireAuth, async (request, response) => 
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   const report = store.reports[0];
+  if (report) {
+    await syncSculptureSources(store, report);
+    await writeStore(store);
+  }
   response.json({
     clients: store.clients,
     periods: store.periods,
@@ -1847,9 +1851,14 @@ app.get("/api/module1/reports/current", requireAuth, async (request, response) =
   const store = await readStore();
   const clientId = String(request.query.clientId || store.clients[0]?.id || "");
   const periodId = String(request.query.periodId || store.periods[0]?.id || "");
+  const shouldSync = request.query.sync !== "false";
   const report = reportForClientPeriod(store, clientId, periodId);
+  const syncResults = shouldSync ? await syncSculptureSources(store, report) : {};
   await writeStore(store);
-  response.json(buildReportPayload(store, report));
+  response.json({
+    report: buildReportPayload(store, report),
+    syncResults,
+  });
 });
 
 app.post("/api/module1/sync", requireAuth, async (request, response) => {

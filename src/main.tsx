@@ -102,6 +102,8 @@ type BootstrapPayload = {
   selectedReport: Report | null;
 };
 
+type SyncResults = Record<string, { error?: string; rowsCount?: number }>;
+
 const reportWorkflow = [
   {
     icon: Database,
@@ -208,6 +210,20 @@ const sourceLabels: Record<string, string> = {
   varianceSummary: "Variance summary",
   intelipar: "Intelipar",
 };
+
+function syncStatusMessage(syncResults: SyncResults = {}) {
+  const entries = Object.entries(syncResults);
+  if (!entries.length) return "";
+
+  const synced = entries.filter(([, result]) => !result.error).length;
+  const failed = entries
+    .filter(([, result]) => result.error)
+    .map(([source]) => sourceLabels[source] || source);
+
+  return failed.length
+    ? `Sculpture respondio ${synced} fuente(s). Por revisar: ${failed.join(", ")}.`
+    : "Datos traidos desde Sculpture correctamente.";
+}
 
 function money(value: number) {
   return new Intl.NumberFormat("es-CL", {
@@ -503,12 +519,14 @@ function App() {
   async function loadSelectedReport(clientId = selectedClientId, periodId = selectedPeriodId) {
     if (!clientId || !periodId) return;
     setWorkStatus("loading");
-    setError("");
+    setError("Cargando cliente y trayendo informacion desde Sculpture...");
 
     try {
-      const report = await readJson<Report>(
+      const payload = await readJson<Report | { report: Report; syncResults: SyncResults }>(
         await fetch(`/api/module1/reports/current?clientId=${encodeURIComponent(clientId)}&periodId=${encodeURIComponent(periodId)}`),
       );
+      const report = "report" in payload ? payload.report : payload;
+      const syncResults = "syncResults" in payload ? payload.syncResults : {};
       setSelectedReport(report);
       setCommentsDraft(report.comments || "");
       setEmailDraft(report.emailDraft || "");
@@ -516,6 +534,7 @@ function App() {
         const exists = current.some((item) => item.id === report.id);
         return exists ? current.map((item) => (item.id === report.id ? report : item)) : [report, ...current];
       });
+      setError(syncStatusMessage(syncResults));
       setWorkStatus("ready");
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : "Error desconocido.");
@@ -529,7 +548,7 @@ function App() {
     setError("Intentando traer Variance e Intelipar desde Sculpture...");
 
     try {
-      const payload = await readJson<{ report: Report; syncResults: Record<string, { error?: string; rowsCount?: number }> }>(
+      const payload = await readJson<{ report: Report; syncResults: SyncResults }>(
         await fetch("/api/module1/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -540,15 +559,7 @@ function App() {
       setCommentsDraft(payload.report.comments || "");
       setEmailDraft(payload.report.emailDraft || "");
       setReports((current) => current.map((item) => (item.id === payload.report.id ? payload.report : item)));
-      const synced = Object.entries(payload.syncResults || {}).filter(([, result]) => !result.error).length;
-      const failed = Object.entries(payload.syncResults || {})
-        .filter(([, result]) => result.error)
-        .map(([source]) => sourceLabels[source] || source);
-      setError(
-        failed.length
-          ? `Sculpture respondio ${synced} fuente(s). Por revisar: ${failed.join(", ")}.`
-          : "Datos traidos desde Sculpture correctamente.",
-      );
+      setError(syncStatusMessage(payload.syncResults));
       setWorkStatus("ready");
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Error desconocido.");
