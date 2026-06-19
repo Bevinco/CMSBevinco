@@ -1,21 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
-  AlertTriangle,
   BarChart3,
   Bell,
   Bot,
   CheckCircle2,
   ClipboardList,
   Cloud,
+  Database,
   FileSpreadsheet,
+  FileText,
   LayoutDashboard,
+  ListChecks,
   Mail,
   PencilLine,
   Send,
   Settings,
   ShieldCheck,
-  Users,
+  ShoppingCart,
+  Workflow,
 } from "lucide-react";
 import "./styles.css";
 
@@ -63,6 +66,65 @@ const reports = [
     cost: "24.9%",
     variance: "-0.8%",
     updated: "12 Jun 2026",
+  },
+];
+
+const moduleRoadmap = [
+  {
+    number: "01",
+    title: "Reportes Bevinco",
+    status: "MVP activo",
+    description: "Automatiza Variance Report e Intelipar desde Sculpture, permite revisar comentarios y preparar envio.",
+    items: ["Variance detailed y summary", "Intelipar", "Comentarios editables", "PDF y email"],
+  },
+  {
+    number: "02",
+    title: "Clientes y criterios",
+    status: "Base inicial",
+    description: "Define reglas por cliente para mantener criterio operativo sin perder flexibilidad.",
+    items: ["Clientes", "Categorias", "Reglas", "Formatos"],
+  },
+  {
+    number: "03",
+    title: "Integraciones",
+    status: "En preparacion",
+    description: "Centraliza conexiones con Sculpture, ClickUp, Supabase, Resend y futuras fuentes.",
+    items: ["Sculpture", "ClickUp", "Supabase", "Resend"],
+  },
+  {
+    number: "04",
+    title: "Reservas y pagos",
+    status: "Futuro",
+    description: "Gestiona reservas, proveedores, codigos, pasajeros, vencimientos y alertas visuales.",
+    items: ["Reservas", "Pagos", "Alertas", "Proveedores"],
+  },
+];
+
+const reportWorkflow = [
+  {
+    icon: Database,
+    title: "Sincronizar datos",
+    detail: "Traer datos desde Sculpture por cliente, periodo y tipo de reporte.",
+  },
+  {
+    icon: BarChart3,
+    title: "Variance Report",
+    detail: "Leer food cost / pour cost en vista detailed y summary.",
+  },
+  {
+    icon: ShoppingCart,
+    title: "Intelipar",
+    detail: "Obtener sugerencias de compra, stock disponible y faltantes.",
+  },
+  {
+    icon: Bot,
+    title: "Analisis asistido",
+    detail: "Generar comentario base editable con criterios del cliente.",
+  },
+  {
+    icon: Send,
+    title: "Revision y envio",
+    detail: "Preparar correo, PDF adjunto y registro de estado.",
   },
 ];
 
@@ -163,7 +225,8 @@ function App() {
 
         <nav className="nav-list" aria-label="Modulos">
           <a href="#dashboard" className="active"><LayoutDashboard size={18} /> Inicio</a>
-          <a href="#reports"><ClipboardList size={18} /> Reportes</a>
+          <a href="#module-reports"><ClipboardList size={18} /> Modulo 1</a>
+          <a href="#roadmap"><Workflow size={18} /> Roadmap</a>
           <a href="#criteria"><ShieldCheck size={18} /> Criterios</a>
           <a href="#reservations"><Bell size={18} /> Reservas</a>
           <a href="#integrations"><Cloud size={18} /> Integraciones</a>
@@ -173,39 +236,79 @@ function App() {
       <section className="workspace">
         <header className="topbar" id="dashboard">
           <div>
-            <p className="eyebrow">MVP operativo</p>
-            <h1>Centro de gestion para reportes semanales</h1>
+            <p className="eyebrow">CMS modular</p>
+            <h1>Modulo 1: reportes automatizados Bevinco</h1>
           </div>
           <button className="primary-button"><Send size={18} /> Nuevo reporte</button>
         </header>
 
         <section className="metrics" aria-label="Resumen">
           <article>
-            <span><FileSpreadsheet size={18} /> Reportes activos</span>
-            <strong>12</strong>
-            <small>3 listos para revision</small>
+            <span><FileSpreadsheet size={18} /> Modulo activo</span>
+            <strong>01</strong>
+            <small>Reportes Bevinco</small>
           </article>
           <article>
-            <span><Users size={18} /> Clientes</span>
-            <strong>8</strong>
-            <small>Formatos configurables</small>
-          </article>
-          <article>
-            <span><BarChart3 size={18} /> Variance promedio</span>
-            <strong>-1.4%</strong>
-            <small>Ultimas 4 semanas</small>
-          </article>
-          <article>
-            <span><AlertTriangle size={18} /> Alertas reservas</span>
+            <span><FileText size={18} /> Reportes fuente</span>
             <strong>2</strong>
-            <small>Pagos por gestionar</small>
+            <small>Variance e Intelipar</small>
           </article>
+          <article>
+            <span><Cloud size={18} /> Conector</span>
+            <strong>1</strong>
+            <small>Sculpture web endpoint</small>
+          </article>
+          <article>
+            <span><ListChecks size={18} /> Roadmap</span>
+            <strong>4</strong>
+            <small>Modulos planificados</small>
+          </article>
+        </section>
+
+        <section className="module-roadmap" id="roadmap" aria-label="Roadmap de modulos">
+          {moduleRoadmap.map((module) => (
+            <article className="module-card" key={module.number}>
+              <div className="module-card-top">
+                <span>{module.number}</span>
+                <small>{module.status}</small>
+              </div>
+              <h2>{module.title}</h2>
+              <p>{module.description}</p>
+              <div className="module-tags">
+                {module.items.map((item) => <span key={item}>{item}</span>)}
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section className="panel module-one" id="module-reports">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Primer modulo propuesto</p>
+              <h2>Reportes Bevinco/Sculpture</h2>
+            </div>
+            <span className="pill success">En desarrollo</span>
+          </div>
+          <div className="workflow-list">
+            {reportWorkflow.map((step) => {
+              const Icon = step.icon;
+              return (
+                <article key={step.title}>
+                  <Icon size={20} />
+                  <div>
+                    <strong>{step.title}</strong>
+                    <small>{step.detail}</small>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </section>
 
         <section className="panel connector-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Conector activo</p>
+              <p className="eyebrow">Conector del modulo 1</p>
               <h2>Requisition & Transfers</h2>
             </div>
             <button className="secondary-button" onClick={loadSculptureRequisition}>
@@ -250,8 +353,8 @@ function App() {
           <div className="panel report-panel" id="reports">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Modulo 1</p>
-                <h2>Reportes Sculpture</h2>
+                <p className="eyebrow">Bandeja del modulo 1</p>
+                <h2>Reportes en revision</h2>
               </div>
               <button className="icon-button" aria-label="Configurar reportes"><Settings size={18} /></button>
             </div>
@@ -268,7 +371,7 @@ function App() {
                 <div className="table-row" key={report.id}>
                   <span>
                     <strong>{report.id}</strong>
-                    <small>{report.audit} · {report.updated}</small>
+                    <small>{report.audit} - {report.updated}</small>
                   </span>
                   <span>{report.client}</span>
                   <span>{report.cost}</span>
@@ -348,7 +451,7 @@ function App() {
                 <span className={alertClass(reservation.alert)} />
                 <strong>{reservation.code}</strong>
                 <p>{reservation.service}</p>
-                <small>{reservation.provider} · {reservation.passengers} pasajeros · vence {reservation.due}</small>
+                <small>{reservation.provider} - {reservation.passengers} pasajeros - vence {reservation.due}</small>
               </article>
             ))}
           </div>
