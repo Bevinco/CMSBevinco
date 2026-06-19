@@ -23,7 +23,8 @@ body {
 
 button,
 textarea,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -243,9 +244,20 @@ button:disabled {
 
 .secondary-button,
 .icon-button,
-.action-row button {
+.action-row button,
+.button-link {
   background: #e8eeee;
   color: #172026;
+}
+
+.button-link {
+  align-items: center;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  text-decoration: none;
 }
 
 .icon-button {
@@ -283,6 +295,38 @@ button:disabled {
 
 .metrics strong {
   font-size: 2rem;
+}
+
+.metric-status {
+  font-size: 1.35rem !important;
+}
+
+.control-bar {
+  align-items: end;
+  background: #ffffff;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+  padding: 18px;
+}
+
+.control-bar label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.control-bar select {
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  min-height: 40px;
+  padding: 0 10px;
 }
 
 .module-grid,
@@ -408,6 +452,11 @@ button:disabled {
   grid-template-columns: 1.2fr 1.2fr 0.7fr 0.7fr minmax(150px, 0.9fr);
   min-width: 760px;
   padding: 14px 0;
+}
+
+.compact-table .table-row {
+  grid-template-columns: 1.4fr 1fr 0.5fr;
+  min-width: 420px;
 }
 
 .table-head {
@@ -560,6 +609,137 @@ button:disabled {
   width: 10px;
 }
 
+.source-grid,
+.action-stack,
+.product-list,
+.report-list,
+.mini-roadmap {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.source-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.source-grid article,
+.product-list article,
+.mini-roadmap article,
+.purchase-grid article {
+  border: 1px solid #edf1f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.source-grid article {
+  align-content: space-between;
+}
+
+.action-stack button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.history-chart {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.history-chart article {
+  display: grid;
+  gap: 7px;
+}
+
+.history-chart span {
+  color: #172026;
+  font-weight: 800;
+}
+
+.history-chart small,
+.product-list small,
+.purchase-grid small,
+.report-list small,
+.mini-roadmap small,
+.muted-copy {
+  color: #6f7d79;
+}
+
+.bar-track {
+  background: #edf1f0;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.bar-track div {
+  background: #176b5a;
+  border-radius: inherit;
+  height: 100%;
+}
+
+.bar-track.variance div {
+  background: #f4b84a;
+}
+
+.draft-panel textarea,
+#comments textarea {
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  color: #22312d;
+  min-height: 160px;
+  margin: 18px 0 0;
+  padding: 14px;
+  resize: vertical;
+  width: 100%;
+}
+
+.purchase-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.purchase-grid p {
+  margin: 0;
+}
+
+.report-list button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #edf1f0;
+  display: flex;
+  justify-content: space-between;
+  min-height: 58px;
+  text-align: left;
+}
+
+.mini-roadmap article {
+  align-items: center;
+  display: flex;
+}
+
+.mini-roadmap span {
+  align-items: center;
+  background: #10201d;
+  border-radius: 8px;
+  color: #ffffff;
+  display: flex;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  width: 42px;
+}
+
+.muted-copy {
+  line-height: 1.55;
+  margin-bottom: 0;
+}
+
 .reservation-grid {
   display: grid;
   gap: 14px;
@@ -616,8 +796,14 @@ button:disabled {
 
   .metrics,
   .module-roadmap,
+  .source-grid,
+  .purchase-grid,
   .reservation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-bar {
+    grid-template-columns: 1fr 1fr;
   }
 
   .module-grid,
@@ -646,7 +832,14 @@ button:disabled {
 
   .metrics,
   .module-roadmap,
+  .source-grid,
+  .purchase-grid,
   .reservation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .control-bar {
+    align-items: stretch;
     grid-template-columns: 1fr;
   }
 }

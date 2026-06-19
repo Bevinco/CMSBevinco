@@ -70,6 +70,12 @@ SCULPTURE_BASE_URL=https://beta.food.sculpturehospitality.com
 SCULPTURE_SESSION_COOKIE=
 SCULPTURE_DEFAULT_CID=29088
 SCULPTURE_DEFAULT_PID=36
+SCULPTURE_VARIANCE_DETAILED_PATH=/reports/variance/
+SCULPTURE_VARIANCE_DETAILED_CMD=variance
+SCULPTURE_VARIANCE_SUMMARY_PATH=/reports/variance/
+SCULPTURE_VARIANCE_SUMMARY_CMD=variance
+SCULPTURE_INTELIPAR_PATH=/reports/intelipar/
+SCULPTURE_INTELIPAR_CMD=overview
 CMS_AUTH_USERNAME=
 CMS_AUTH_PASSWORD=
 CMS_SESSION_SECRET=
@@ -77,3 +83,5 @@ CMS_SESSION_SECRET=
 
 `SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
+
+Las rutas `SCULPTURE_VARIANCE_*` e `SCULPTURE_INTELIPAR_*` son configurables porque Sculpture no publica una API abierta. Deben reemplazarse por los endpoints internos reales capturados desde DevTools.
