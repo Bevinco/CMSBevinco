@@ -496,7 +496,7 @@ function App() {
       setReports((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setCommentsDraft(updated.comments || "");
       setEmailDraft(updated.emailDraft || "");
-      setError("Resumen ejecutivo generado con los datos cargados del reporte.");
+      setError("Reporte generado y guardado. Puedes abrirlo desde la bandeja de Reportes.");
       setWorkStatus("ready");
     } catch (summaryError) {
       setError(summaryError instanceof Error ? summaryError.message : "Error desconocido.");
@@ -540,6 +540,8 @@ function App() {
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
+  const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
+  const maxProductVariance = Math.max(...(selectedReport?.topProducts.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
@@ -868,23 +870,23 @@ function App() {
           <div className="panel" id="comments">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Editable</p>
-                <h2>Resumen ejecutivo del reporte</h2>
+                <p className="eyebrow">Reporte generado</p>
+                <h2>Resumen ejecutivo para cliente</h2>
               </div>
               <Bot size={22} />
             </div>
             <div className="summary-help">
-              <strong>Agente de resumen</strong>
-              <small>Genera un analisis editable usando ingresos, costo, variance, categorias, top productos e Intelipar del CSV cargado.</small>
+              <strong>Generador de reporte</strong>
+              <small>Usa los CSV cargados para armar el resumen, el email y dejar el reporte guardado en la bandeja de Reportes.</small>
             </div>
             <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
             <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
             <div className="action-row wrap-actions">
               <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
-                <Bot size={17} /> Generar resumen del reporte
+                <Bot size={17} /> Generar reporte
               </button>
               <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
-                <PencilLine size={17} /> Guardar resumen y email
+                <PencilLine size={17} /> Guardar cambios
               </button>
             </div>
           </div>
@@ -898,10 +900,20 @@ function App() {
                 <h2>Variaciones por categoria</h2>
               </div>
             </div>
-            <div className="table compact-table">
-              <div className="table-row table-head"><span>Categoria</span><span>Monto</span><span>%</span></div>
+            <div className="variance-chart">
               {selectedReport?.categoryVariances.map((item) => (
-                <div className="table-row" key={item.category}><span>{item.category}</span><span>{money(item.amount)}</span><span>{item.percent}%</span></div>
+                <article key={item.category}>
+                  <div>
+                    <strong>{item.category}</strong>
+                    <span className={item.amount < 0 ? "negative" : "positive"}>{money(item.amount)} - {item.percent}%</span>
+                  </div>
+                  <div className="chart-track">
+                    <div
+                      className={item.amount < 0 ? "negative-bar" : "positive-bar"}
+                      style={{ width: `${Math.max(8, (Math.abs(item.amount) / maxCategoryVariance) * 100)}%` }}
+                    />
+                  </div>
+                </article>
               ))}
             </div>
           </div>
@@ -913,11 +925,20 @@ function App() {
                 <h2>Top variaciones</h2>
               </div>
             </div>
-            <div className="product-list">
+            <div className="variance-chart">
               {selectedReport?.topProducts.map((item) => (
                 <article key={`${item.name}-${item.category}`}>
-                  <strong>{item.name}</strong>
-                  <small>{item.category} - {money(item.varianceAmount)} - {item.variancePercent}%</small>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <small>{item.category}</small>
+                    <span className={item.varianceAmount < 0 ? "negative" : "positive"}>{money(item.varianceAmount)} - {item.variancePercent}%</span>
+                  </div>
+                  <div className="chart-track">
+                    <div
+                      className={item.varianceAmount < 0 ? "negative-bar" : "positive-bar"}
+                      style={{ width: `${Math.max(8, (Math.abs(item.varianceAmount) / maxProductVariance) * 100)}%` }}
+                    />
+                  </div>
                 </article>
               ))}
             </div>
@@ -950,11 +971,12 @@ function App() {
         <section className="panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Bandeja</p>
+              <p className="eyebrow">Guardados</p>
               <h2>Reportes guardados</h2>
             </div>
             <ClipboardList size={22} />
           </div>
+          <p className="muted-copy">Cada reporte generado o editado queda guardado por cliente y periodo. Desde esta bandeja puedes abrirlo, revisarlo y exportarlo como PDF.</p>
           <div className="report-list">
             {reportRows.map((report) => (
               <button

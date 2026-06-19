@@ -820,6 +820,31 @@ function renderReportHtml(store, report) {
   const sourceRows = Object.entries(payload.sourceStatus || {})
     .map(([source, status]) => `<tr><td>${sourceLabelsForPdf[source] || source}</td><td><span class="badge neutral">${status}</span></td></tr>`)
     .join("");
+  const maxCategoryVariance = Math.max(...payload.categoryVariances.map((item) => Math.abs(item.amount)), 1);
+  const maxProductVariance = Math.max(...payload.topProducts.map((item) => Math.abs(item.varianceAmount)), 1);
+  const maxHistoryRevenue = Math.max(...payload.history.map((item) => item.revenue), 1);
+  const categoryChart = payload.categoryVariances
+    .slice(0, 8)
+    .map((item) => {
+      const width = Math.max(8, (Math.abs(item.amount) / maxCategoryVariance) * 100);
+      const tone = item.amount < 0 ? "bar negative" : "bar positive";
+      return `<div class="chart-row"><div class="chart-label"><strong>${item.category}</strong><span class="${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)} · ${item.percent}%</span></div><div class="chart-track"><div class="${tone}" style="width:${width}%"></div></div></div>`;
+    })
+    .join("");
+  const productChart = payload.topProducts
+    .slice(0, 8)
+    .map((item) => {
+      const width = Math.max(8, (Math.abs(item.varianceAmount) / maxProductVariance) * 100);
+      const tone = item.varianceAmount < 0 ? "bar negative" : "bar positive";
+      return `<div class="chart-row"><div class="chart-label"><strong>${item.name}</strong><span>${item.category}</span><span class="${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)} · ${item.variancePercent}%</span></div><div class="chart-track"><div class="${tone}" style="width:${width}%"></div></div></div>`;
+    })
+    .join("");
+  const historyChart = payload.history
+    .map((item) => {
+      const width = Math.max(8, (item.revenue / maxHistoryRevenue) * 100);
+      return `<div class="chart-row"><div class="chart-label"><strong>${item.label}</strong><span>${money.format(item.revenue)} · ${item.costPercent}% costo</span></div><div class="chart-track"><div class="bar positive" style="width:${width}%"></div></div></div>`;
+    })
+    .join("");
 
   return `<!doctype html>
 <html lang="es">
@@ -986,6 +1011,42 @@ function renderReportHtml(store, report) {
       padding: 16px;
       white-space: pre-wrap;
     }
+    .chart-list {
+      display: grid;
+      gap: 12px;
+    }
+    .chart-row {
+      display: grid;
+      gap: 8px;
+    }
+    .chart-label {
+      align-items: baseline;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      justify-content: space-between;
+    }
+    .chart-label span {
+      color: #526862;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .chart-track {
+      background: #edf1f0;
+      border-radius: 999px;
+      height: 10px;
+      overflow: hidden;
+    }
+    .bar {
+      border-radius: inherit;
+      height: 100%;
+    }
+    .bar.positive {
+      background: #176b5a;
+    }
+    .bar.negative {
+      background: #d66b58;
+    }
     .badge {
       border-radius: 999px;
       display: inline-flex;
@@ -1047,16 +1108,16 @@ function renderReportHtml(store, report) {
         </div>
         <div class="section">
           <div class="section-header"><h2>Historico ultimos 4 periodos</h2></div>
-          <div class="section-body"><table><thead><tr><th>Periodo</th><th>Ingresos</th><th>% Costo</th><th>Variance</th></tr></thead><tbody>${historyRows}</tbody></table></div>
+          <div class="section-body"><div class="chart-list">${historyChart}</div><table><thead><tr><th>Periodo</th><th>Ingresos</th><th>% Costo</th><th>Variance</th></tr></thead><tbody>${historyRows}</tbody></table></div>
         </div>
       </section>
       <section class="section">
         <div class="section-header"><h2>Variaciones por categoria</h2></div>
-        <div class="section-body"><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></div>
+        <div class="section-body"><div class="chart-list">${categoryChart}</div><table><thead><tr><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${categoryRows}</tbody></table></div>
       </section>
       <section class="section">
         <div class="section-header"><h2>Top productos con mayor variacion</h2></div>
-        <div class="section-body"><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></div>
+        <div class="section-body"><div class="chart-list">${productChart}</div><table><thead><tr><th>Producto</th><th>Categoria</th><th>Monto</th><th>%</th></tr></thead><tbody>${productRows}</tbody></table></div>
       </section>
       <section class="section">
         <div class="section-header"><h2>Sugerencia de compra Intelipar</h2></div>
