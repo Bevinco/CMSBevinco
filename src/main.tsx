@@ -142,6 +142,79 @@ const reportWorkflow = [
   },
 ];
 
+const moduleOneProcess = [
+  {
+    title: "1. Auditoria semanal",
+    detail: "El cliente o equipo Bevinco toma inventario en Sculpture y se cierra el periodo semanal.",
+    status: "Origen",
+  },
+  {
+    title: "2. Variance Report",
+    detail: "Se obtiene el detalle y resumen de diferencias, ingresos, costo real e ideal.",
+    status: "Activo con CSV",
+  },
+  {
+    title: "3. Intelipar",
+    detail: "Se revisa sugerencia de compra, stock, par, orden, proveedor y excesos.",
+    status: "Activo con CSV",
+  },
+  {
+    title: "4. Reporte Bevinco",
+    detail: "Se arma el resumen semanal con historico de 4 periodos, categorias y top productos.",
+    status: "En CMS",
+  },
+  {
+    title: "5. Revision humana",
+    detail: "Se editan comentarios, se validan proveedores y se marca como listo para revisar.",
+    status: "En CMS",
+  },
+  {
+    title: "6. Envio al cliente",
+    detail: "Se exporta PDF y se prepara email con registro de estado enviado.",
+    status: "Preparado",
+  },
+];
+
+const moduleOnePending = [
+  {
+    title: "Capturar endpoints internos",
+    detail: "Reemplazar rutas configurables por requests reales de Variance detailed, Variance summary e Intelipar desde DevTools.",
+    status: "Pendiente",
+  },
+  {
+    title: "Mapeo completo cliente/periodo",
+    detail: "Obtener IDs reales de Sculpture para todos los clientes, locales food/barra y periodos semanales.",
+    status: "Pendiente",
+  },
+  {
+    title: "Persistencia Supabase",
+    detail: "Migrar data/module1.json a tablas reales para no depender del filesystem de Render.",
+    status: "Pendiente",
+  },
+  {
+    title: "PDF final fiel a plantilla",
+    detail: "Ajustar export al formato visual exacto de las plantillas Bardot Barra/Cocina.",
+    status: "En curso",
+  },
+  {
+    title: "Envio real con Resend",
+    detail: "Configurar RESEND_API_KEY, remitente y destinatarios reales por cliente.",
+    status: "Preparado",
+  },
+  {
+    title: "ClickUp",
+    detail: "Disparar creacion de borrador cuando una auditoria pase a listo para reporte.",
+    status: "Pendiente",
+  },
+];
+
+function taskStatusClass(status: string) {
+  if (status === "Pendiente") return "task-status pending";
+  if (status === "En curso") return "task-status working";
+  if (status === "Preparado") return "task-status prepared";
+  return "task-status done";
+}
+
 const criteria = [
   "Comparar ventas, inventario y compras por categoria.",
   "Mantener comparacion de los ultimos cuatro periodos.",
@@ -596,6 +669,48 @@ function App() {
                 </article>
               );
             })}
+          </div>
+        </section>
+
+        <section className="module-grid">
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Lo que debe reflejar</p>
+                <h2>Proceso semanal real</h2>
+              </div>
+              <Workflow size={22} />
+            </div>
+            <div className="process-list">
+              {moduleOneProcess.map((step) => (
+                <article key={step.title}>
+                  <div>
+                    <strong>{step.title}</strong>
+                    <small>{step.detail}</small>
+                  </div>
+                  <span className={taskStatusClass(step.status)}>{step.status}</span>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Pendientes</p>
+                <h2>Para cerrar el modulo 1</h2>
+              </div>
+              <ListChecks size={22} />
+            </div>
+            <div className="pending-list">
+              {moduleOnePending.map((item) => (
+                <article key={item.title}>
+                  <span className={taskStatusClass(item.status)}>{item.status}</span>
+                  <strong>{item.title}</strong>
+                  <small>{item.detail}</small>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 

@@ -632,7 +632,9 @@ button:disabled {
 .action-stack,
 .product-list,
 .report-list,
-.mini-roadmap {
+.mini-roadmap,
+.process-list,
+.pending-list {
   display: grid;
   gap: 12px;
   margin-top: 18px;
@@ -645,12 +647,61 @@ button:disabled {
 .source-grid article,
 .product-list article,
 .mini-roadmap article,
-.purchase-grid article {
+.purchase-grid article,
+.process-list article,
+.pending-list article {
   border: 1px solid #edf1f0;
   border-radius: 8px;
   display: grid;
   gap: 8px;
   padding: 14px;
+}
+
+.process-list article {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.pending-list article {
+  align-content: start;
+}
+
+.process-list small,
+.pending-list small {
+  color: #6f7d79;
+  display: block;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.task-status {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 800;
+  justify-content: center;
+  max-width: max-content;
+  padding: 6px 9px;
+}
+
+.task-status.done {
+  background: #dff5ea;
+  color: #14633f;
+}
+
+.task-status.prepared {
+  background: #e7f0ff;
+  color: #244f8f;
+}
+
+.task-status.working {
+  background: #fff0c7;
+  color: #825a00;
+}
+
+.task-status.pending {
+  background: #fde4df;
+  color: #9b2d22;
 }
 
 .source-grid article {
