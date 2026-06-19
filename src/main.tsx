@@ -12,6 +12,8 @@ import {
   FileText,
   LayoutDashboard,
   ListChecks,
+  Lock,
+  LogOut,
   Mail,
   PencilLine,
   Send,
@@ -25,6 +27,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AlertLevel = "ok" | "warning" | "danger";
 type ConnectorStatus = "idle" | "loading" | "ready" | "error";
+type AuthStatus = "checking" | "authenticated" | "anonymous";
 
 type SculptureRow = {
   group: string;
@@ -74,8 +77,8 @@ const moduleRoadmap = [
     number: "01",
     title: "Reportes Bevinco",
     status: "MVP activo",
-    description: "Automatiza Variance Report e Intelipar desde Sculpture, permite revisar comentarios y preparar envio.",
-    items: ["Variance detailed y summary", "Intelipar", "Comentarios editables", "PDF y email"],
+    description: "Automatiza el reporte semanal que hoy se descarga de Sculpture, se pega en Excel y se comenta manualmente.",
+    items: ["Variance detailed y summary", "Intelipar", "Historico 4 periodos", "PDF y email"],
   },
   {
     number: "02",
@@ -104,32 +107,33 @@ const reportWorkflow = [
   {
     icon: Database,
     title: "Sincronizar datos",
-    detail: "Traer datos desde Sculpture por cliente, periodo y tipo de reporte.",
+    detail: "Traer datos semanales desde Sculpture por cliente, periodo y tipo de reporte.",
   },
   {
     icon: BarChart3,
     title: "Variance Report",
-    detail: "Leer food cost / pour cost en vista detailed y summary.",
+    detail: "Leer food cost / pour cost, variaciones por producto y resumen por categoria.",
   },
   {
     icon: ShoppingCart,
     title: "Intelipar",
-    detail: "Obtener sugerencias de compra, stock disponible y faltantes.",
+    detail: "Obtener sugerencia de compra y revisar proveedores o datos desactualizados.",
   },
   {
     icon: Bot,
-    title: "Analisis asistido",
-    detail: "Generar comentario base editable con criterios del cliente.",
+    title: "Dashboard semanal",
+    detail: "Mantener graficos consistentes con comparacion de los ultimos cuatro periodos.",
   },
   {
     icon: Send,
     title: "Revision y envio",
-    detail: "Preparar correo, PDF adjunto y registro de estado.",
+    detail: "Editar comentarios, preparar correo, PDF adjunto y registro de estado.",
   },
 ];
 
 const criteria = [
   "Comparar ventas, inventario y compras por categoria.",
+  "Mantener comparacion de los ultimos cuatro periodos.",
   "Marcar proveedores desactualizados antes de sugerir compras.",
   "Mantener comentarios editables antes del envio.",
   "Respetar el formato historico de graficos y resumen semanal.",
@@ -181,10 +185,113 @@ function alertClass(alert: AlertLevel) {
   return "signal ok";
 }
 
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submitLogin(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "No se pudo iniciar sesion.");
+      }
+
+      onLogin();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Error desconocido.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <div className="brand login-brand">
+          <div className="brand-mark">B</div>
+          <div>
+            <strong>Bevinco CMS</strong>
+            <span>Acceso interno</span>
+          </div>
+        </div>
+        <div>
+          <p className="eyebrow">Modulo 1</p>
+          <h1>Reportes automatizados Bevinco</h1>
+        </div>
+        <form className="login-form" onSubmit={submitLogin}>
+          <label>
+            Usuario
+            <input
+              autoComplete="username"
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              type="text"
+              value={username}
+            />
+          </label>
+          <label>
+            Contrasena
+            <input
+              autoComplete="current-password"
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          {error ? <p className="login-error">{error}</p> : null}
+          <button className="primary-button" disabled={submitting} type="submit">
+            <Lock size={17} /> {submitting ? "Entrando" : "Entrar"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 function App() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
+  const [currentUser, setCurrentUser] = useState("");
   const [connectorStatus, setConnectorStatus] = useState<ConnectorStatus>("idle");
   const [connectorError, setConnectorError] = useState("");
   const [sculptureData, setSculptureData] = useState<SculptureResponse | null>(null);
+
+  async function checkSession() {
+    try {
+      const response = await fetch("/api/auth/me");
+      const payload = await response.json();
+
+      if (payload.authenticated) {
+        setCurrentUser(payload.user?.username || "");
+        setAuthStatus("authenticated");
+        return;
+      }
+    } catch {
+      setCurrentUser("");
+    }
+
+    setAuthStatus("anonymous");
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setCurrentUser("");
+    setSculptureData(null);
+    setConnectorStatus("idle");
+    setAuthStatus("anonymous");
+  }
 
   async function loadSculptureRequisition() {
     setConnectorStatus("loading");
@@ -207,10 +314,34 @@ function App() {
   }
 
   useEffect(() => {
-    loadSculptureRequisition();
+    checkSession();
   }, []);
 
+  useEffect(() => {
+    if (authStatus === "authenticated") {
+      loadSculptureRequisition();
+    }
+  }, [authStatus]);
+
   const previewRows = useMemo(() => sculptureData?.rows.slice(0, 8) || [], [sculptureData]);
+
+  if (authStatus === "checking") {
+    return (
+      <main className="loading-shell">
+        <div className="brand">
+          <div className="brand-mark">B</div>
+          <div>
+            <strong>Bevinco CMS</strong>
+            <span>Validando sesion</span>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (authStatus === "anonymous") {
+    return <LoginScreen onLogin={checkSession} />;
+  }
 
   return (
     <main className="app-shell">
@@ -239,7 +370,11 @@ function App() {
             <p className="eyebrow">CMS modular</p>
             <h1>Modulo 1: reportes automatizados Bevinco</h1>
           </div>
-          <button className="primary-button"><Send size={18} /> Nuevo reporte</button>
+          <div className="topbar-actions">
+            <span>{currentUser}</span>
+            <button className="primary-button"><Send size={18} /> Nuevo reporte</button>
+            <button className="secondary-button" onClick={logout}><LogOut size={17} /> Salir</button>
+          </div>
         </header>
 
         <section className="metrics" aria-label="Resumen">

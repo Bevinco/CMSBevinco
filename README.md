@@ -50,6 +50,8 @@ El backend Express sirve el sitio compilado y expone el endpoint seguro:
 GET /api/sculpture/requisition
 ```
 
+El CMS requiere login por usuario y contrasena. Las credenciales se leen desde variables de entorno del servidor.
+
 ## Variables de entorno
 
 Copiar `.env.example` a `.env` y completar las claves cuando esten disponibles.
@@ -68,6 +70,10 @@ SCULPTURE_BASE_URL=https://beta.food.sculpturehospitality.com
 SCULPTURE_SESSION_COOKIE=
 SCULPTURE_DEFAULT_CID=29088
 SCULPTURE_DEFAULT_PID=36
+CMS_AUTH_USERNAME=
+CMS_AUTH_PASSWORD=
+CMS_SESSION_SECRET=
 ```
 
 `SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture.
+`CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
