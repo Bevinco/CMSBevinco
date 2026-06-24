@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   BarChart3,
   Bot,
+  Building2,
   ClipboardList,
   Cloud,
   Database,
@@ -14,6 +15,7 @@ import {
   LogOut,
   Mail,
   PencilLine,
+  Plus,
   Printer,
   RefreshCw,
   Send,
@@ -32,6 +34,8 @@ type ActiveView = "dashboard" | "module1" | "reports" | "criteria";
 type Client = {
   id: string;
   name: string;
+  accountName?: string;
+  moduleName?: string;
   cid: string;
   sculptureCid?: string;
   area: string;
@@ -211,6 +215,26 @@ const sourceLabels: Record<string, string> = {
   intelipar: "Intelipar",
 };
 
+function clientAccountLabel(client?: Client | null) {
+  if (!client) return "Sin cliente";
+  if (client.accountName) return client.accountName;
+  return client.name.split(/\s[-·]\s/)[0] || client.name;
+}
+
+function clientUnitLabel(client?: Client | null) {
+  if (!client) return "Sin unidad";
+  if (client.moduleName) return client.moduleName;
+  if (client.name.includes(" - ")) return client.name.split(" - ").slice(1).join(" - ");
+  if (client.name.includes(" · ")) return client.name.split(" · ").slice(1).join(" · ");
+  return client.area || client.name;
+}
+
+function clientDisplayName(client: Client) {
+  const account = clientAccountLabel(client);
+  const unit = clientUnitLabel(client);
+  return account && unit && account !== unit ? `${account} · ${unit}` : client.name;
+}
+
 function syncStatusMessage(syncResults: SyncResults = {}) {
   const entries = Object.entries(syncResults);
   if (!entries.length) return "";
@@ -335,6 +359,13 @@ function App() {
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
+  const [newUnit, setNewUnit] = useState({
+    accountName: "",
+    moduleName: "",
+    area: "Food",
+    sculptureCid: "",
+    recipients: "",
+  });
 
   async function checkSession() {
     try {
@@ -457,6 +488,52 @@ function App() {
       setWorkStatus("error");
     } finally {
       window.clearTimeout(timeoutId);
+    }
+  }
+
+  async function createReportingUnit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const accountName = newUnit.accountName.trim();
+    const moduleName = newUnit.moduleName.trim();
+    const sculptureCid = newUnit.sculptureCid.trim();
+
+    if (!accountName || !moduleName) {
+      setError("Completa cliente y unidad para crear una nueva unidad de reporte.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Creando unidad de reporte...");
+
+    try {
+      const payload = await readJson<{ client: Client; clients: Client[] }>(
+        await fetch("/api/module1/clients", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountName,
+            moduleName,
+            name: `${accountName} - ${moduleName}`,
+            cid: sculptureCid || `${accountName}-${moduleName}`,
+            sculptureCid,
+            area: newUnit.area,
+            recipients: newUnit.recipients
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+          }),
+        }),
+      );
+      setClients(payload.clients);
+      setSelectedClientId(payload.client.id);
+      setNewUnit({ accountName, moduleName: "", area: "Food", sculptureCid: "", recipients: "" });
+      await loadSelectedReport(payload.client.id, selectedPeriodId);
+      setError(`Unidad creada: ${clientDisplayName(payload.client)}. Ahora puedes cargar CSV o sincronizar Sculpture.`);
+      setWorkStatus("ready");
+    } catch (unitError) {
+      setError(unitError instanceof Error ? unitError.message : "Error desconocido.");
+      setWorkStatus("error");
     }
   }
 
@@ -643,6 +720,7 @@ function App() {
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
   const maxProductVariance = Math.max(...(selectedReport?.topProducts.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
+  const selectedClient = clients.find((client) => client.id === selectedClientId) || selectedReport?.client || null;
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
@@ -744,7 +822,7 @@ function App() {
           <>
         <section className="control-bar">
           <label>
-            Cliente
+            Cliente / unidad
             <select
               value={selectedClientId}
               onChange={(event) => {
@@ -752,7 +830,7 @@ function App() {
                 loadSelectedReport(event.target.value, selectedPeriodId);
               }}
             >
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              {clients.map((client) => <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>)}
             </select>
           </label>
           <label>
@@ -771,7 +849,7 @@ function App() {
             <RefreshCw size={17} /> Sincronizar fuentes
           </button>
           <button className="secondary-button" disabled={workStatus === "loading"} onClick={importSamples}>
-            <Database size={17} /> Restaurar Bardot
+            <Database size={17} /> Cargar ejemplo Bardot
           </button>
           {selectedReport ? (
             <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
@@ -781,6 +859,88 @@ function App() {
         </section>
 
         {error ? <p className="connector-error">{error}</p> : null}
+
+        <section className="panel unit-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Cliente y unidad</p>
+              <h2>Unidad de reporte seleccionada</h2>
+            </div>
+            <Building2 size={22} />
+          </div>
+          <div className="unit-grid">
+            <div className="unit-summary">
+              <article>
+                <span>Cliente</span>
+                <strong>{clientAccountLabel(selectedClient)}</strong>
+              </article>
+              <article>
+                <span>Unidad / modulo</span>
+                <strong>{clientUnitLabel(selectedClient)}</strong>
+              </article>
+              <article>
+                <span>Sculpture CID</span>
+                <strong>{selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
+              </article>
+              <article>
+                <span>Area</span>
+                <strong>{selectedClient?.area || "Food"}</strong>
+              </article>
+            </div>
+
+            <form className="unit-form" onSubmit={createReportingUnit}>
+              <div>
+                <p className="eyebrow">Agregar otro cliente/local</p>
+                <strong>Crear unidad para probar Sculpture</strong>
+              </div>
+              <div className="unit-form-grid">
+                <label>
+                  Cliente
+                  <input
+                    placeholder="Ej. Bardot"
+                    value={newUnit.accountName}
+                    onChange={(event) => setNewUnit((current) => ({ ...current, accountName: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Unidad / modulo
+                  <input
+                    placeholder="Ej. Barra, Cocina, Vitacura"
+                    value={newUnit.moduleName}
+                    onChange={(event) => setNewUnit((current) => ({ ...current, moduleName: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Area
+                  <select value={newUnit.area} onChange={(event) => setNewUnit((current) => ({ ...current, area: event.target.value }))}>
+                    <option value="Food">Cocina / Food</option>
+                    <option value="Beverage">Barra / Beverage</option>
+                  </select>
+                </label>
+                <label>
+                  Sculpture CID
+                  <input
+                    inputMode="numeric"
+                    placeholder="Ej. 29088"
+                    value={newUnit.sculptureCid}
+                    onChange={(event) => setNewUnit((current) => ({ ...current, sculptureCid: event.target.value }))}
+                  />
+                </label>
+                <label className="wide-field">
+                  Emails de envio
+                  <input
+                    placeholder="cliente@empresa.com, operaciones@empresa.com"
+                    value={newUnit.recipients}
+                    onChange={(event) => setNewUnit((current) => ({ ...current, recipients: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <button className="secondary-button" disabled={workStatus === "loading"} type="submit">
+                <Plus size={17} /> Crear unidad
+              </button>
+            </form>
+          </div>
+        </section>
 
         <section className="metrics" aria-label="Resumen">
           <article>

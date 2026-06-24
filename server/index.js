@@ -48,7 +48,9 @@ const sampleDefinitions = [
   {
     client: {
       id: "bardot-barra",
-      name: "Bardot Barra",
+      name: "Bardot - Barra",
+      accountName: "Bardot",
+      moduleName: "Barra",
       cid: "bardot-barra",
       sculptureCid: defaultCid,
       area: "Beverage",
@@ -60,7 +62,9 @@ const sampleDefinitions = [
   {
     client: {
       id: "bardot-cocina",
-      name: "Bardot Cocina",
+      name: "Bardot - Cocina",
+      accountName: "Bardot",
+      moduleName: "Cocina",
       cid: "bardot-cocina",
       sculptureCid: defaultCid,
       area: "Food",
@@ -833,13 +837,18 @@ function slugify(value) {
 }
 
 function ensureClient(store, clientInput) {
-  const id = clientInput.id || slugify(clientInput.name);
+  const accountName = clientInput.accountName || clientInput.organizationName || "";
+  const moduleName = clientInput.moduleName || clientInput.unitName || "";
+  const composedName = accountName && moduleName ? `${accountName} - ${moduleName}` : "";
+  const id = clientInput.id || slugify(clientInput.name || composedName);
   let client = store.clients.find((candidate) => candidate.id === id);
 
   if (!client) {
     client = {
       id,
-      name: clientInput.name || id,
+      name: clientInput.name || composedName || id,
+      accountName,
+      moduleName,
       cid: clientInput.cid || id,
       sculptureCid: clientInput.sculptureCid || clientInput.cid || "",
       area: clientInput.area || "Food",
@@ -848,7 +857,9 @@ function ensureClient(store, clientInput) {
     store.clients.push(client);
   } else {
     Object.assign(client, {
-      name: clientInput.name || client.name,
+      name: clientInput.name || composedName || client.name,
+      accountName: accountName || client.accountName,
+      moduleName: moduleName || client.moduleName,
       cid: clientInput.cid || client.cid,
       sculptureCid: clientInput.sculptureCid || client.sculptureCid || clientInput.cid || client.cid,
       area: clientInput.area || client.area,
