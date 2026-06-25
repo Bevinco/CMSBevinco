@@ -72,6 +72,8 @@ VITE_SCULPTURE_API_BASE_URL=
 VITE_SCULPTURE_API_KEY=
 VITE_OPENAI_API_KEY=
 SCULPTURE_BASE_URL=https://beta.food.sculpturehospitality.com
+SCULPTURE_FOOD_BASE_URL=https://beta.food.sculpturehospitality.com
+SCULPTURE_BEVERAGE_BASE_URL=https://beta.beverage.sculpturehospitality.com
 SCULPTURE_SESSION_COOKIE=
 SCULPTURE_USERNAME=
 SCULPTURE_PASSWORD=
@@ -95,4 +97,4 @@ CMS_SESSION_SECRET=
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
 Para ClickUp, usar `CLICKUP_API_TOKEN` si se trabaja con token personal. Si se usa OAuth, configurar `CLICKUP_CLIENT_ID`, `CLICKUP_CLIENT_SECRET` y conectar desde el CMS con el `code`; el endpoint de intercambio usado es `POST /oauth/token`. `CLICKUP_LIST_ID` define la lista donde se crean las tareas de reportes.
 
-El CMS intenta traer Variance detailed, Variance summary e Intelipar desde los endpoints internos de Sculpture al sincronizar fuentes y antes de generar el reporte. Para clientes o periodos reales, guardar `sculptureCid` en el cliente y `sculpturePid`/`pid` en el periodo; si faltan, usa `SCULPTURE_DEFAULT_CID` y `SCULPTURE_DEFAULT_PID`.
+El CMS intenta traer Variance detailed, Variance summary e Intelipar desde los endpoints internos de Sculpture al sincronizar fuentes y antes de generar el reporte. Desde Modulo 1 se puede buscar la lista de unidades visibles en Sculpture, importar la unidad al CMS y guardar su `sculptureCid` con el host correcto de Food o Beverage. Para periodos reales, guardar `sculpturePid`/`pid`; si faltan, usa `SCULPTURE_DEFAULT_CID` y `SCULPTURE_DEFAULT_PID`.

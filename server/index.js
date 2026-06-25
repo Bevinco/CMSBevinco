@@ -12,6 +12,10 @@ const port = process.env.PORT || 3000;
 
 const sculptureBaseUrl =
   process.env.SCULPTURE_BASE_URL || "https://beta.food.sculpturehospitality.com";
+const sculptureFoodBaseUrl =
+  process.env.SCULPTURE_FOOD_BASE_URL || sculptureBaseUrl;
+const sculptureBeverageBaseUrl =
+  process.env.SCULPTURE_BEVERAGE_BASE_URL || "https://beta.beverage.sculpturehospitality.com";
 const defaultCid = process.env.SCULPTURE_DEFAULT_CID || "29088";
 const defaultPid = process.env.SCULPTURE_DEFAULT_PID || "36";
 const sculptureUsername =
@@ -38,7 +42,7 @@ const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
 const publicDir = path.resolve(__dirname, "public");
-let sculptureSessionCookieCache = "";
+const sculptureSessionCookieCache = new Map();
 let clickupAccessTokenCache = "";
 
 app.use(express.json({ limit: "15mb" }));
@@ -244,14 +248,20 @@ function looksLikeSculptureLogin(html) {
   return body.includes("password") && (body.includes("login") || body.includes("sign in") || body.includes("usuario"));
 }
 
-async function fetchSculptureLoginCookie() {
+function baseUrlForSculptureArea(area = "") {
+  return String(area || "").toLowerCase().includes("beverage") || String(area || "").toLowerCase().includes("barra")
+    ? sculptureBeverageBaseUrl
+    : sculptureFoodBaseUrl;
+}
+
+async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl) {
   if (!sculptureUsername || !sculpturePassword) return "";
 
-  const loginUrl = new URL(sculptureLoginPath, sculptureBaseUrl).toString();
+  const loginUrl = new URL(sculptureLoginPath, baseUrl).toString();
   const loginPageResponse = await fetch(loginUrl, {
     headers: {
       accept: "text/html,application/xhtml+xml",
-      referer: `${sculptureBaseUrl}/`,
+      referer: `${baseUrl}/`,
     },
     redirect: "manual",
   });
@@ -288,7 +298,7 @@ async function fetchSculptureLoginCookie() {
       accept: "text/html, */*; q=0.01",
       "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
       cookie: loginPageCookie,
-      origin: sculptureBaseUrl,
+      origin: baseUrl,
       referer: loginUrl,
     },
     body,
@@ -313,15 +323,15 @@ async function fetchSculptureLoginCookie() {
     await loginResponse.arrayBuffer();
   }
 
-  sculptureSessionCookieCache = cookie;
+  sculptureSessionCookieCache.set(baseUrl, cookie);
   return cookie;
 }
 
-async function getSculptureCookie({ forceLogin = false } = {}) {
+async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodBaseUrl } = {}) {
   if (!forceLogin && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
-  if (!forceLogin && sculptureSessionCookieCache) return sculptureSessionCookieCache;
+  if (!forceLogin && sculptureSessionCookieCache.get(baseUrl)) return sculptureSessionCookieCache.get(baseUrl);
 
-  const cookie = await fetchSculptureLoginCookie();
+  const cookie = await fetchSculptureLoginCookie(baseUrl);
   if (cookie) return cookie;
 
   const error = new Error("SCULPTURE_SESSION_COOKIE or SCULPTURE_USERNAME/SCULPTURE_PASSWORD must be configured.");
@@ -331,6 +341,136 @@ async function getSculptureCookie({ forceLogin = false } = {}) {
 
 function configuredIdentifier(...values) {
   return values.find((value) => /^\d+$/.test(String(value || "").trim())) || "";
+}
+
+function cleanSculptureUnitName(value = "") {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^(select|seleccionar|choose)\s+/i, "")
+    .trim();
+}
+
+function extractCidFromValue(value = "") {
+  const text = String(value || "");
+  return (
+    text.match(/[?&]cid=(\d+)/i)?.[1] ||
+    text.match(/(?:^|[^\d])cid[/:=-](\d+)/i)?.[1] ||
+    text.match(/(?:client|company|location|restaurant)[_-]?id[/:=-](\d+)/i)?.[1] ||
+    ""
+  );
+}
+
+function parseSculptureUnitsFromHtml(html, { area, baseUrl }) {
+  const $ = cheerio.load(html);
+  const units = new Map();
+  const addUnit = ({ cid, name, href = "", externalCode = "" }) => {
+    const cleanName = cleanSculptureUnitName(name);
+    const resolvedCid = configuredIdentifier(cid, extractCidFromValue(href));
+    if (!resolvedCid || !cleanName || cleanName.length < 3) return;
+    if (/sign out|support|account|detailed reporting|home|inventory|reports/i.test(cleanName)) return;
+
+    const accountName = cleanName
+      .replace(/^\d+\s+/, "")
+      .replace(/\s*[-·]\s*(barra|bar|cocina|food|beverage)$/i, "")
+      .trim();
+    const moduleName = /barra|bar|beverage/i.test(`${cleanName} ${area}`)
+      ? "Barra"
+      : /cocina|food/i.test(`${cleanName} ${area}`)
+        ? "Cocina"
+        : area;
+    const id = `${resolvedCid}-${moduleName}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+    units.set(`${resolvedCid}-${area}`, {
+      id,
+      name: `${accountName || cleanName} - ${moduleName}`,
+      accountName: accountName || cleanName,
+      moduleName,
+      cid: resolvedCid,
+      sculptureCid: resolvedCid,
+      externalCode,
+      area,
+      baseUrl,
+      source: "sculpture",
+    });
+  };
+
+  $("option").each((_, option) => {
+    const element = $(option);
+    const value = element.attr("value") || "";
+    addUnit({
+      cid: element.attr("data-cid") || element.attr("data-client-id") || element.attr("data-company-id") || configuredIdentifier(value, extractCidFromValue(value)),
+      name: element.text(),
+      href: value,
+    });
+  });
+
+  $("a, button, [data-cid], [data-client-id], [data-company-id]").each((_, node) => {
+    const element = $(node);
+    const href = element.attr("href") || element.attr("data-url") || element.attr("value") || "";
+    const label = element.text() || element.attr("title") || element.attr("aria-label") || "";
+    addUnit({
+      cid: element.attr("data-cid") || element.attr("data-client-id") || element.attr("data-company-id") || configuredIdentifier(element.attr("value"), extractCidFromValue(href)),
+      name: label,
+      href,
+    });
+  });
+
+  return Array.from(units.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
+  const requestPage = async (cookie) => {
+    const response = await fetch(new URL(pagePath, baseUrl).toString(), {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        cookie,
+        referer: `${baseUrl}/`,
+      },
+    });
+    const html = await response.text();
+    return { response, html };
+  };
+  let cookie = await getSculptureCookie({ baseUrl });
+  let { response, html } = await requestPage(cookie);
+
+  if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
+    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+    ({ response, html } = await requestPage(cookie));
+  }
+
+  if (!response.ok || looksLikeSculptureLogin(html)) {
+    const error = new Error(`Unable to load Sculpture page ${pagePath}.`);
+    error.status = response.status || 401;
+    error.details = html.slice(0, 500);
+    throw error;
+  }
+
+  return html;
+}
+
+async function discoverSculptureUnits() {
+  const targets = [
+    { area: "Food", baseUrl: sculptureFoodBaseUrl, paths: ["/", "/reports/variance/", "/requisition/"] },
+    { area: "Beverage", baseUrl: sculptureBeverageBaseUrl, paths: ["/", "/reports/variance/", "/requisition/"] },
+  ];
+  const units = new Map();
+  const errors = [];
+
+  for (const target of targets) {
+    for (const pagePath of target.paths) {
+      try {
+        const html = await fetchSculpturePage({ baseUrl: target.baseUrl, path: pagePath });
+        parseSculptureUnitsFromHtml(html, target).forEach((unit) => units.set(`${unit.sculptureCid}-${unit.area}`, unit));
+      } catch (error) {
+        errors.push({ area: target.area, path: pagePath, error: error.message });
+      }
+    }
+  }
+
+  return {
+    units: Array.from(units.values()).sort((left, right) => left.name.localeCompare(right.name)),
+    errors,
+  };
 }
 
 function resolveSculptureContext({ client, period, requestBody = {} }) {
@@ -862,6 +1002,7 @@ function ensureClient(store, clientInput) {
       moduleName,
       cid: clientInput.cid || id,
       sculptureCid: clientInput.sculptureCid || clientInput.cid || "",
+      sculptureBaseUrl: clientInput.sculptureBaseUrl || clientInput.baseUrl || "",
       area: clientInput.area || "Food",
       recipients: clientInput.recipients || [],
     };
@@ -873,6 +1014,7 @@ function ensureClient(store, clientInput) {
       moduleName: moduleName || client.moduleName,
       cid: clientInput.cid || client.cid,
       sculptureCid: clientInput.sculptureCid || client.sculptureCid || clientInput.cid || client.cid,
+      sculptureBaseUrl: clientInput.sculptureBaseUrl || clientInput.baseUrl || client.sculptureBaseUrl,
       area: clientInput.area || client.area,
       recipients: clientInput.recipients || client.recipients,
     });
@@ -1271,7 +1413,7 @@ async function getClickupTasks({
   };
 }
 
-async function fetchSculptureInternalReport({ type, cid, pid }) {
+async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", baseUrl = baseUrlForSculptureArea(area) }) {
   const reportConfig = {
     varianceDetailed: {
       path: process.env.SCULPTURE_VARIANCE_DETAILED_PATH || "/reports/variance/",
@@ -1309,14 +1451,14 @@ async function fetchSculptureInternalReport({ type, cid, pid }) {
 
   const body = new URLSearchParams(reportConfig.payload);
   const requestReport = async (cookie) => {
-    const response = await fetch(`${sculptureBaseUrl}${reportConfig.path}`, {
+    const response = await fetch(`${baseUrl}${reportConfig.path}`, {
       method: "POST",
       headers: {
         accept: "text/html, */*; q=0.01",
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
         cookie,
-        origin: sculptureBaseUrl,
-        referer: `${sculptureBaseUrl}/`,
+        origin: baseUrl,
+        referer: `${baseUrl}/`,
         "x-requested-with": "XMLHttpRequest",
       },
       body,
@@ -1325,11 +1467,11 @@ async function fetchSculptureInternalReport({ type, cid, pid }) {
     return { response, html };
   };
 
-  let cookie = await getSculptureCookie();
+  let cookie = await getSculptureCookie({ baseUrl });
   let { response, html } = await requestReport(cookie);
 
   if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
-    cookie = await getSculptureCookie({ forceLogin: true });
+    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
     ({ response, html } = await requestReport(cookie));
   }
 
@@ -1350,6 +1492,7 @@ async function fetchSculptureInternalReport({ type, cid, pid }) {
   return {
     type,
     endpoint: reportConfig.path,
+    baseUrl,
     cid,
     pid,
     ...parseSculptureTable(html),
@@ -1360,6 +1503,8 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
   const { cid, pid, cidSource, pidSource } = resolveSculptureContext({ client, period, requestBody });
+  const area = client?.area || requestBody.area || "Food";
+  const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
   const syncResults = {};
 
   if (!cid || !pid) {
@@ -1374,11 +1519,12 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
   for (const type of ["varianceDetailed", "varianceSummary", "intelipar"]) {
     try {
-      const data = await fetchSculptureInternalReport({ type, cid, pid });
+      const data = await fetchSculptureInternalReport({ type, cid, pid, area, baseUrl });
       syncResults[type] = {
         ...data,
         cidSource,
         pidSource,
+        area,
         rowsCount: data.rows?.length || 0,
       };
       report.sourceStatus[type] = data.rows?.length ? "Sincronizado" : "Sin datos";
@@ -2264,6 +2410,48 @@ app.post("/api/module1/clients", requireAuth, async (request, response) => {
   const client = ensureClient(store, request.body || {});
   await writeStore(store);
   response.json({ client, clients: store.clients });
+});
+
+app.get("/api/module1/sculpture-units", requireAuth, async (_request, response) => {
+  try {
+    const payload = await discoverSculptureUnits();
+    response.json(payload);
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to discover Sculpture units.",
+      details: error.details,
+    });
+  }
+});
+
+app.post("/api/module1/sculpture-units/import", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const unit = request.body || {};
+
+  if (!unit.sculptureCid && !unit.cid) {
+    response.status(400).json({ error: "Sculpture cid is required." });
+    return;
+  }
+
+  const client = ensureClient(store, {
+    ...unit,
+    cid: unit.sculptureCid || unit.cid,
+    sculptureCid: unit.sculptureCid || unit.cid,
+    sculptureBaseUrl: unit.baseUrl || unit.sculptureBaseUrl || baseUrlForSculptureArea(unit.area),
+    recipients: unit.recipients || [],
+  });
+  const periodId = unit.periodId && store.periods.some((period) => period.id === unit.periodId)
+    ? unit.periodId
+    : store.periods[0]?.id;
+  const report = reportForClientPeriod(store, client.id, periodId || defaultPid);
+  await writeStore(store);
+
+  response.json({
+    client,
+    clients: store.clients,
+    selectedReport: buildReportPayload(store, report),
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+  });
 });
 
 app.post("/api/module1/periods", requireAuth, async (request, response) => {

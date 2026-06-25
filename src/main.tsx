@@ -39,8 +39,21 @@ type Client = {
   moduleName?: string;
   cid: string;
   sculptureCid?: string;
+  sculptureBaseUrl?: string;
   area: string;
   recipients: string[];
+};
+
+type SculptureUnit = {
+  id: string;
+  name: string;
+  accountName: string;
+  moduleName: string;
+  cid: string;
+  sculptureCid: string;
+  area: string;
+  baseUrl?: string;
+  sculptureBaseUrl?: string;
 };
 
 type Period = {
@@ -407,6 +420,8 @@ function App() {
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
+  const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
+  const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
@@ -713,6 +728,65 @@ function App() {
       setWorkStatus("ready");
     } catch (unitError) {
       setError(unitError instanceof Error ? unitError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function loadSculptureUnits() {
+    setWorkStatus("loading");
+    setError("Buscando clientes y unidades visibles en Sculpture...");
+
+    try {
+      const payload = await readJson<{ units: SculptureUnit[]; errors?: Array<{ area: string; path: string; error: string }> }>(
+        await fetch("/api/module1/sculpture-units"),
+      );
+      const units = payload.units || [];
+      setSculptureUnits(units);
+      setSelectedSculptureUnitId((current) => current || units[0]?.id || "");
+      setError(
+        units.length
+          ? `Sculpture devolvio ${units.length} unidad(es). Elige una para crearle reportes.`
+          : "No se detectaron unidades en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
+      );
+      setWorkStatus(units.length ? "ready" : "error");
+    } catch (unitError) {
+      setSculptureUnits([]);
+      setSelectedSculptureUnitId("");
+      setError(unitError instanceof Error ? unitError.message : "No se pudo leer la lista de Sculpture.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function importSelectedSculptureUnit(unitId = selectedSculptureUnitId) {
+    const unit = sculptureUnits.find((item) => item.id === unitId);
+    if (!unit) {
+      setError("Primero busca y selecciona una unidad de Sculpture.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Agregando unidad de Sculpture al modulo...");
+
+    try {
+      const payload = await readJson<{ client: Client; clients: Client[]; selectedReport: Report; reports: Report[] }>(
+        await fetch("/api/module1/sculpture-units/import", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...unit, periodId: selectedPeriodId }),
+        }),
+      );
+      setClients(payload.clients);
+      setReports(payload.reports);
+      setSelectedClientId(payload.client.id);
+      setSelectedReport(payload.selectedReport);
+      setSelectedPeriodId(payload.selectedReport.periodId);
+      setCommentsDraft(payload.selectedReport.comments || "");
+      setEmailDraft(payload.selectedReport.emailDraft || "");
+      setError(`Unidad agregada: ${clientDisplayName(payload.client)}. Ahora sincroniza las fuentes del periodo.`);
+      setWorkStatus("ready");
+    } catch (unitError) {
+      setError(unitError instanceof Error ? unitError.message : "No se pudo agregar la unidad de Sculpture.");
       setWorkStatus("error");
     }
   }
@@ -1129,6 +1203,10 @@ function App() {
                 <span>Area</span>
                 <strong>{selectedClient?.area || "Food"}</strong>
               </article>
+              <article>
+                <span>Origen</span>
+                <strong>{selectedClient?.sculptureBaseUrl?.includes("beverage") ? "Beverage" : "Food"}</strong>
+              </article>
             </div>
 
             <form className="unit-form" onSubmit={createReportingUnit}>
@@ -1182,6 +1260,43 @@ function App() {
                 <Plus size={17} /> Crear unidad
               </button>
             </form>
+          </div>
+          <div className="sculpture-picker">
+            <div>
+              <p className="eyebrow">Directo desde Sculpture</p>
+              <strong>Elegir cliente/local visible para esta cuenta</strong>
+              <small>Busca unidades en Food y Beverage, guarda el CID correcto y luego usa el periodo seleccionado para generar el reporte.</small>
+            </div>
+            <div className="sculpture-picker-row">
+              <label>
+                Unidad detectada
+                <select
+                  value={selectedSculptureUnitId}
+                  onChange={(event) => setSelectedSculptureUnitId(event.target.value)}
+                >
+                  {sculptureUnits.length ? (
+                    sculptureUnits.map((unit) => (
+                      <option key={unit.id} value={unit.id}>
+                        {unit.name} - {unit.area} - CID {unit.sculptureCid || unit.cid}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Busca unidades para completar esta lista</option>
+                  )}
+                </select>
+              </label>
+              <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadSculptureUnits} type="button">
+                <RefreshCw size={17} /> Buscar en Sculpture
+              </button>
+              <button
+                className="primary-button"
+                disabled={!selectedSculptureUnitId || workStatus === "loading"}
+                onClick={() => importSelectedSculptureUnit()}
+                type="button"
+              >
+                <Plus size={17} /> Usar unidad
+              </button>
+            </div>
           </div>
         </section>
 

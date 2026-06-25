@@ -437,6 +437,55 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.sculpture-picker {
+  background: #f8faf9;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.sculpture-picker > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.sculpture-picker strong {
+  color: #172026;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.sculpture-picker small {
+  color: #65756f;
+  line-height: 1.45;
+}
+
+.sculpture-picker-row {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+}
+
+.sculpture-picker-row label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.76rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.sculpture-picker-row select {
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
 .clickup-panel {
   display: grid;
   gap: 16px;
@@ -1455,6 +1504,7 @@ button:disabled {
   .split-section,
   .page-grid,
   .unit-grid,
+  .sculpture-picker-row,
   .clickup-actions,
   .clickup-board,
   .pending-form,
