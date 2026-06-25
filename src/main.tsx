@@ -256,6 +256,7 @@ const sourceLabels: Record<string, string> = {
   varianceSummary: "Variance summary",
   intelipar: "Intelipar",
 };
+const tasksPerColumn = 5;
 
 function clientAccountLabel(client?: Client | null) {
   if (!client) return "Sin cliente";
@@ -411,6 +412,7 @@ function App() {
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
   const [clickupPage, setClickupPage] = useState(0);
   const [clickupHasMore, setClickupHasMore] = useState(false);
+  const [clickupColumnPages, setClickupColumnPages] = useState<Record<string, number>>({});
   const [clickupStatusFilter, setClickupStatusFilter] = useState("important");
   const [clickupCode, setClickupCode] = useState("");
   const [newPending, setNewPending] = useState({
@@ -518,6 +520,7 @@ function App() {
       setClickupTasks(payload.tasks || []);
       setClickupHasMore(Boolean(payload.hasMore));
       setClickupPage(payload.page || page);
+      setClickupColumnPages({});
     } catch (tasksError) {
       setClickupTasks([]);
       setError(tasksError instanceof Error ? tasksError.message : "No se pudieron cargar las tareas de ClickUp.");
@@ -1658,12 +1661,7 @@ function App() {
                     <option value="all">Todos los estados</option>
                     {clickupStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
-                  <button className="secondary-button" disabled={clickupPage === 0 || workStatus === "loading"} onClick={() => loadClickupTasks(Math.max(0, clickupPage - 1), clickupStatusFilter)}>
-                    Anterior
-                  </button>
-                  <button className="secondary-button" disabled={!clickupHasMore || workStatus === "loading"} onClick={() => loadClickupTasks(clickupPage + 1, clickupStatusFilter)}>
-                    Siguiente
-                  </button>
+                  <span className="board-page-note">5 por columna</span>
                 </div>
               </div>
               <p className="muted-copy">Estados recomendados para ver hoy: falta informacion, auditoria en proceso, graficos actualizados, listo para reporte, comentarios escritos, reporte enviado y cancelado. Inactiva queda fuera del filtro operativo porque suele acumular ruido.</p>
@@ -1676,7 +1674,12 @@ function App() {
                         <strong>{tasks.length}</strong>
                       </div>
                       <div className="clickup-task-list">
-                        {tasks.map((task) => (
+                        {tasks
+                          .slice(
+                            (clickupColumnPages[status] || 0) * tasksPerColumn,
+                            ((clickupColumnPages[status] || 0) + 1) * tasksPerColumn,
+                          )
+                          .map((task) => (
                           <a className="clickup-task-card" href={task.url} key={task.id} target="_blank" rel="noreferrer">
                             <div>
                               <strong>{task.name}</strong>
@@ -1693,6 +1696,33 @@ function App() {
                           </a>
                         ))}
                       </div>
+                      {tasks.length > tasksPerColumn ? (
+                        <div className="column-pager">
+                          <button
+                            className="secondary-button"
+                            disabled={(clickupColumnPages[status] || 0) === 0}
+                            onClick={() => setClickupColumnPages((current) => ({
+                              ...current,
+                              [status]: Math.max(0, (current[status] || 0) - 1),
+                            }))}
+                          >
+                            Anterior
+                          </button>
+                          <span>
+                            {(clickupColumnPages[status] || 0) + 1} / {Math.ceil(tasks.length / tasksPerColumn)}
+                          </span>
+                          <button
+                            className="secondary-button"
+                            disabled={(clickupColumnPages[status] || 0) >= Math.ceil(tasks.length / tasksPerColumn) - 1}
+                            onClick={() => setClickupColumnPages((current) => ({
+                              ...current,
+                              [status]: Math.min(Math.ceil(tasks.length / tasksPerColumn) - 1, (current[status] || 0) + 1),
+                            }))}
+                          >
+                            Siguiente
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
