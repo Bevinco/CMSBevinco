@@ -447,6 +447,7 @@ function App() {
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
+  const [sculptureDirectoryLoaded, setSculptureDirectoryLoaded] = useState(false);
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
@@ -764,9 +765,9 @@ function App() {
     }
   }
 
-  async function loadSculptureUnits() {
+  async function loadSculptureUnits({ quiet = false } = {}) {
     setWorkStatus("loading");
-    setError("Buscando restaurantes y periodos visibles en Sculpture...");
+    if (!quiet) setError("Cargando restaurantes y periodos desde Sculpture...");
 
     try {
       const payload = await readJson<{ units: SculptureUnit[]; periods?: SculpturePeriod[]; errors?: Array<{ area: string; path: string; error: string }> }>(
@@ -777,24 +778,33 @@ function App() {
       setSculptureUnits(units);
       setSculpturePeriods(periodsFromSculpture);
       setSelectedSculptureUnitId((current) => current || units[0]?.id || "");
+      setSculptureDirectoryLoaded(true);
       const firstMonth = monthFromPeriod(periodsFromSculpture[0]);
       if (firstMonth) {
         setFromMonth((current) => current || firstMonth);
         setToMonth((current) => current || firstMonth);
       }
-      setError(
-        units.length
-          ? `Sculpture devolvio ${units.length} restaurante(s) y ${periodsFromSculpture.length} periodo(s). Elige rango y consulta.`
-          : "No se detectaron restaurantes en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
-      );
+      if (!quiet || !units.length) {
+        setError(
+          units.length
+            ? `Lista actualizada: ${units.length} restaurante(s) y ${periodsFromSculpture.length} periodo(s) disponibles.`
+            : "No se detectaron restaurantes en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
+        );
+      }
       setWorkStatus(units.length ? "ready" : "error");
     } catch (unitError) {
       setSculptureUnits([]);
       setSculpturePeriods([]);
       setSelectedSculptureUnitId("");
+      setSculptureDirectoryLoaded(true);
       setError(unitError instanceof Error ? unitError.message : "No se pudo leer la lista de Sculpture.");
       setWorkStatus("error");
     }
+  }
+
+  function ensureSculptureDirectory() {
+    if (sculptureDirectoryLoaded || workStatus === "loading") return;
+    loadSculptureUnits({ quiet: true });
   }
 
   async function importSelectedSculptureUnit(unitId = selectedSculptureUnitId) {
@@ -1078,6 +1088,12 @@ function App() {
     }
   }, [authStatus, activeView]);
 
+  useEffect(() => {
+    if (authStatus === "authenticated" && activeView === "module1" && !sculptureDirectoryLoaded) {
+      loadSculptureUnits({ quiet: true });
+    }
+  }, [authStatus, activeView, sculptureDirectoryLoaded]);
+
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const clickupTasksByStatus = useMemo(() => {
     const groups = new Map<string, ClickupTask[]>();
@@ -1257,8 +1273,8 @@ function App() {
         <section className="panel unit-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Cliente y unidad</p>
-              <h2>Unidad de reporte seleccionada</h2>
+              <p className="eyebrow">Sculpture Hospitality</p>
+              <h2>Consultar reportes por restaurante</h2>
             </div>
             <Building2 size={22} />
           </div>
@@ -1289,7 +1305,7 @@ function App() {
             <div className="unit-form">
               <div>
                 <p className="eyebrow">Consulta directa</p>
-                <strong>Traer reportes por restaurante y mes</strong>
+                <strong>Selecciona restaurante y rango</strong>
               </div>
               <div className="unit-form-grid">
                 <label>
@@ -1297,6 +1313,8 @@ function App() {
                   <select
                     value={selectedSculptureUnitId}
                     onChange={(event) => setSelectedSculptureUnitId(event.target.value)}
+                    onFocus={ensureSculptureDirectory}
+                    onMouseDown={ensureSculptureDirectory}
                   >
                     {sculptureUnits.length ? (
                       sculptureUnits.map((unit) => (
@@ -1304,8 +1322,10 @@ function App() {
                           {unit.name} - {unit.area}
                         </option>
                       ))
+                    ) : workStatus === "loading" && !sculptureDirectoryLoaded ? (
+                      <option value="">Cargando restaurantes desde Sculpture...</option>
                     ) : (
-                      <option value="">Busca restaurantes en Sculpture</option>
+                      <option value="">No hay restaurantes cargados desde Sculpture</option>
                     )}
                   </select>
                 </label>
@@ -1326,38 +1346,14 @@ function App() {
                   />
                 </label>
                 <div className="query-note">
-                  <span>{sculpturePeriods.length ? `${sculpturePeriods.length} periodos detectados en Sculpture` : "Si Sculpture no devuelve periodos, se usa el periodo seleccionado arriba."}</span>
+                  <span>{sculpturePeriods.length ? `${sculpturePeriods.length} periodos detectados en Sculpture` : "Al abrir el selector, el CMS intenta traer restaurantes y periodos desde Sculpture."}</span>
                 </div>
               </div>
               <div className="query-actions">
-                <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadSculptureUnits} type="button">
-                  <RefreshCw size={17} /> Buscar restaurantes
-                </button>
-                <button className="primary-button" disabled={workStatus === "loading"} onClick={querySculptureReports} type="button">
-                  <Database size={17} /> Consultar reportes
+                <button className="primary-button" disabled={workStatus === "loading" || (!selectedSculptureUnitId && !selectedClientId)} onClick={querySculptureReports} type="button">
+                  <Database size={17} /> Generar reporte
                 </button>
               </div>
-            </div>
-          </div>
-          <div className="sculpture-picker">
-            <div>
-              <p className="eyebrow">Directo desde Sculpture</p>
-              <strong>Flujo esperado</strong>
-              <small>El CMS lee restaurantes visibles en Sculpture, cruza el rango de meses con los periodos disponibles y actualiza los reportes guardados para revisión, PDF y envío.</small>
-            </div>
-            <div className="sculpture-picker-row">
-              <article>
-                <strong>1. Buscar</strong>
-                <span>Trae restaurantes/locales y periodos visibles con las credenciales configuradas.</span>
-              </article>
-              <article>
-                <strong>2. Consultar</strong>
-                <span>Usa el CID del restaurante y el PID de cada periodo para pedir Variance e Intelipar.</span>
-              </article>
-              <article>
-                <strong>3. Revisar</strong>
-                <span>El reporte queda en el CMS para resumen, PDF, email y ClickUp.</span>
-              </article>
             </div>
           </div>
         </section>
