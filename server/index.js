@@ -1095,6 +1095,48 @@ async function createClickupTaskForReport(store, report, listId = clickupListId)
   return report.clickupTask;
 }
 
+function mapClickupTask(task) {
+  return {
+    id: task.id,
+    customId: task.custom_id,
+    name: task.name,
+    url: task.url,
+    status: task.status?.status || "Sin estado",
+    statusColor: task.status?.color || "",
+    assignees: (task.assignees || []).map((assignee) => ({
+      id: assignee.id,
+      username: assignee.username,
+      email: assignee.email,
+      initials: assignee.initials,
+      color: assignee.color,
+    })),
+    dueDate: task.due_date ? Number(task.due_date) : null,
+    tags: (task.tags || []).map((tag) => tag.name || tag.tag_fg || "").filter(Boolean),
+    subtasks: Array.isArray(task.subtasks) ? task.subtasks.length : Number(task.subtasks || 0),
+    dateUpdated: task.date_updated ? Number(task.date_updated) : null,
+  };
+}
+
+async function getClickupTasks(listId = clickupListId) {
+  if (!listId) {
+    const error = new Error("CLICKUP_LIST_ID is not configured.");
+    error.status = 503;
+    throw error;
+  }
+
+  const query = new URLSearchParams({
+    include_closed: "true",
+    subtasks: "true",
+    page: "0",
+  });
+  const { payload, authSource } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task?${query}`);
+  return {
+    listId,
+    authSource,
+    tasks: (payload.tasks || []).map(mapClickupTask),
+  };
+}
+
 async function fetchSculptureInternalReport({ type, cid, pid }) {
   const reportConfig = {
     varianceDetailed: {
@@ -2347,6 +2389,18 @@ app.post("/api/clickup/oauth/token", requireAuth, async (request, response) => {
   } catch (error) {
     response.status(error.status || 500).json({
       error: error.message || "Unable to exchange ClickUp OAuth code.",
+      details: error.details,
+    });
+  }
+});
+
+app.get("/api/clickup/tasks", requireAuth, async (request, response) => {
+  try {
+    const tasksPayload = await getClickupTasks(request.query.listId || clickupListId);
+    response.json(tasksPayload);
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to load ClickUp tasks.",
       details: error.details,
     });
   }

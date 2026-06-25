@@ -30,7 +30,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "reports" | "criteria";
+type ActiveView = "dashboard" | "module1" | "tasks" | "reports" | "criteria";
 
 type Client = {
   id: string;
@@ -125,6 +125,20 @@ type ClickupStatus = {
   connected: boolean;
   user?: { username?: string; email?: string } | null;
   error?: string;
+};
+
+type ClickupTask = {
+  id: string;
+  customId?: string;
+  name: string;
+  url?: string;
+  status: string;
+  statusColor?: string;
+  assignees: Array<{ id?: string; username?: string; email?: string; initials?: string; color?: string }>;
+  dueDate?: number | null;
+  tags: string[];
+  subtasks: number;
+  dateUpdated?: number | null;
 };
 
 const reportWorkflow = [
@@ -276,6 +290,11 @@ function money(value: number) {
   }).format(value || 0);
 }
 
+function shortDate(timestamp?: number | null) {
+  if (!timestamp) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short" }).format(new Date(timestamp));
+}
+
 function statusClass(status: ReportStatus) {
   if (status === "Enviado") return "pill success";
   if (status === "Listo para revisar") return "pill warning";
@@ -379,6 +398,7 @@ function App() {
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
+  const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupCode, setClickupCode] = useState("");
   const [newUnit, setNewUnit] = useState({
     accountName: "",
@@ -452,6 +472,16 @@ function App() {
         connected: false,
         error: statusError instanceof Error ? statusError.message : "Error desconocido.",
       });
+    }
+  }
+
+  async function loadClickupTasks() {
+    try {
+      const payload = await readJson<{ tasks: ClickupTask[] }>(await fetch("/api/clickup/tasks"));
+      setClickupTasks(payload.tasks || []);
+    } catch (tasksError) {
+      setClickupTasks([]);
+      setError(tasksError instanceof Error ? tasksError.message : "No se pudieron cargar las tareas de ClickUp.");
     }
   }
 
@@ -754,6 +784,7 @@ function App() {
       setReports((current) => current.map((item) => (item.id === payload.report.id ? payload.report : item)));
       setError(payload.task.url ? `Tarea creada en ClickUp: ${payload.task.url}` : "Tarea creada en ClickUp.");
       await loadClickupStatus();
+      await loadClickupTasks();
       setWorkStatus("ready");
     } catch (clickupError) {
       setError(clickupError instanceof Error ? clickupError.message : "Error desconocido.");
@@ -797,7 +828,22 @@ function App() {
     }
   }, [authStatus]);
 
+  useEffect(() => {
+    if (authStatus === "authenticated" && activeView === "tasks") {
+      loadClickupStatus();
+      loadClickupTasks();
+    }
+  }, [authStatus, activeView]);
+
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
+  const clickupTasksByStatus = useMemo(() => {
+    const groups = new Map<string, ClickupTask[]>();
+    clickupTasks.forEach((task) => {
+      const status = task.status || "Sin estado";
+      groups.set(status, [...(groups.get(status) || []), task]);
+    });
+    return Array.from(groups.entries());
+  }, [clickupTasks]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
@@ -806,6 +852,7 @@ function App() {
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
+    tasks: ["Gestion operativa", "Pendientes ClickUp"],
     reports: ["Bandeja", "Reportes guardados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
   }[activeView];
@@ -839,6 +886,7 @@ function App() {
         <nav className="nav-list" aria-label="Modulos">
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button>
           <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button>
+          <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}><ListChecks size={18} /> Pendientes</button>
           <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
           <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><Upload size={18} /> Criterios</button>
         </nav>
@@ -873,9 +921,23 @@ function App() {
                   <span>PDF y email</span>
                 </div>
               </button>
-              <button className="module-card module-card-button" onClick={() => setActiveView("criteria")}>
+              <button className="module-card module-card-button" onClick={() => setActiveView("tasks")}>
                 <div className="module-card-top">
                   <span>02</span>
+                  <small>ClickUp</small>
+                </div>
+                <h2>Pendientes operativos</h2>
+                <p>Sincroniza tareas de auditoria, estados del flujo y creacion de tareas desde los reportes del CMS.</p>
+                <div className="module-tags">
+                  <span>Auditorias Chile</span>
+                  <span>Estados</span>
+                  <span>Tareas</span>
+                  <span>Seguimiento</span>
+                </div>
+              </button>
+              <button className="module-card module-card-button" onClick={() => setActiveView("criteria")}>
+                <div className="module-card-top">
+                  <span>03</span>
                   <small>Base</small>
                 </div>
                 <h2>Criterios del agente</h2>
@@ -1239,61 +1301,6 @@ function App() {
           </div>
         </section>
 
-        <section className="panel clickup-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">ClickUp</p>
-              <h2>Seguimiento operativo</h2>
-            </div>
-            <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupStatus}>
-              <RefreshCw size={17} /> Verificar
-            </button>
-          </div>
-          <div className="clickup-grid">
-            <article>
-              <span>Conexion</span>
-              <strong>{clickupStatus?.connected ? "Conectado" : "Por configurar"}</strong>
-              <small>
-                {clickupStatus?.connected
-                  ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"} · ${clickupStatus.authSource}`
-                  : clickupStatus?.error || "Configura token/lista o conecta OAuth."}
-              </small>
-            </article>
-            <article>
-              <span>Lista destino</span>
-              <strong>{clickupStatus?.listIdConfigured ? "Configurada" : "Falta CLICKUP_LIST_ID"}</strong>
-              <small>La tarea del reporte se crea en esa lista.</small>
-            </article>
-            <article>
-              <span>Tarea del reporte</span>
-              <strong>{selectedReport?.clickupTask?.id || "No creada"}</strong>
-              {selectedReport?.clickupTask?.url ? (
-                <a href={selectedReport.clickupTask.url} target="_blank" rel="noreferrer">
-                  Abrir en ClickUp <ExternalLink size={14} />
-                </a>
-              ) : (
-                <small>Genera una tarea para coordinar revision, PDF y envio.</small>
-              )}
-            </article>
-          </div>
-          <div className="clickup-actions">
-            <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
-              <Plus size={17} /> Crear tarea ClickUp
-            </button>
-            <label>
-              Codigo OAuth
-              <input
-                placeholder="Pega aqui el code de redirect si usan OAuth"
-                value={clickupCode}
-                onChange={(event) => setClickupCode(event.target.value)}
-              />
-            </label>
-            <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
-              Conectar OAuth
-            </button>
-          </div>
-        </section>
-
         <section className="split-section">
           <div className="panel">
             <div className="panel-header">
@@ -1414,6 +1421,108 @@ function App() {
           </div>
         </section>
           </>
+        ) : null}
+
+        {activeView === "tasks" ? (
+          <section className="tasks-module">
+            {error ? <p className="connector-error">{error}</p> : null}
+
+            <section className="panel clickup-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">ClickUp</p>
+                  <h2>Pendientes de auditoria y reportes</h2>
+                </div>
+                <div className="action-row wrap-actions">
+                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupStatus}>
+                    <RefreshCw size={17} /> Verificar
+                  </button>
+                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupTasks}>
+                    <ListChecks size={17} /> Actualizar tareas
+                  </button>
+                </div>
+              </div>
+              <div className="clickup-grid">
+                <article>
+                  <span>Conexion</span>
+                  <strong>{clickupStatus?.connected ? "Conectado" : "Por configurar"}</strong>
+                  <small>
+                    {clickupStatus?.connected
+                      ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"} - ${clickupStatus.authSource}`
+                      : clickupStatus?.error || "Configura token/lista o conecta OAuth."}
+                  </small>
+                </article>
+                <article>
+                  <span>Lista operativa</span>
+                  <strong>{clickupStatus?.listIdConfigured ? "Auditorias Chile" : "Falta CLICKUP_LIST_ID"}</strong>
+                  <small>El CMS lee y crea tareas en la lista configurada en Render.</small>
+                </article>
+                <article>
+                  <span>Tareas cargadas</span>
+                  <strong>{clickupTasks.length}</strong>
+                  <small>{clickupTasksByStatus.length} estado(s) visibles desde ClickUp.</small>
+                </article>
+              </div>
+              <div className="clickup-actions">
+                <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
+                  <Plus size={17} /> Crear tarea del reporte seleccionado
+                </button>
+                <label>
+                  Codigo OAuth
+                  <input
+                    placeholder="Pega aqui el code de redirect si usan OAuth"
+                    value={clickupCode}
+                    onChange={(event) => setClickupCode(event.target.value)}
+                  />
+                </label>
+                <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
+                  Conectar OAuth
+                </button>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Flujo ClickUp</p>
+                  <h2>Tablero de pendientes</h2>
+                </div>
+                <Cloud size={22} />
+              </div>
+              {clickupTasksByStatus.length ? (
+                <div className="clickup-board">
+                  {clickupTasksByStatus.map(([status, tasks]) => (
+                    <article className="clickup-column" key={status}>
+                      <div className="clickup-column-header">
+                        <span>{status}</span>
+                        <strong>{tasks.length}</strong>
+                      </div>
+                      <div className="clickup-task-list">
+                        {tasks.map((task) => (
+                          <a className="clickup-task-card" href={task.url} key={task.id} target="_blank" rel="noreferrer">
+                            <div>
+                              <strong>{task.name}</strong>
+                              <small>Vence: {shortDate(task.dueDate)}</small>
+                            </div>
+                            <div className="clickup-task-meta">
+                              {task.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}
+                              {task.assignees.slice(0, 3).map((assignee) => (
+                                <i key={`${task.id}-${assignee.id || assignee.initials || assignee.email}`}>
+                                  {assignee.initials || assignee.username?.slice(0, 2) || "CU"}
+                                </i>
+                              ))}
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted-copy">Aun no hay tareas cargadas desde ClickUp. Verifica la conexion y actualiza tareas.</p>
+              )}
+            </section>
+          </section>
         ) : null}
 
         {activeView === "reports" ? (
