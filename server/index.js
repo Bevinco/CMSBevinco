@@ -512,6 +512,14 @@ function looksLikeSculpturePeriodLabel(value = "") {
     (text.includes(" to ") || text.includes(" al ") || /\d{4}/.test(text));
 }
 
+function extractSculpturePeriodId(value = "") {
+  return configuredIdentifier(
+    String(value || "").match(/[?&](?:pid|periodid|period_id)=(\d+)/i)?.[1],
+    String(value || "").match(/\b(?:pid|periodid|period_id)\D{0,8}(\d+)/i)?.[1],
+    value,
+  );
+}
+
 function parseSculpturePeriodsFromHtml(html) {
   const $ = cheerio.load(html);
   const periods = new Map();
@@ -540,11 +548,17 @@ function parseSculpturePeriodsFromHtml(html) {
   $("a, button, [data-pid], [data-period-id]").each((_, node) => {
     const element = $(node);
     const href = element.attr("href") || element.attr("data-url") || element.attr("value") || "";
+    const label = element.text() || element.attr("title") || element.attr("aria-label") || "";
     addPeriod({
-      pid: element.attr("data-pid") || element.attr("data-period-id") || configuredIdentifier(element.attr("value"), href.match(/[?&]pid=(\d+)/i)?.[1]),
-      label: element.text() || element.attr("title") || element.attr("aria-label") || "",
+      pid: element.attr("data-pid") || element.attr("data-period-id") || extractSculpturePeriodId(element.attr("value")) || extractSculpturePeriodId(href),
+      label,
     });
   });
+
+  const periodLinkPattern = /href=["'][^"']*(?:pid|periodid|period_id)=(\d+)[^"']*["'][^>]*>([^<]+)</gi;
+  for (const match of html.matchAll(periodLinkPattern)) {
+    addPeriod({ pid: match[1], label: match[2] });
+  }
 
   return Array.from(periods.values()).sort((left, right) => String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)));
 }
@@ -577,6 +591,48 @@ async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
   }
 
   return html;
+}
+
+async function activateSculptureContext({ baseUrl, cid, pid = "", cookie }) {
+  let sessionCookie = cookie || (await getSculptureCookie({ baseUrl }));
+  let referer = `${baseUrl}/`;
+
+  const visit = async (pagePath) => {
+    const response = await fetch(new URL(pagePath, baseUrl).toString(), {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        cookie: sessionCookie,
+        referer,
+      },
+      redirect: "manual",
+    });
+    const html = await response.text();
+    sessionCookie = mergeCookieHeaders(sessionCookie, getSetCookieHeaders(response));
+    referer = new URL(pagePath, baseUrl).toString();
+
+    if (!response.ok || looksLikeSculptureLogin(html)) {
+      const error = new Error(`Unable to activate Sculpture context ${pagePath}.`);
+      error.status = response.status || 401;
+      error.details = html.slice(0, 500);
+      throw error;
+    }
+
+    return html;
+  };
+
+  let html = await visit(`/?clientid=${encodeURIComponent(cid)}`);
+  if (pid) html = await visit(`/?periodid=${encodeURIComponent(pid)}`);
+
+  return { cookie: sessionCookie, html, referer };
+}
+
+async function fetchSculpturePeriodsForClient({ baseUrl, cid }) {
+  if (!configuredIdentifier(cid)) return [];
+  const { html } = await activateSculptureContext({ baseUrl, cid });
+  return parseSculpturePeriodsFromHtml(html).map((period) => ({
+    ...period,
+    id: `sculpture-${cid}-${period.pid}`,
+  }));
 }
 
 async function discoverSculptureUnits() {
@@ -1041,19 +1097,24 @@ function pickRecordValue(record, keys, fallback = "") {
 function extractReportMetrics(parsedTable) {
   const rows = parsedTable.rows || [];
   const categoryMap = new Map();
+  const categoryPercentMap = new Map();
   const products = [];
+  let currentCategory = "Sin categoria";
   let revenue = 0;
   let usedCost = 0;
   let soldCost = 0;
   let varianceTotal = 0;
+  let grandSummary = null;
 
   rows.forEach((row) => {
     const values = row.values || [];
-    const itemName = pickRecordValue(row.record, ["itemName", "item", "product", "productName", "producto", "nombreArticulo", "nombreArtCulo"], values[0] || "");
-    const isTotal = isTotalRow(itemName) || /^total\s+/i.test(itemName);
+    const itemName = pickRecordValue(row.record, ["itemName", "item", "product", "productName", "producto", "nombreArticulo", "nombreArtículo", "nombreArtCulo"], values[0] || "");
+    const isGrandTotal = /grand\s+total/i.test(itemName);
+    const isCategoryTotal = isTotalRow(itemName) || /^total\s+/i.test(itemName) || /:\s*$/.test(itemName);
+    const isTotal = isGrandTotal || isCategoryTotal;
     const category = isTotal
       ? cleanTotalName(itemName)
-      : row.group || pickRecordValue(row.record, ["category", "categoria", "categorA"], "Sin categoria");
+      : row.group || pickRecordValue(row.record, ["category", "categoria", "categorA"], currentCategory);
     const varianceValue =
       pickRecordValue(row.record, [
         "variance",
@@ -1073,6 +1134,19 @@ function extractReportMetrics(parsedTable) {
     const rowRevenue = parseNumber(pickRecordValue(row.record, ["revenue", "ingresos", "sales", "ventas"]));
     const rowUsedCost = parseNumber(pickRecordValue(row.record, ["usedCost", "usadoCosto", "costoUsado", "usageCost"]));
     const rowSoldCost = parseNumber(pickRecordValue(row.record, ["soldCost", "vendidoCosto", "costoVendido", "salesCost"]));
+    const rowCostPercent = parseNumber(pickRecordValue(row.record, ["costPercent", "porcentajeDeCosto", "porcentajeCosto"]));
+
+    if (isGrandTotal) {
+      grandSummary = {
+        revenue: rowRevenue,
+        costPercent: rowCostPercent,
+        variancePercent: parseNumber(percentValue),
+        varianceAmount: amount,
+      };
+      return;
+    }
+
+    if (isCategoryTotal) currentCategory = category || currentCategory;
 
     if (!isTotal) {
       revenue += rowRevenue;
@@ -1090,8 +1164,9 @@ function extractReportMetrics(parsedTable) {
       });
     }
 
-    if (isTotal) {
+    if (isCategoryTotal) {
       categoryMap.set(category, amount);
+      categoryPercentMap.set(category, parseNumber(percentValue));
     } else {
       categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
     }
@@ -1100,11 +1175,11 @@ function extractReportMetrics(parsedTable) {
   const categoryVariances = Array.from(categoryMap.entries()).map(([category, amount]) => ({
     category,
     amount,
-    percent: 0,
+    percent: categoryPercentMap.get(category) || 0,
   }));
 
   return {
-    summary: {
+    summary: grandSummary || {
       revenue,
       costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
       variancePercent: soldCost ? Number(((varianceTotal / soldCost) * 100).toFixed(1)) : 0,
@@ -1112,6 +1187,7 @@ function extractReportMetrics(parsedTable) {
     },
     categoryVariances: categoryVariances.slice(0, 8),
     topProducts: products
+      .filter((item) => item.varianceAmount || item.variancePercent)
       .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
       .slice(0, 8),
   };
@@ -1632,6 +1708,16 @@ function sculptureReportConfigs({ type, cid, pid }) {
 
   if (type === "intelipar") {
     return uniqueSculptureConfigs([
+      {
+        path: "/reportPar/generate",
+        payload: {
+          vendor: "",
+          report_type: "200",
+          group_by_vendor: "true",
+          as_of_date: "",
+          stnid: "",
+        },
+      },
       configured,
       { path: "/reports/intelipar/overview/", payload: { cmd: "overview", cid, pid } },
       { path: "/reports/intelipar/", payload: { cmd: "overview", cid, pid } },
@@ -1640,7 +1726,19 @@ function sculptureReportConfigs({ type, cid, pid }) {
   }
 
   const view = type === "varianceSummary" ? "summary" : "detailed";
+  const grouping = type === "varianceSummary" ? "Summary" : "Detailed";
   return uniqueSculptureConfigs([
+    {
+      path: "/reports/generate",
+      payload: {
+        type: "variance",
+        var_type: "category",
+        grouping,
+        file_format: "",
+        cid,
+        periodid: pid,
+      },
+    },
     configured,
     { path: "/reports/variance/overview/", payload: { cmd: "overview", view, cid, pid } },
     { path: "/reports/variance/overview/", payload: { cmd: "overview", detail: view, cid, pid } },
@@ -1659,6 +1757,7 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
   }
 
   const attempts = [];
+  let referer = `${baseUrl}/`;
   const requestReport = async (cookie, reportConfig) => {
     const body = new URLSearchParams(reportConfig.payload);
     const requestUrl = new URL(reportConfig.path, baseUrl).toString();
@@ -1669,7 +1768,7 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
         cookie,
         origin: baseUrl,
-        referer: `${baseUrl}/`,
+        referer,
         "x-requested-with": "XMLHttpRequest",
       },
       body,
@@ -1679,6 +1778,17 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
   };
 
   let cookie = await getSculptureCookie({ baseUrl });
+  try {
+    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie });
+    cookie = context.cookie;
+    referer = context.referer;
+  } catch (error) {
+    if (!sculptureUsername || !sculpturePassword) throw error;
+    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie });
+    cookie = context.cookie;
+    referer = context.referer;
+  }
   let firstEmptyResult = null;
 
   for (const reportConfig of reportConfigs) {
@@ -1783,12 +1893,12 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
       if (type === "intelipar") {
         const suggestions = data.rows.slice(0, 12).map((row) => ({
-          item: row.record.itemName || row.record.item || row.values[0] || "",
-          provider: row.record.provider || row.record.vendor || row.record.proveedor || row.values[1] || "Por validar",
-          stock: row.record.stock || row.record.onHand || row.record.stockActual || row.values[2] || "",
-          suggested: row.record.suggested || row.record.order || row.record.sugerido || row.values[3] || "",
-          note: row.record.note || row.record.nota || "Revisar contra proveedor actualizado",
-        }));
+          item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
+          provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
+          stock: pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || ""),
+          suggested: pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || ""),
+          note: pickRecordValue(row.record, ["note", "nota", "excesoDeInventario", "díasRestantes"], "Revisar contra proveedor actualizado"),
+        })).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
         if (suggestions.length) report.purchaseSuggestions = suggestions;
       }
     } catch (error) {
@@ -2762,8 +2872,17 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     sculptureBaseUrl: resolvedUnit.baseUrl || resolvedUnit.sculptureBaseUrl || baseUrlForSculptureArea(resolvedUnit.area),
     recipients: resolvedUnit.recipients || [],
   });
+  let sculptureClientPeriods = [];
+  try {
+    sculptureClientPeriods = await fetchSculpturePeriodsForClient({
+      baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
+      cid: sculptureCid,
+    });
+  } catch {
+    sculptureClientPeriods = [];
+  }
   const selectedPeriods = resolvePeriodsForSculptureQuery(store, {
-    periods: incomingPeriods,
+    periods: sculptureClientPeriods.length ? sculptureClientPeriods : incomingPeriods,
     periodId,
     fromMonth,
     toMonth,
