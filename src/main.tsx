@@ -141,6 +141,15 @@ type ClickupTask = {
   dateUpdated?: number | null;
 };
 
+type ClickupMember = { id?: number; username?: string; email?: string; initials?: string; color?: string };
+type ClickupListStatus = { id?: string; status: string; color?: string; type?: string };
+type ClickupMeta = {
+  list?: { id?: string; name?: string; statuses?: ClickupListStatus[] };
+  members: ClickupMember[];
+  importantStatuses: string[];
+  defaultTaskStatus: string;
+};
+
 const reportWorkflow = [
   {
     icon: Database,
@@ -399,7 +408,20 @@ function App() {
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
+  const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
+  const [clickupPage, setClickupPage] = useState(0);
+  const [clickupHasMore, setClickupHasMore] = useState(false);
+  const [clickupStatusFilter, setClickupStatusFilter] = useState("important");
   const [clickupCode, setClickupCode] = useState("");
+  const [newPending, setNewPending] = useState({
+    name: "",
+    description: "",
+    dueDate: "",
+    dueTime: "",
+    status: "LISTO PARA REPORTE",
+    assignee: "",
+    priority: "3",
+  });
   const [newUnit, setNewUnit] = useState({
     accountName: "",
     moduleName: "",
@@ -475,13 +497,79 @@ function App() {
     }
   }
 
-  async function loadClickupTasks() {
+  async function loadClickupMeta() {
     try {
-      const payload = await readJson<{ tasks: ClickupTask[] }>(await fetch("/api/clickup/tasks"));
+      const meta = await readJson<ClickupMeta>(await fetch("/api/clickup/meta"));
+      setClickupMeta(meta);
+      setNewPending((current) => ({ ...current, status: current.status || meta.defaultTaskStatus || "LISTO PARA REPORTE" }));
+    } catch (metaError) {
+      setClickupMeta({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
+      setError(metaError instanceof Error ? metaError.message : "No se pudo cargar la configuracion de ClickUp.");
+    }
+  }
+
+  async function loadClickupTasks(page = clickupPage, status = clickupStatusFilter) {
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (status && status !== "important") params.set("status", status);
+      const payload = await readJson<{ tasks: ClickupTask[]; hasMore?: boolean; page?: number }>(
+        await fetch(`/api/clickup/tasks?${params}`),
+      );
       setClickupTasks(payload.tasks || []);
+      setClickupHasMore(Boolean(payload.hasMore));
+      setClickupPage(payload.page || page);
     } catch (tasksError) {
       setClickupTasks([]);
       setError(tasksError instanceof Error ? tasksError.message : "No se pudieron cargar las tareas de ClickUp.");
+    }
+  }
+
+  async function createManualClickupTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newPending.name.trim()) {
+      setError("El pendiente necesita un nombre.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Creando pendiente en ClickUp...");
+
+    try {
+      const dueDate = newPending.dueDate
+        ? `${newPending.dueDate}T${newPending.dueTime || "18:00"}`
+        : "";
+      await readJson<{ task: ClickupTask }>(
+        await fetch("/api/clickup/tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: newPending.name,
+            description: newPending.description,
+            status: newPending.status,
+            dueDate,
+            dueDateTime: Boolean(newPending.dueTime),
+            priority: Number(newPending.priority),
+            assignees: newPending.assignee ? [newPending.assignee] : [],
+            tags: ["bevinco", "operacion"],
+          }),
+        }),
+      );
+      setNewPending({
+        name: "",
+        description: "",
+        dueDate: "",
+        dueTime: "",
+        status: clickupMeta.defaultTaskStatus || "LISTO PARA REPORTE",
+        assignee: "",
+        priority: "3",
+      });
+      await loadClickupTasks(0, clickupStatusFilter);
+      setError("Pendiente creado en ClickUp.");
+      setWorkStatus("ready");
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "Error desconocido.");
+      setWorkStatus("error");
     }
   }
 
@@ -831,7 +919,8 @@ function App() {
   useEffect(() => {
     if (authStatus === "authenticated" && activeView === "tasks") {
       loadClickupStatus();
-      loadClickupTasks();
+      loadClickupMeta();
+      loadClickupTasks(0, clickupStatusFilter);
     }
   }, [authStatus, activeView]);
 
@@ -844,6 +933,13 @@ function App() {
     });
     return Array.from(groups.entries());
   }, [clickupTasks]);
+  const clickupStatusOptions = useMemo(() => {
+    const statusSet = new Set<string>();
+    clickupMeta.importantStatuses.forEach((status) => statusSet.add(status));
+    (clickupMeta.list?.statuses || []).forEach((status) => statusSet.add(status.status));
+    clickupTasks.forEach((task) => statusSet.add(task.status));
+    return Array.from(statusSet).filter(Boolean);
+  }, [clickupMeta, clickupTasks]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
@@ -1437,7 +1533,7 @@ function App() {
                   <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupStatus}>
                     <RefreshCw size={17} /> Verificar
                   </button>
-                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupTasks}>
+                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={() => loadClickupTasks(clickupPage, clickupStatusFilter)}>
                     <ListChecks size={17} /> Actualizar tareas
                   </button>
                 </div>
@@ -1454,13 +1550,13 @@ function App() {
                 </article>
                 <article>
                   <span>Lista operativa</span>
-                  <strong>{clickupStatus?.listIdConfigured ? "Auditorias Chile" : "Falta CLICKUP_LIST_ID"}</strong>
+                  <strong>{clickupMeta.list?.name || (clickupStatus?.listIdConfigured ? "Auditorias Chile" : "Falta CLICKUP_LIST_ID")}</strong>
                   <small>El CMS lee y crea tareas en la lista configurada en Render.</small>
                 </article>
                 <article>
-                  <span>Tareas cargadas</span>
+                  <span>Tareas en pagina</span>
                   <strong>{clickupTasks.length}</strong>
-                  <small>{clickupTasksByStatus.length} estado(s) visibles desde ClickUp.</small>
+                  <small>Pagina {clickupPage + 1}. {clickupHasMore ? "Hay mas tareas." : "Ultima pagina o filtro acotado."}</small>
                 </article>
               </div>
               <div className="clickup-actions">
@@ -1484,11 +1580,93 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div>
+                  <p className="eyebrow">Nuevo pendiente</p>
+                  <h2>Crear tarea en ClickUp</h2>
+                </div>
+                <Plus size={22} />
+              </div>
+              <form className="pending-form" onSubmit={createManualClickupTask}>
+                <label>
+                  Nombre del pendiente
+                  <input
+                    placeholder="Ej. Revisar reporte Bardot - Barra"
+                    value={newPending.name}
+                    onChange={(event) => setNewPending((current) => ({ ...current, name: event.target.value }))}
+                  />
+                </label>
+                <label className="wide-field">
+                  Descripcion
+                  <textarea
+                    placeholder="Detalle operativo, contexto, links o criterios para resolverlo."
+                    value={newPending.description}
+                    onChange={(event) => setNewPending((current) => ({ ...current, description: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Estado
+                  <select value={newPending.status} onChange={(event) => setNewPending((current) => ({ ...current, status: event.target.value }))}>
+                    {clickupStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Responsable
+                  <select value={newPending.assignee} onChange={(event) => setNewPending((current) => ({ ...current, assignee: event.target.value }))}>
+                    <option value="">Sin responsable</option>
+                    {clickupMeta.members.map((member) => (
+                      <option key={member.id || member.email} value={member.id}>{member.username || member.email}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Fecha limite
+                  <input type="date" value={newPending.dueDate} onChange={(event) => setNewPending((current) => ({ ...current, dueDate: event.target.value }))} />
+                </label>
+                <label>
+                  Hora
+                  <input type="time" value={newPending.dueTime} onChange={(event) => setNewPending((current) => ({ ...current, dueTime: event.target.value }))} />
+                </label>
+                <label>
+                  Prioridad
+                  <select value={newPending.priority} onChange={(event) => setNewPending((current) => ({ ...current, priority: event.target.value }))}>
+                    <option value="1">Urgente</option>
+                    <option value="2">Alta</option>
+                    <option value="3">Normal</option>
+                    <option value="4">Baja</option>
+                  </select>
+                </label>
+                <button className="primary-button" disabled={workStatus === "loading"} type="submit">
+                  <Plus size={17} /> Crear pendiente
+                </button>
+              </form>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div>
                   <p className="eyebrow">Flujo ClickUp</p>
                   <h2>Tablero de pendientes</h2>
                 </div>
-                <Cloud size={22} />
+                <div className="task-toolbar">
+                  <select
+                    value={clickupStatusFilter}
+                    onChange={(event) => {
+                      setClickupStatusFilter(event.target.value);
+                      loadClickupTasks(0, event.target.value);
+                    }}
+                  >
+                    <option value="important">Estados operativos</option>
+                    <option value="all">Todos los estados</option>
+                    {clickupStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                  <button className="secondary-button" disabled={clickupPage === 0 || workStatus === "loading"} onClick={() => loadClickupTasks(Math.max(0, clickupPage - 1), clickupStatusFilter)}>
+                    Anterior
+                  </button>
+                  <button className="secondary-button" disabled={!clickupHasMore || workStatus === "loading"} onClick={() => loadClickupTasks(clickupPage + 1, clickupStatusFilter)}>
+                    Siguiente
+                  </button>
+                </div>
               </div>
+              <p className="muted-copy">Estados recomendados para ver hoy: falta informacion, auditoria en proceso, graficos actualizados, listo para reporte, comentarios escritos, reporte enviado y cancelado. Inactiva queda fuera del filtro operativo porque suele acumular ruido.</p>
               {clickupTasksByStatus.length ? (
                 <div className="clickup-board">
                   {clickupTasksByStatus.map(([status, tasks]) => (

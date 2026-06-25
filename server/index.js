@@ -25,6 +25,12 @@ const clickupBaseUrl = process.env.CLICKUP_BASE_URL || "https://api.clickup.com/
 const clickupListId = process.env.CLICKUP_LIST_ID || process.env.VITE_CLICKUP_LIST_ID || "";
 const clickupClientId = process.env.CLICKUP_CLIENT_ID || "";
 const clickupClientSecret = process.env.CLICKUP_CLIENT_SECRET || "";
+const clickupDefaultStatuses = (process.env.CLICKUP_VISIBLE_STATUSES ||
+  "FALTA INFORMACION,AUDITORIA EN PROCESO,GRAFICOS ACTUALIZADOS,LISTO PARA REPORTE,COMENTARIOS ESCRITOS,REPORTE ENVIADO,CANCELADO")
+  .split(",")
+  .map((status) => status.trim())
+  .filter(Boolean);
+const clickupDefaultTaskStatus = process.env.CLICKUP_DEFAULT_TASK_STATUS || "LISTO PARA REPORTE";
 const authUsername = process.env.CMS_AUTH_USERNAME;
 const authPassword = process.env.CMS_AUTH_PASSWORD;
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -1026,7 +1032,46 @@ async function clickupRequest(pathname, options = {}) {
   return { payload, authSource: auth.source };
 }
 
-function buildClickupTaskBody(store, report) {
+function normalizeClickupTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function normalizeClickupAssignees(value) {
+  const assignees = Array.isArray(value) ? value : value ? [value] : [];
+  return assignees
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
+}
+
+function buildClickupTaskBodyFromInput(input = {}) {
+  const body = {
+    name: String(input.name || "").trim(),
+    markdown_content: String(input.markdown_content || input.description || "").trim(),
+    tags: Array.isArray(input.tags)
+      ? input.tags
+      : String(input.tags || "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    notify_all: false,
+  };
+  const assignees = normalizeClickupAssignees(input.assignees);
+  const dueDate = normalizeClickupTimestamp(input.dueDate || input.due_date);
+
+  if (input.status) body.status = String(input.status).trim();
+  if (input.priority) body.priority = Number(input.priority);
+  if (assignees.length) body.assignees = assignees;
+  if (dueDate) {
+    body.due_date = dueDate;
+    body.due_date_time = Boolean(input.dueDateTime ?? input.due_date_time ?? true);
+  }
+
+  return body;
+}
+
+function buildClickupTaskBody(store, report, overrides = {}) {
   const payload = buildReportPayload(store, report);
   const clientName = payload.client?.name || report.clientId;
   const periodLabel = payload.period?.label || report.periodId;
@@ -1066,10 +1111,12 @@ function buildClickupTaskBody(store, report) {
     ].join("\n"),
     tags: ["bevinco", "reporte-semanal"],
     priority: 3,
+    status: clickupDefaultTaskStatus,
+    ...overrides,
   };
 }
 
-async function createClickupTaskForReport(store, report, listId = clickupListId) {
+async function createClickupTaskForReport(store, report, listId = clickupListId, overrides = {}) {
   if (!listId) {
     const error = new Error("CLICKUP_LIST_ID is not configured.");
     error.status = 503;
@@ -1078,7 +1125,7 @@ async function createClickupTaskForReport(store, report, listId = clickupListId)
 
   const { payload, authSource } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task`, {
     method: "POST",
-    body: JSON.stringify(buildClickupTaskBody(store, report)),
+    body: JSON.stringify(buildClickupTaskBody(store, report, overrides)),
   });
 
   report.clickupTask = {
@@ -1093,6 +1140,37 @@ async function createClickupTaskForReport(store, report, listId = clickupListId)
   report.updatedAt = new Date().toISOString();
 
   return report.clickupTask;
+}
+
+async function createClickupManualTask(taskInput = {}, listId = clickupListId) {
+  if (!listId) {
+    const error = new Error("CLICKUP_LIST_ID is not configured.");
+    error.status = 503;
+    throw error;
+  }
+
+  const body = buildClickupTaskBodyFromInput({
+    status: clickupDefaultTaskStatus,
+    priority: 3,
+    tags: ["bevinco"],
+    ...taskInput,
+  });
+
+  if (!body.name) {
+    const error = new Error("Task name is required.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { payload, authSource } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  return {
+    ...mapClickupTask(payload),
+    authSource,
+  };
 }
 
 function mapClickupTask(task) {
@@ -1117,7 +1195,50 @@ function mapClickupTask(task) {
   };
 }
 
-async function getClickupTasks(listId = clickupListId) {
+async function getClickupListMeta(listId = clickupListId) {
+  if (!listId) {
+    const error = new Error("CLICKUP_LIST_ID is not configured.");
+    error.status = 503;
+    throw error;
+  }
+
+  const [{ payload: listPayload }, { payload: membersPayload }] = await Promise.all([
+    clickupRequest(`/list/${encodeURIComponent(listId)}`),
+    clickupRequest(`/list/${encodeURIComponent(listId)}/member`),
+  ]);
+
+  return {
+    list: {
+      id: listPayload.id,
+      name: listPayload.name,
+      statuses: (listPayload.statuses || []).map((status) => ({
+        id: status.id,
+        status: status.status,
+        color: status.color,
+        type: status.type,
+      })),
+    },
+    members: (membersPayload.members || []).map((member) => {
+      const user = member.user || member;
+      return {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        initials: user.initials,
+        color: user.color,
+      };
+    }),
+    importantStatuses: clickupDefaultStatuses,
+    defaultTaskStatus: clickupDefaultTaskStatus,
+  };
+}
+
+async function getClickupTasks({
+  listId = clickupListId,
+  page = 0,
+  statuses = clickupDefaultStatuses,
+  includeClosed = true,
+} = {}) {
   if (!listId) {
     const error = new Error("CLICKUP_LIST_ID is not configured.");
     error.status = 503;
@@ -1127,13 +1248,26 @@ async function getClickupTasks(listId = clickupListId) {
   const query = new URLSearchParams({
     include_closed: "true",
     subtasks: "true",
-    page: "0",
+    order_by: "due_date",
+    reverse: "false",
+    page: String(Math.max(0, Number(page) || 0)),
   });
+  query.set("include_closed", includeClosed ? "true" : "false");
+  (Array.isArray(statuses) ? statuses : [statuses])
+    .map((status) => String(status || "").trim())
+    .filter(Boolean)
+    .forEach((status) => query.append("statuses[]", status));
+
   const { payload, authSource } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task?${query}`);
+  const tasks = (payload.tasks || []).map(mapClickupTask);
+
   return {
     listId,
     authSource,
-    tasks: (payload.tasks || []).map(mapClickupTask),
+    page: Math.max(0, Number(page) || 0),
+    hasMore: tasks.length >= 100,
+    statuses,
+    tasks,
   };
 }
 
@@ -2396,11 +2530,46 @@ app.post("/api/clickup/oauth/token", requireAuth, async (request, response) => {
 
 app.get("/api/clickup/tasks", requireAuth, async (request, response) => {
   try {
-    const tasksPayload = await getClickupTasks(request.query.listId || clickupListId);
+    const requestedStatuses = request.query.status === "all"
+      ? []
+      : Array.isArray(request.query.status)
+        ? request.query.status
+        : request.query.status
+          ? [request.query.status]
+          : clickupDefaultStatuses;
+    const tasksPayload = await getClickupTasks({
+      listId: request.query.listId || clickupListId,
+      page: request.query.page || 0,
+      statuses: requestedStatuses,
+      includeClosed: request.query.includeClosed !== "false",
+    });
     response.json(tasksPayload);
   } catch (error) {
     response.status(error.status || 500).json({
       error: error.message || "Unable to load ClickUp tasks.",
+      details: error.details,
+    });
+  }
+});
+
+app.get("/api/clickup/meta", requireAuth, async (request, response) => {
+  try {
+    response.json(await getClickupListMeta(request.query.listId || clickupListId));
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to load ClickUp metadata.",
+      details: error.details,
+    });
+  }
+});
+
+app.post("/api/clickup/tasks", requireAuth, async (request, response) => {
+  try {
+    const task = await createClickupManualTask(request.body || {}, request.body?.listId || clickupListId);
+    response.json({ task });
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to create ClickUp task.",
       details: error.details,
     });
   }
@@ -2416,7 +2585,7 @@ app.post("/api/clickup/reports/:reportId/task", requireAuth, async (request, res
   }
 
   try {
-    const task = await createClickupTaskForReport(store, report, request.body?.listId || clickupListId);
+    const task = await createClickupTaskForReport(store, report, request.body?.listId || clickupListId, request.body?.task || {});
     await writeStore(store);
     response.json({ task, report: buildReportPayload(store, report) });
   } catch (error) {

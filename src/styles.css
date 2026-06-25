@@ -498,6 +498,50 @@ button:disabled {
   padding: 0 10px;
 }
 
+.pending-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.pending-form label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.76rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.pending-form input,
+.pending-form select,
+.pending-form textarea,
+.task-toolbar select {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.pending-form textarea {
+  min-height: 92px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.pending-form button {
+  align-self: end;
+}
+
+.task-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .tasks-module {
   display: grid;
   gap: 22px;
@@ -1358,6 +1402,7 @@ button:disabled {
   .unit-grid,
   .clickup-actions,
   .clickup-board,
+  .pending-form,
   .workflow-list {
     grid-template-columns: 1fr;
   }
