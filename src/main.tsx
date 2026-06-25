@@ -1681,9 +1681,9 @@ function App() {
                           )
                           .map((task) => (
                           <a className="clickup-task-card" href={task.url} key={task.id} target="_blank" rel="noreferrer">
-                            <div>
+                            <div className="clickup-task-main">
                               <strong>{task.name}</strong>
-                              <small>Vence: {shortDate(task.dueDate)}</small>
+                              <small>{shortDate(task.dueDate)}</small>
                             </div>
                             <div className="clickup-task-meta">
                               {task.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}

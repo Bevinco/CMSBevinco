@@ -444,7 +444,7 @@ button:disabled {
 
 .clickup-grid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -453,21 +453,25 @@ button:disabled {
   border: 1px solid #edf1f0;
   border-radius: 8px;
   display: grid;
-  gap: 6px;
-  padding: 12px;
+  gap: 5px;
+  padding: 10px 12px;
 }
 
 .clickup-grid span,
 .clickup-actions label {
   color: #46605a;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 800;
+}
+
+.clickup-grid strong {
+  font-size: 0.95rem;
 }
 
 .clickup-grid small,
 .clickup-grid a {
   color: #6f7d79;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   line-height: 1.45;
 }
 
@@ -500,15 +504,15 @@ button:disabled {
 
 .pending-form {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .pending-form label {
   color: #46605a;
   display: grid;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 800;
   gap: 7px;
 }
@@ -525,7 +529,7 @@ button:disabled {
 }
 
 .pending-form textarea {
-  min-height: 92px;
+  min-height: 74px;
   padding: 10px;
   resize: vertical;
 }
@@ -553,24 +557,25 @@ button:disabled {
 
 .tasks-module {
   display: grid;
-  gap: 22px;
+  gap: 16px;
 }
 
 .clickup-board {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(3, minmax(260px, 1fr));
-  margin-top: 16px;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  margin-top: 14px;
 }
 
 .clickup-column {
-  background: #f6f8f7;
+  align-content: start;
+  background: #f8faf9;
   border: 1px solid #dce4e2;
   border-radius: 8px;
   display: grid;
-  gap: 12px;
-  min-height: 180px;
-  padding: 12px;
+  gap: 9px;
+  min-height: auto;
+  padding: 10px;
 }
 
 .clickup-column-header {
@@ -582,7 +587,7 @@ button:disabled {
 
 .clickup-column-header span {
   color: #172026;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -591,33 +596,35 @@ button:disabled {
   background: #e8eeee;
   border-radius: 999px;
   color: #46605a;
-  font-size: 0.8rem;
-  padding: 4px 8px;
+  font-size: 0.72rem;
+  min-width: 26px;
+  padding: 4px 7px;
+  text-align: center;
 }
 
 .clickup-task-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .column-pager {
   align-items: center;
   border-top: 1px solid #dce4e2;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: space-between;
-  padding-top: 10px;
+  padding-top: 8px;
 }
 
 .column-pager button {
-  font-size: 0.78rem;
-  min-height: 32px;
-  padding: 0 10px;
+  font-size: 0.7rem;
+  min-height: 28px;
+  padding: 0 8px;
 }
 
 .column-pager span {
   color: #6f7d79;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -628,8 +635,9 @@ button:disabled {
   border-radius: 8px;
   color: #172026;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  min-height: 82px;
+  padding: 10px;
   text-decoration: none;
 }
 
@@ -638,10 +646,22 @@ button:disabled {
   box-shadow: 0 8px 18px rgba(16, 32, 29, 0.06);
 }
 
+.clickup-task-main {
+  display: grid;
+  gap: 5px;
+}
+
+.clickup-task-main strong {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
 .clickup-task-card small {
   color: #6f7d79;
   display: block;
-  margin-top: 4px;
+  font-size: 0.76rem;
+  margin-top: 0;
 }
 
 .clickup-task-meta {
@@ -655,9 +675,13 @@ button:disabled {
   background: #e7f0ff;
   border-radius: 999px;
   color: #244f8f;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
-  padding: 4px 7px;
+  max-width: 120px;
+  overflow: hidden;
+  padding: 3px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .clickup-task-meta i {
@@ -666,13 +690,13 @@ button:disabled {
   border-radius: 999px;
   color: #ffffff;
   display: inline-flex;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-style: normal;
   font-weight: 800;
-  height: 24px;
+  height: 22px;
   justify-content: center;
   text-transform: uppercase;
-  width: 24px;
+  width: 22px;
 }
 
 .upload-box {
