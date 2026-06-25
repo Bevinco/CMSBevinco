@@ -56,6 +56,15 @@ type SculptureUnit = {
   sculptureBaseUrl?: string;
 };
 
+type SculpturePeriod = {
+  id: string;
+  label: string;
+  startsAt: string;
+  endsAt: string;
+  pid?: string;
+  sculpturePid?: string;
+};
+
 type Period = {
   id: string;
   label: string;
@@ -318,6 +327,10 @@ function shortDate(timestamp?: number | null) {
   return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "short" }).format(new Date(timestamp));
 }
 
+function monthFromPeriod(period?: Period | SculpturePeriod | null) {
+  return (period?.startsAt || period?.endsAt || "").slice(0, 7);
+}
+
 function statusClass(status: ReportStatus) {
   if (status === "Enviado") return "pill success";
   if (status === "Listo para revisar") return "pill warning";
@@ -432,7 +445,10 @@ function App() {
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
+  const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
+  const [fromMonth, setFromMonth] = useState("");
+  const [toMonth, setToMonth] = useState("");
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
@@ -494,6 +510,11 @@ function App() {
     setSelectedPeriodId(report?.periodId || payload.periods[0]?.id || "");
     setCommentsDraft(report?.comments || "");
     setEmailDraft(report?.emailDraft || "");
+    const selectedMonth = monthFromPeriod(report?.period || payload.periods[0]);
+    if (selectedMonth) {
+      setFromMonth((current) => current || selectedMonth);
+      setToMonth((current) => current || selectedMonth);
+    }
   }
 
   async function loadModule() {
@@ -745,23 +766,31 @@ function App() {
 
   async function loadSculptureUnits() {
     setWorkStatus("loading");
-    setError("Buscando clientes y unidades visibles en Sculpture...");
+    setError("Buscando restaurantes y periodos visibles en Sculpture...");
 
     try {
-      const payload = await readJson<{ units: SculptureUnit[]; errors?: Array<{ area: string; path: string; error: string }> }>(
+      const payload = await readJson<{ units: SculptureUnit[]; periods?: SculpturePeriod[]; errors?: Array<{ area: string; path: string; error: string }> }>(
         await fetch("/api/module1/sculpture-units"),
       );
       const units = payload.units || [];
+      const periodsFromSculpture = payload.periods || [];
       setSculptureUnits(units);
+      setSculpturePeriods(periodsFromSculpture);
       setSelectedSculptureUnitId((current) => current || units[0]?.id || "");
+      const firstMonth = monthFromPeriod(periodsFromSculpture[0]);
+      if (firstMonth) {
+        setFromMonth((current) => current || firstMonth);
+        setToMonth((current) => current || firstMonth);
+      }
       setError(
         units.length
-          ? `Sculpture devolvio ${units.length} unidad(es). Elige una para crearle reportes.`
-          : "No se detectaron unidades en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
+          ? `Sculpture devolvio ${units.length} restaurante(s) y ${periodsFromSculpture.length} periodo(s). Elige rango y consulta.`
+          : "No se detectaron restaurantes en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
       );
       setWorkStatus(units.length ? "ready" : "error");
     } catch (unitError) {
       setSculptureUnits([]);
+      setSculpturePeriods([]);
       setSelectedSculptureUnitId("");
       setError(unitError instanceof Error ? unitError.message : "No se pudo leer la lista de Sculpture.");
       setWorkStatus("error");
@@ -798,6 +827,43 @@ function App() {
       setWorkStatus("ready");
     } catch (unitError) {
       setError(unitError instanceof Error ? unitError.message : "No se pudo agregar la unidad de Sculpture.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function querySculptureReports() {
+    const selectedUnit = sculptureUnits.find((item) => item.id === selectedSculptureUnitId);
+
+    if (!selectedUnit && !selectedClientId) {
+      setError("Primero busca y selecciona un restaurante/local de Sculpture.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Consultando reportes directamente en Sculpture...");
+
+    try {
+      const payload = await readJson<BootstrapPayload & { queriedReports?: Report[] }>(
+        await fetch("/api/module1/sculpture/query", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            unit: selectedUnit,
+            clientId: selectedUnit ? "" : selectedClientId,
+            periodId: selectedPeriodId,
+            fromMonth,
+            toMonth,
+            periods: sculpturePeriods,
+          }),
+        }),
+      );
+      applyBootstrapPayload(payload);
+      const count = payload.queriedReports?.length || 0;
+      setError(count ? `Consulta lista: ${count} reporte(s) actualizados desde Sculpture.` : "Sculpture respondio, pero no devolvio reportes para el rango.");
+      setWorkStatus(count ? "ready" : "error");
+    } catch (queryError) {
+      setError(queryError instanceof Error ? queryError.message : "No se pudo consultar Sculpture.");
       setWorkStatus("error");
     }
   }
@@ -1220,93 +1286,78 @@ function App() {
               </article>
             </div>
 
-            <form className="unit-form" onSubmit={createReportingUnit}>
+            <div className="unit-form">
               <div>
-                <p className="eyebrow">Agregar otro cliente/local</p>
-                <strong>Crear unidad para probar Sculpture</strong>
+                <p className="eyebrow">Consulta directa</p>
+                <strong>Traer reportes por restaurante y mes</strong>
               </div>
               <div className="unit-form-grid">
                 <label>
-                  Cliente
-                  <input
-                    placeholder="Ej. Bardot"
-                    value={newUnit.accountName}
-                    onChange={(event) => setNewUnit((current) => ({ ...current, accountName: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Unidad / modulo
-                  <input
-                    placeholder="Ej. Barra, Cocina, Vitacura"
-                    value={newUnit.moduleName}
-                    onChange={(event) => setNewUnit((current) => ({ ...current, moduleName: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Area
-                  <select value={newUnit.area} onChange={(event) => setNewUnit((current) => ({ ...current, area: event.target.value }))}>
-                    <option value="Food">Cocina / Food</option>
-                    <option value="Beverage">Barra / Beverage</option>
+                  Restaurante/local
+                  <select
+                    value={selectedSculptureUnitId}
+                    onChange={(event) => setSelectedSculptureUnitId(event.target.value)}
+                  >
+                    {sculptureUnits.length ? (
+                      sculptureUnits.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.name} - {unit.area}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Busca restaurantes en Sculpture</option>
+                    )}
                   </select>
                 </label>
                 <label>
-                  Sculpture CID
+                  Desde mes
                   <input
-                    inputMode="numeric"
-                    placeholder="Ej. 29088"
-                    value={newUnit.sculptureCid}
-                    onChange={(event) => setNewUnit((current) => ({ ...current, sculptureCid: event.target.value }))}
+                    type="month"
+                    value={fromMonth}
+                    onChange={(event) => setFromMonth(event.target.value)}
                   />
                 </label>
-                <label className="wide-field">
-                  Emails de envio
+                <label>
+                  Hasta mes
                   <input
-                    placeholder="cliente@empresa.com, operaciones@empresa.com"
-                    value={newUnit.recipients}
-                    onChange={(event) => setNewUnit((current) => ({ ...current, recipients: event.target.value }))}
+                    type="month"
+                    value={toMonth}
+                    onChange={(event) => setToMonth(event.target.value)}
                   />
                 </label>
+                <div className="query-note">
+                  <span>{sculpturePeriods.length ? `${sculpturePeriods.length} periodos detectados en Sculpture` : "Si Sculpture no devuelve periodos, se usa el periodo seleccionado arriba."}</span>
+                </div>
               </div>
-              <button className="secondary-button" disabled={workStatus === "loading"} type="submit">
-                <Plus size={17} /> Crear unidad
-              </button>
-            </form>
+              <div className="query-actions">
+                <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadSculptureUnits} type="button">
+                  <RefreshCw size={17} /> Buscar restaurantes
+                </button>
+                <button className="primary-button" disabled={workStatus === "loading"} onClick={querySculptureReports} type="button">
+                  <Database size={17} /> Consultar reportes
+                </button>
+              </div>
+            </div>
           </div>
           <div className="sculpture-picker">
             <div>
               <p className="eyebrow">Directo desde Sculpture</p>
-              <strong>Elegir cliente/local visible para esta cuenta</strong>
-              <small>Busca unidades en Food y Beverage, guarda el CID correcto y luego usa el periodo seleccionado para generar el reporte.</small>
+              <strong>Flujo esperado</strong>
+              <small>El CMS lee restaurantes visibles en Sculpture, cruza el rango de meses con los periodos disponibles y actualiza los reportes guardados para revisión, PDF y envío.</small>
             </div>
             <div className="sculpture-picker-row">
-              <label>
-                Unidad detectada
-                <select
-                  value={selectedSculptureUnitId}
-                  onChange={(event) => setSelectedSculptureUnitId(event.target.value)}
-                >
-                  {sculptureUnits.length ? (
-                    sculptureUnits.map((unit) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.name} - {unit.area} - CID {unit.sculptureCid || unit.cid}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Busca unidades para completar esta lista</option>
-                  )}
-                </select>
-              </label>
-              <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadSculptureUnits} type="button">
-                <RefreshCw size={17} /> Buscar en Sculpture
-              </button>
-              <button
-                className="primary-button"
-                disabled={!selectedSculptureUnitId || workStatus === "loading"}
-                onClick={() => importSelectedSculptureUnit()}
-                type="button"
-              >
-                <Plus size={17} /> Usar unidad
-              </button>
+              <article>
+                <strong>1. Buscar</strong>
+                <span>Trae restaurantes/locales y periodos visibles con las credenciales configuradas.</span>
+              </article>
+              <article>
+                <strong>2. Consultar</strong>
+                <span>Usa el CID del restaurante y el PID de cada periodo para pedir Variance e Intelipar.</span>
+              </article>
+              <article>
+                <strong>3. Revisar</strong>
+                <span>El reporte queda en el CMS para resumen, PDF, email y ClickUp.</span>
+              </article>
             </div>
           </div>
         </section>

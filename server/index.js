@@ -1,5 +1,6 @@
 import path from "node:path";
 import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import * as cheerio from "cheerio";
@@ -7,6 +8,27 @@ import express from "express";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function loadLocalEnvFile() {
+  const envPath = path.resolve(__dirname, "../.env");
+  if (!fsSync.existsSync(envPath)) return;
+
+  const rawEnv = fsSync.readFileSync(envPath, "utf8");
+  rawEnv.split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([^#=]+)=(.*)$/);
+    if (!match) return;
+    const key = match[1].trim();
+    if (process.env[key] !== undefined) return;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  });
+}
+
+loadLocalEnvFile();
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -418,6 +440,88 @@ function parseSculptureUnitsFromHtml(html, { area, baseUrl }) {
   return Array.from(units.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function normalizeMonthName(month = "") {
+  const normalized = String(month || "").slice(0, 3).toLowerCase();
+  const monthMap = {
+    jan: "01",
+    ene: "01",
+    feb: "02",
+    mar: "03",
+    apr: "04",
+    abr: "04",
+    may: "05",
+    jun: "06",
+    jul: "07",
+    aug: "08",
+    ago: "08",
+    sep: "09",
+    oct: "10",
+    nov: "11",
+    dec: "12",
+    dic: "12",
+  };
+  return monthMap[normalized] || "";
+}
+
+function parseSculpturePeriodDates(label = "") {
+  const text = String(label || "").replace(/\s+/g, " ").trim();
+  const match = text.match(/([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\s+(\d{1,2})\s+(?:to|al|-)\s+(?:(\w+)\s+)?(\d{1,2})\s+(\d{4})/i);
+  if (!match) return { startsAt: "", endsAt: "" };
+
+  const [, startMonthName, startDay, endMonthName, endDay, year] = match;
+  const startMonth = normalizeMonthName(startMonthName);
+  const endMonth = normalizeMonthName(endMonthName || startMonthName);
+  if (!startMonth || !endMonth) return { startsAt: "", endsAt: "" };
+
+  return {
+    startsAt: `${year}-${startMonth}-${String(startDay).padStart(2, "0")}`,
+    endsAt: `${year}-${endMonth}-${String(endDay).padStart(2, "0")}`,
+  };
+}
+
+function looksLikeSculpturePeriodLabel(value = "") {
+  const text = String(value || "").toLowerCase();
+  return /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|abr|ago|dic)\b/.test(text) &&
+    (text.includes(" to ") || text.includes(" al ") || /\d{4}/.test(text));
+}
+
+function parseSculpturePeriodsFromHtml(html) {
+  const $ = cheerio.load(html);
+  const periods = new Map();
+  const addPeriod = ({ pid, label }) => {
+    const cleanLabel = cleanSculptureUnitName(label);
+    const resolvedPid = configuredIdentifier(pid);
+    if (!resolvedPid || !looksLikeSculpturePeriodLabel(cleanLabel)) return;
+    const { startsAt, endsAt } = parseSculpturePeriodDates(cleanLabel);
+    periods.set(resolvedPid, {
+      id: `sculpture-${resolvedPid}`,
+      label: cleanLabel,
+      startsAt,
+      endsAt,
+      pid: resolvedPid,
+      sculpturePid: resolvedPid,
+      source: "sculpture",
+    });
+  };
+
+  $("option").each((_, option) => {
+    const element = $(option);
+    const value = element.attr("value") || "";
+    addPeriod({ pid: configuredIdentifier(value, extractCidFromValue(value)), label: element.text() });
+  });
+
+  $("a, button, [data-pid], [data-period-id]").each((_, node) => {
+    const element = $(node);
+    const href = element.attr("href") || element.attr("data-url") || element.attr("value") || "";
+    addPeriod({
+      pid: element.attr("data-pid") || element.attr("data-period-id") || configuredIdentifier(element.attr("value"), href.match(/[?&]pid=(\d+)/i)?.[1]),
+      label: element.text() || element.attr("title") || element.attr("aria-label") || "",
+    });
+  });
+
+  return Array.from(periods.values()).sort((left, right) => String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)));
+}
+
 async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
   const requestPage = async (cookie) => {
     const response = await fetch(new URL(pagePath, baseUrl).toString(), {
@@ -454,6 +558,7 @@ async function discoverSculptureUnits() {
     { area: "Beverage", baseUrl: sculptureBeverageBaseUrl, paths: ["/", "/reports/variance/", "/requisition/"] },
   ];
   const units = new Map();
+  const periods = new Map();
   const errors = [];
 
   for (const target of targets) {
@@ -461,6 +566,7 @@ async function discoverSculptureUnits() {
       try {
         const html = await fetchSculpturePage({ baseUrl: target.baseUrl, path: pagePath });
         parseSculptureUnitsFromHtml(html, target).forEach((unit) => units.set(`${unit.sculptureCid}-${unit.area}`, unit));
+        parseSculpturePeriodsFromHtml(html).forEach((period) => periods.set(period.pid, period));
       } catch (error) {
         errors.push({ area: target.area, path: pagePath, error: error.message });
       }
@@ -469,6 +575,7 @@ async function discoverSculptureUnits() {
 
   return {
     units: Array.from(units.values()).sort((left, right) => left.name.localeCompare(right.name)),
+    periods: Array.from(periods.values()),
     errors,
   };
 }
@@ -1563,6 +1670,38 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   return syncResults;
 }
 
+function periodMonthKey(period) {
+  const date = period?.startsAt || period?.endsAt || "";
+  return String(date).slice(0, 7);
+}
+
+function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", fromMonth = "", toMonth = "" } = {}) {
+  const incomingPeriods = Array.isArray(periods)
+    ? periods.map((period) => ensurePeriod(store, period)).filter(Boolean)
+    : [];
+  const availablePeriods = incomingPeriods.length ? incomingPeriods : store.periods;
+  const from = String(fromMonth || "").slice(0, 7);
+  const to = String(toMonth || from || "").slice(0, 7);
+
+  if (from || to) {
+    const filtered = availablePeriods.filter((period) => {
+      const month = periodMonthKey(period);
+      if (!month) return false;
+      if (from && month < from) return false;
+      if (to && month > to) return false;
+      return true;
+    });
+    if (filtered.length) return filtered;
+  }
+
+  const selected = store.periods.find((period) => period.id === periodId) ||
+    availablePeriods.find((period) => period.id === periodId) ||
+    availablePeriods[0] ||
+    store.periods[0];
+
+  return selected ? [selected] : [];
+}
+
 function buildReportPayload(store, report) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
@@ -2457,6 +2596,68 @@ app.post("/api/module1/sculpture-units/import", requireAuth, async (request, res
     clients: store.clients,
     selectedReport: buildReportPayload(store, report),
     reports: store.reports.map((item) => buildReportPayload(store, item)),
+  });
+});
+
+app.post("/api/module1/sculpture/query", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const { unit, clientId, periodId, fromMonth, toMonth, periods: incomingPeriods = [] } = request.body || {};
+  const resolvedUnit = unit || store.clients.find((candidate) => candidate.id === clientId);
+
+  if (!resolvedUnit) {
+    response.status(400).json({ error: "Selecciona un restaurante/local de Sculpture para consultar." });
+    return;
+  }
+
+  const sculptureCid = configuredIdentifier(resolvedUnit.sculptureCid, resolvedUnit.cid);
+  if (!sculptureCid) {
+    response.status(400).json({ error: "El restaurante/local seleccionado no tiene CID numerico de Sculpture." });
+    return;
+  }
+
+  const client = ensureClient(store, {
+    ...resolvedUnit,
+    cid: sculptureCid,
+    sculptureCid,
+    sculptureBaseUrl: resolvedUnit.baseUrl || resolvedUnit.sculptureBaseUrl || baseUrlForSculptureArea(resolvedUnit.area),
+    recipients: resolvedUnit.recipients || [],
+  });
+  const selectedPeriods = resolvePeriodsForSculptureQuery(store, {
+    periods: incomingPeriods,
+    periodId,
+    fromMonth,
+    toMonth,
+  });
+
+  if (!selectedPeriods.length) {
+    response.status(400).json({ error: "No hay periodos disponibles para el rango seleccionado." });
+    return;
+  }
+
+  const queriedReports = [];
+  const syncResultsByPeriod = {};
+
+  for (const period of selectedPeriods) {
+    const report = reportForClientPeriod(store, client.id, period.id);
+    const syncResults = await syncSculptureSources(store, report, {
+      cid: sculptureCid,
+      pid: period.sculpturePid || period.pid,
+      area: client.area,
+    });
+    syncResultsByPeriod[period.id] = syncResults;
+    queriedReports.push(buildReportPayload(store, report));
+  }
+
+  await writeStore(store);
+
+  response.json({
+    client,
+    clients: store.clients,
+    periods: store.periods,
+    selectedReport: queriedReports[0] || null,
+    queriedReports,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    syncResultsByPeriod,
   });
 });
 

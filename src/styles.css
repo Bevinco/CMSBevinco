@@ -481,6 +481,28 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.query-note {
+  align-items: center;
+  background: #f5f8f7;
+  border: 1px solid #e7eceb;
+  border-radius: 8px;
+  color: #66706d;
+  display: flex;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding: 0 10px;
+}
+
+.query-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.query-actions button {
+  flex: 1 1 190px;
+}
+
 .sculpture-picker {
   background: #f8faf9;
   border: 1px solid #dce4e2;
@@ -510,7 +532,7 @@ button:disabled {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(280px, 1fr) auto auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .sculpture-picker-row label {
@@ -528,6 +550,26 @@ button:disabled {
   color: #172026;
   min-height: 38px;
   padding: 0 10px;
+}
+
+.sculpture-picker-row article {
+  background: #ffffff;
+  border: 1px solid #e7eceb;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-height: 86px;
+  padding: 12px;
+}
+
+.sculpture-picker-row article strong {
+  color: var(--sculpture-blue);
+}
+
+.sculpture-picker-row article span {
+  color: #66706d;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .clickup-panel {
