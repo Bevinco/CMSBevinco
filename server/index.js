@@ -196,18 +196,28 @@ function normalizeHeader(value) {
     .replace(/^[A-Z]/, (char) => char.toLowerCase());
 }
 
-function parseSculptureTable(html) {
-  const $ = cheerio.load(html);
-  const table = $("table").first();
-  const headers = table
+function parseSculptureTableElement($, table) {
+  let headers = $(table)
     .find("thead th")
     .map((_, element) => $(element).text().trim().replace(/\s+/g, " "))
     .get();
 
+  if (!headers.length) {
+    headers = $(table)
+      .find("tr")
+      .first()
+      .find("th")
+      .map((_, element) => $(element).text().trim().replace(/\s+/g, " "))
+      .get();
+  }
+
+  const bodyRows = $(table).find("tbody tr").length ? $(table).find("tbody tr") : $(table).find("tr");
   const rows = [];
   let currentGroup = "";
 
-  table.find("tbody tr, tr").each((_, row) => {
+  bodyRows.each((rowIndex, row) => {
+    if (!$(row).find("td").length) return;
+
     const cells = $(row)
       .find("td")
       .map((__, cell) => $(cell).text().trim().replace(/\s+/g, " "))
@@ -215,8 +225,13 @@ function parseSculptureTable(html) {
 
     if (!cells.length) return;
 
+    if (!headers.length && rowIndex === 0) {
+      headers = cells;
+      return;
+    }
+
     const filledCells = cells.filter(Boolean);
-    if (filledCells.length === 1 && cells.length < headers.length) {
+    if (filledCells.length === 1 && (!headers.length || cells.length < headers.length)) {
       currentGroup = filledCells[0];
       return;
     }
@@ -235,6 +250,18 @@ function parseSculptureTable(html) {
   });
 
   return { headers, rows };
+}
+
+function parseSculptureTable(html) {
+  const $ = cheerio.load(html);
+  const tables = $("table")
+    .map((_, table) => parseSculptureTableElement($, table))
+    .get();
+
+  return tables.sort((left, right) => {
+    if (right.rows.length !== left.rows.length) return right.rows.length - left.rows.length;
+    return right.headers.length - left.headers.length;
+  })[0] || { headers: [], rows: [] };
 }
 
 function getSetCookieHeaders(response) {
@@ -1004,35 +1031,70 @@ async function buildStoreFromSamples() {
   };
 }
 
+function pickRecordValue(record, keys, fallback = "") {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== "") return record[key];
+  }
+  return fallback;
+}
+
 function extractReportMetrics(parsedTable) {
   const rows = parsedTable.rows || [];
   const categoryMap = new Map();
   const products = [];
+  let revenue = 0;
+  let usedCost = 0;
+  let soldCost = 0;
+  let varianceTotal = 0;
 
   rows.forEach((row) => {
     const values = row.values || [];
-    const itemName = row.record.itemName || values[0] || "";
-    const category = row.group || row.record.category || "Sin categoria";
+    const itemName = pickRecordValue(row.record, ["itemName", "item", "product", "productName", "producto", "nombreArticulo", "nombreArtCulo"], values[0] || "");
+    const isTotal = isTotalRow(itemName) || /^total\s+/i.test(itemName);
+    const category = isTotal
+      ? cleanTotalName(itemName)
+      : row.group || pickRecordValue(row.record, ["category", "categoria", "categorA"], "Sin categoria");
     const varianceValue =
-      row.record.variance ||
-      row.record.varianceAmount ||
-      row.record.difference ||
-      row.record.extendedDifference ||
-      values.find((value) => String(value).includes("%")) ||
+      pickRecordValue(row.record, [
+        "variance",
+        "varianceAmount",
+        "difference",
+        "extendedDifference",
+        "diferenciaCosto",
+        "ahorroFaltanteCosto",
+        "faltanteCosto",
+      ]) ||
       values[values.length - 1] ||
       "0";
     const amount = parseNumber(varianceValue);
+    const percentValue =
+      pickRecordValue(row.record, ["variancePercent", "differencePercent", "diferencia", "diferenciaPct", "porcentajeDiferencia"]) ||
+      values.find((value) => String(value).includes("%"));
+    const rowRevenue = parseNumber(pickRecordValue(row.record, ["revenue", "ingresos", "sales", "ventas"]));
+    const rowUsedCost = parseNumber(pickRecordValue(row.record, ["usedCost", "usadoCosto", "costoUsado", "usageCost"]));
+    const rowSoldCost = parseNumber(pickRecordValue(row.record, ["soldCost", "vendidoCosto", "costoVendido", "salesCost"]));
 
-    if (itemName) {
+    if (!isTotal) {
+      revenue += rowRevenue;
+      usedCost += rowUsedCost;
+      soldCost += rowSoldCost;
+      varianceTotal += amount;
+    }
+
+    if (itemName && !isTotal) {
       products.push({
         name: itemName,
         category,
         varianceAmount: amount,
-        variancePercent: parseNumber(values.find((value) => String(value).includes("%"))),
+        variancePercent: parseNumber(percentValue),
       });
     }
 
-    categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
+    if (isTotal) {
+      categoryMap.set(category, amount);
+    } else {
+      categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
+    }
   });
 
   const categoryVariances = Array.from(categoryMap.entries()).map(([category, amount]) => ({
@@ -1042,6 +1104,12 @@ function extractReportMetrics(parsedTable) {
   }));
 
   return {
+    summary: {
+      revenue,
+      costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
+      variancePercent: soldCost ? Number(((varianceTotal / soldCost) * 100).toFixed(1)) : 0,
+      varianceAmount: varianceTotal,
+    },
     categoryVariances: categoryVariances.slice(0, 8),
     topProducts: products
       .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
@@ -1520,28 +1588,38 @@ async function getClickupTasks({
   };
 }
 
-async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", baseUrl = baseUrlForSculptureArea(area) }) {
-  const reportConfig = {
+function uniqueSculptureConfigs(configs) {
+  const seen = new Set();
+  return configs.filter((config) => {
+    const key = `${config.path}|${JSON.stringify(config.payload)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function sculptureReportConfigs({ type, cid, pid }) {
+  const configured = {
     varianceDetailed: {
-      path: process.env.SCULPTURE_VARIANCE_DETAILED_PATH || "/reports/variance/",
+      path: process.env.SCULPTURE_VARIANCE_DETAILED_PATH || "/reports/variance/overview/",
       payload: {
-        cmd: process.env.SCULPTURE_VARIANCE_DETAILED_CMD || "variance",
+        cmd: process.env.SCULPTURE_VARIANCE_DETAILED_CMD || "overview",
         view: "detailed",
         cid,
         pid,
       },
     },
     varianceSummary: {
-      path: process.env.SCULPTURE_VARIANCE_SUMMARY_PATH || "/reports/variance/",
+      path: process.env.SCULPTURE_VARIANCE_SUMMARY_PATH || "/reports/variance/overview/",
       payload: {
-        cmd: process.env.SCULPTURE_VARIANCE_SUMMARY_CMD || "variance",
+        cmd: process.env.SCULPTURE_VARIANCE_SUMMARY_CMD || "overview",
         view: "summary",
         cid,
         pid,
       },
     },
     intelipar: {
-      path: process.env.SCULPTURE_INTELIPAR_PATH || "/reports/intelipar/",
+      path: process.env.SCULPTURE_INTELIPAR_PATH || "/reports/intelipar/overview/",
       payload: {
         cmd: process.env.SCULPTURE_INTELIPAR_CMD || "overview",
         cid,
@@ -1550,15 +1628,41 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
     },
   }[type];
 
-  if (!reportConfig) {
+  if (!configured) return [];
+
+  if (type === "intelipar") {
+    return uniqueSculptureConfigs([
+      configured,
+      { path: "/reports/intelipar/overview/", payload: { cmd: "overview", cid, pid } },
+      { path: "/reports/intelipar/", payload: { cmd: "overview", cid, pid } },
+      { path: "/intelipar/overview/", payload: { cmd: "overview", cid, pid } },
+    ]);
+  }
+
+  const view = type === "varianceSummary" ? "summary" : "detailed";
+  return uniqueSculptureConfigs([
+    configured,
+    { path: "/reports/variance/overview/", payload: { cmd: "overview", view, cid, pid } },
+    { path: "/reports/variance/overview/", payload: { cmd: "overview", detail: view, cid, pid } },
+    { path: "/reports/variance/", payload: { cmd: "overview", view, cid, pid } },
+    { path: "/reports/variance/overview/", payload: { cmd: "variance", view, cid, pid } },
+  ]);
+}
+
+async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", baseUrl = baseUrlForSculptureArea(area) }) {
+  const reportConfigs = sculptureReportConfigs({ type, cid, pid });
+
+  if (!reportConfigs.length) {
     const error = new Error("Unsupported report type.");
     error.status = 400;
     throw error;
   }
 
-  const body = new URLSearchParams(reportConfig.payload);
-  const requestReport = async (cookie) => {
-    const response = await fetch(`${baseUrl}${reportConfig.path}`, {
+  const attempts = [];
+  const requestReport = async (cookie, reportConfig) => {
+    const body = new URLSearchParams(reportConfig.payload);
+    const requestUrl = new URL(reportConfig.path, baseUrl).toString();
+    const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
         accept: "text/html, */*; q=0.01",
@@ -1571,39 +1675,66 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
       body,
     });
     const html = await response.text();
-    return { response, html };
+    return { response, html, requestUrl };
   };
 
   let cookie = await getSculptureCookie({ baseUrl });
-  let { response, html } = await requestReport(cookie);
+  let firstEmptyResult = null;
 
-  if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
-    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
-    ({ response, html } = await requestReport(cookie));
+  for (const reportConfig of reportConfigs) {
+    let { response, html, requestUrl } = await requestReport(cookie, reportConfig);
+
+    if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
+      cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+      ({ response, html, requestUrl } = await requestReport(cookie, reportConfig));
+    }
+
+    const attempt = {
+      endpoint: new URL(requestUrl).pathname,
+      cmd: reportConfig.payload.cmd,
+      view: reportConfig.payload.view || reportConfig.payload.detail || "",
+      status: response.status,
+      rowsCount: 0,
+    };
+
+    if (!response.ok) {
+      attempts.push({ ...attempt, error: `HTTP ${response.status}` });
+      continue;
+    }
+
+    if (looksLikeSculptureLogin(html)) {
+      attempts.push({ ...attempt, error: "Login requerido" });
+      continue;
+    }
+
+    const parsed = parseSculptureTable(html);
+    attempt.rowsCount = parsed.rows?.length || 0;
+    attempt.headersCount = parsed.headers?.length || 0;
+    attempts.push(attempt);
+
+    const result = {
+      type,
+      endpoint: attempt.endpoint,
+      cmd: reportConfig.payload.cmd,
+      view: attempt.view,
+      baseUrl,
+      cid,
+      pid,
+      attempts,
+      ...parsed,
+    };
+
+    if (parsed.rows?.length) return result;
+    firstEmptyResult ||= result;
   }
 
-  if (!response.ok) {
-    const error = new Error(`Sculpture returned ${response.status} for ${type}.`);
-    error.status = response.status;
-    error.details = html.slice(0, 500);
-    throw error;
-  }
+  if (firstEmptyResult) return firstEmptyResult;
 
-  if (looksLikeSculptureLogin(html)) {
-    const error = new Error(`Sculpture login is required for ${type}.`);
-    error.status = 401;
-    error.details = html.slice(0, 500);
-    throw error;
-  }
-
-  return {
-    type,
-    endpoint: reportConfig.path,
-    baseUrl,
-    cid,
-    pid,
-    ...parseSculptureTable(html),
-  };
+  const error = new Error(`Sculpture no devolvio datos para ${type}.`);
+  error.status = attempts.some((attempt) => attempt.error === "Login requerido") ? 401 : 502;
+  error.details = JSON.stringify(attempts.slice(0, 6));
+  error.attempts = attempts;
+  throw error;
 }
 
 async function syncSculptureSources(store, report, requestBody = {}) {
@@ -1638,6 +1769,14 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
       if (type === "varianceDetailed" || type === "varianceSummary") {
         const metrics = extractReportMetrics(data);
+        if (
+          metrics.summary.revenue ||
+          metrics.summary.costPercent ||
+          metrics.summary.varianceAmount ||
+          metrics.summary.variancePercent
+        ) {
+          report.summary = metrics.summary;
+        }
         if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
         if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
       }
@@ -1656,6 +1795,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       syncResults[type] = {
         error: error.message,
         details: error.details,
+        attempts: error.attempts,
         cid,
         pid,
         cidSource,

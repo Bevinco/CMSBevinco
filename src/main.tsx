@@ -138,7 +138,12 @@ type BootstrapPayload = {
   selectedReport: Report | null;
 };
 
-type SyncResults = Record<string, { error?: string; rowsCount?: number }>;
+type SyncResults = Record<string, { error?: string; rowsCount?: number; endpoint?: string; cmd?: string; attempts?: Array<{ endpoint?: string; status?: number; rowsCount?: number; error?: string }> }>;
+
+type SculptureQueryPayload = BootstrapPayload & {
+  queriedReports?: Report[];
+  syncResultsByPeriod?: Record<string, SyncResults>;
+};
 
 type ClickupStatus = {
   configured: boolean;
@@ -148,6 +153,16 @@ type ClickupStatus = {
   user?: { username?: string; email?: string } | null;
   error?: string;
 };
+
+function summarizeSculptureSync(syncResultsByPeriod: SculptureQueryPayload["syncResultsByPeriod"]) {
+  const results = Object.values(syncResultsByPeriod || {}).flatMap((periodResults) => Object.values(periodResults || {}));
+  const rowsCount = results.reduce((sum, result) => sum + (Number(result.rowsCount) || 0), 0);
+  const errors = results.filter((result) => result.error);
+  const emptySources = results.filter((result) => !result.error && !(Number(result.rowsCount) || 0));
+  const endpoints = Array.from(new Set(results.map((result) => result.endpoint).filter(Boolean))).slice(0, 3);
+
+  return { rowsCount, errors, emptySources, endpoints };
+}
 
 type ClickupTask = {
   id: string;
@@ -854,7 +869,7 @@ function App() {
     setError("Consultando reportes directamente en Sculpture...");
 
     try {
-      const payload = await readJson<BootstrapPayload & { queriedReports?: Report[] }>(
+      const payload = await readJson<SculptureQueryPayload>(
         await fetch("/api/module1/sculpture/query", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -870,8 +885,20 @@ function App() {
       );
       applyBootstrapPayload(payload);
       const count = payload.queriedReports?.length || 0;
-      setError(count ? `Consulta lista: ${count} reporte(s) actualizados desde Sculpture.` : "Sculpture respondio, pero no devolvio reportes para el rango.");
-      setWorkStatus(count ? "ready" : "error");
+      const syncSummary = summarizeSculptureSync(payload.syncResultsByPeriod);
+
+      if (count && syncSummary.rowsCount) {
+        setError(`Consulta lista: ${count} reporte(s) actualizados desde Sculpture con ${syncSummary.rowsCount} fila(s) leidas.`);
+        setWorkStatus("ready");
+        return;
+      }
+
+      const endpointNote = syncSummary.endpoints.length ? ` Endpoints probados: ${syncSummary.endpoints.join(", ")}.` : "";
+      const errorNote = syncSummary.errors.length
+        ? ` ${syncSummary.errors.length} fuente(s) fallaron; revisa sesion, credenciales o permisos en Render.`
+        : ` Sculpture respondio, pero no devolvio filas para las fuentes del periodo.`;
+      setError(`${errorNote}${endpointNote}`);
+      setWorkStatus("error");
     } catch (queryError) {
       setError(queryError instanceof Error ? queryError.message : "No se pudo consultar Sculpture.");
       setWorkStatus("error");
