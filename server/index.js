@@ -21,6 +21,10 @@ const sculpturePassword =
 const sculptureLoginPath = process.env.SCULPTURE_LOGIN_PATH || "/login/";
 const sculptureLoginUsernameField = process.env.SCULPTURE_LOGIN_USERNAME_FIELD || "";
 const sculptureLoginPasswordField = process.env.SCULPTURE_LOGIN_PASSWORD_FIELD || "";
+const clickupBaseUrl = process.env.CLICKUP_BASE_URL || "https://api.clickup.com/api/v2";
+const clickupListId = process.env.CLICKUP_LIST_ID || process.env.VITE_CLICKUP_LIST_ID || "";
+const clickupClientId = process.env.CLICKUP_CLIENT_ID || "";
+const clickupClientSecret = process.env.CLICKUP_CLIENT_SECRET || "";
 const authUsername = process.env.CMS_AUTH_USERNAME;
 const authPassword = process.env.CMS_AUTH_PASSWORD;
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -29,6 +33,7 @@ const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
 const publicDir = path.resolve(__dirname, "public");
 let sculptureSessionCookieCache = "";
+let clickupAccessTokenCache = "";
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -937,6 +942,157 @@ function detectCsvSourceType(rows, fileName = "") {
   }
 
   return "varianceDetailed";
+}
+
+function getClickupAuth() {
+  if (clickupAccessTokenCache || process.env.CLICKUP_ACCESS_TOKEN || process.env.CLICKUP_OAUTH_ACCESS_TOKEN) {
+    return {
+      header: `Bearer ${clickupAccessTokenCache || process.env.CLICKUP_ACCESS_TOKEN || process.env.CLICKUP_OAUTH_ACCESS_TOKEN}`,
+      source: clickupAccessTokenCache ? "oauth_runtime" : "oauth_env",
+    };
+  }
+
+  const personalToken = process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || "";
+  if (personalToken) {
+    return {
+      header: personalToken,
+      source: "personal_token",
+    };
+  }
+
+  return { header: "", source: "missing" };
+}
+
+async function exchangeClickupCode(code) {
+  if (!clickupClientId || !clickupClientSecret) {
+    const error = new Error("CLICKUP_CLIENT_ID and CLICKUP_CLIENT_SECRET must be configured for OAuth.");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(`${clickupBaseUrl}/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: clickupClientId,
+      client_secret: clickupClientSecret,
+      code,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(payload.err || payload.error || `ClickUp OAuth returned ${response.status}.`);
+    error.status = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  clickupAccessTokenCache = payload.access_token || "";
+  return payload;
+}
+
+async function clickupRequest(pathname, options = {}) {
+  const auth = getClickupAuth();
+  if (!auth.header) {
+    const error = new Error("CLICKUP_API_TOKEN or CLICKUP_ACCESS_TOKEN is not configured.");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(`${clickupBaseUrl}${pathname}`, {
+    ...options,
+    headers: {
+      authorization: auth.header,
+      "content-type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw: text };
+  }
+
+  if (!response.ok) {
+    const error = new Error(payload.err || payload.error || `ClickUp returned ${response.status}.`);
+    error.status = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return { payload, authSource: auth.source };
+}
+
+function buildClickupTaskBody(store, report) {
+  const payload = buildReportPayload(store, report);
+  const clientName = payload.client?.name || report.clientId;
+  const periodLabel = payload.period?.label || report.periodId;
+  const taskName = `Reporte semanal Bevinco - ${clientName} - ${periodLabel}`;
+  const topProducts = (payload.topProducts || [])
+    .slice(0, 5)
+    .map((item) => `- ${item.name} (${item.category}): ${moneyPlain(item.varianceAmount)} / ${item.variancePercent}%`)
+    .join("\n");
+  const suggestions = (payload.purchaseSuggestions || [])
+    .slice(0, 5)
+    .map((item) => `- ${item.item}: stock ${item.stock || "s/i"}, sugerido ${item.suggested || "por revisar"} (${item.provider || "proveedor por validar"})`)
+    .join("\n");
+
+  return {
+    name: taskName,
+    markdown_content: [
+      `## ${taskName}`,
+      "",
+      `**Estado CMS:** ${report.status}`,
+      `**Ingresos:** ${moneyPlain(payload.summary.revenue)}`,
+      `**% costo:** ${payload.summary.costPercent}%`,
+      `**Variance:** ${payload.summary.variancePercent}% (${moneyPlain(payload.summary.varianceAmount)})`,
+      "",
+      "### Resumen generado",
+      payload.comments || "Reporte pendiente de generar en el CMS.",
+      "",
+      "### Top productos",
+      topProducts || "Sin productos destacados.",
+      "",
+      "### Sugerencia de compra",
+      suggestions || "Sin sugerencias cargadas.",
+      "",
+      "### Fuentes",
+      Object.entries(payload.sourceStatus || {})
+        .map(([source, status]) => `- ${sourceLabelsForPdf[source] || source}: ${status}`)
+        .join("\n"),
+    ].join("\n"),
+    tags: ["bevinco", "reporte-semanal"],
+    priority: 3,
+  };
+}
+
+async function createClickupTaskForReport(store, report, listId = clickupListId) {
+  if (!listId) {
+    const error = new Error("CLICKUP_LIST_ID is not configured.");
+    error.status = 503;
+    throw error;
+  }
+
+  const { payload, authSource } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task`, {
+    method: "POST",
+    body: JSON.stringify(buildClickupTaskBody(store, report)),
+  });
+
+  report.clickupTask = {
+    id: payload.id,
+    url: payload.url,
+    name: payload.name,
+    status: payload.status?.status || payload.status,
+    listId,
+    authSource,
+    createdAt: new Date().toISOString(),
+  };
+  report.updatedAt = new Date().toISOString();
+
+  return report.clickupTask;
 }
 
 async function fetchSculptureInternalReport({ type, cid, pid }) {
@@ -2145,6 +2301,76 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   report.updatedAt = new Date().toISOString();
   await writeStore(store);
   response.json({ sent: true, payload, report: buildReportPayload(store, report) });
+});
+
+app.get("/api/clickup/status", requireAuth, async (_request, response) => {
+  const auth = getClickupAuth();
+  const status = {
+    configured: Boolean(auth.header),
+    authSource: auth.source,
+    listIdConfigured: Boolean(clickupListId),
+    connected: false,
+    user: null,
+    error: "",
+  };
+
+  if (!auth.header) {
+    response.json(status);
+    return;
+  }
+
+  try {
+    const { payload } = await clickupRequest("/user");
+    status.connected = true;
+    status.user = payload.user || payload;
+    response.json(status);
+  } catch (error) {
+    status.error = error.message || "Unable to connect to ClickUp.";
+    response.json(status);
+  }
+});
+
+app.post("/api/clickup/oauth/token", requireAuth, async (request, response) => {
+  const code = String(request.body?.code || "").trim();
+
+  if (!code) {
+    response.status(400).json({ error: "ClickUp OAuth code is required." });
+    return;
+  }
+
+  try {
+    const payload = await exchangeClickupCode(code);
+    response.json({
+      connected: Boolean(payload.access_token),
+      tokenType: payload.token_type || "bearer",
+    });
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to exchange ClickUp OAuth code.",
+      details: error.details,
+    });
+  }
+});
+
+app.post("/api/clickup/reports/:reportId/task", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+
+  if (!report) {
+    response.status(404).json({ error: "Report not found." });
+    return;
+  }
+
+  try {
+    const task = await createClickupTaskForReport(store, report, request.body?.listId || clickupListId);
+    await writeStore(store);
+    response.json({ task, report: buildReportPayload(store, report) });
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "Unable to create ClickUp task.",
+      details: error.details,
+    });
+  }
 });
 
 const distPath = path.resolve(__dirname, "../dist");

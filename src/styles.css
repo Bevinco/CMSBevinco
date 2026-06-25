@@ -437,6 +437,67 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.clickup-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.clickup-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.clickup-grid article {
+  background: #f6f8f7;
+  border: 1px solid #edf1f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.clickup-grid span,
+.clickup-actions label {
+  color: #46605a;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.clickup-grid small,
+.clickup-grid a {
+  color: #6f7d79;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.clickup-grid a {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  text-decoration: none;
+}
+
+.clickup-actions {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(260px, 1fr) auto;
+}
+
+.clickup-actions label {
+  display: grid;
+  gap: 7px;
+}
+
+.clickup-actions input {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
 .upload-box {
   display: grid;
   gap: 12px;
@@ -1180,6 +1241,7 @@ button:disabled {
   .source-grid,
   .purchase-grid,
   .agent-analysis-grid,
+  .clickup-grid,
   .reservation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1192,6 +1254,7 @@ button:disabled {
   .split-section,
   .page-grid,
   .unit-grid,
+  .clickup-actions,
   .workflow-list {
     grid-template-columns: 1fr;
   }
@@ -1219,6 +1282,7 @@ button:disabled {
   .source-grid,
   .purchase-grid,
   .agent-analysis-grid,
+  .clickup-grid,
   .reservation-grid {
     grid-template-columns: 1fr;
   }

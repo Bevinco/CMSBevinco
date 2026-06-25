@@ -63,8 +63,11 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 VITE_RESEND_API_KEY=
 VITE_REPORTS_FROM_EMAIL=
-VITE_CLICKUP_API_TOKEN=
-VITE_CLICKUP_LIST_ID=
+CLICKUP_API_TOKEN=
+CLICKUP_ACCESS_TOKEN=
+CLICKUP_CLIENT_ID=
+CLICKUP_CLIENT_SECRET=
+CLICKUP_LIST_ID=
 VITE_SCULPTURE_API_BASE_URL=
 VITE_SCULPTURE_API_KEY=
 VITE_OPENAI_API_KEY=
@@ -90,5 +93,6 @@ CMS_SESSION_SECRET=
 
 `SCULPTURE_SESSION_COOKIE` debe configurarse solo en Render o en `.env` local. No se debe commitear porque permite acceder a la sesion activa de Sculpture. Si la cookie falta o vence, el servidor intenta iniciar sesion con `SCULPTURE_USERNAME` y `SCULPTURE_PASSWORD`.
 `CMS_SESSION_SECRET` debe ser un texto largo y aleatorio para mantener firmadas las sesiones del CMS.
+Para ClickUp, usar `CLICKUP_API_TOKEN` si se trabaja con token personal. Si se usa OAuth, configurar `CLICKUP_CLIENT_ID`, `CLICKUP_CLIENT_SECRET` y conectar desde el CMS con el `code`; el endpoint de intercambio usado es `POST /oauth/token`. `CLICKUP_LIST_ID` define la lista donde se crean las tareas de reportes.
 
 El CMS intenta traer Variance detailed, Variance summary e Intelipar desde los endpoints internos de Sculpture al sincronizar fuentes y antes de generar el reporte. Para clientes o periodos reales, guardar `sculptureCid` en el cliente y `sculpturePid`/`pid` en el periodo; si faltan, usa `SCULPTURE_DEFAULT_CID` y `SCULPTURE_DEFAULT_PID`.

@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Cloud,
   Database,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   LayoutDashboard,
@@ -86,6 +87,15 @@ type Report = {
   };
   comments: string;
   emailDraft: string;
+  clickupTask?: {
+    id?: string;
+    url?: string;
+    name?: string;
+    status?: string;
+    listId?: string;
+    authSource?: string;
+    createdAt?: string;
+  };
   sourceStatus: Record<string, string>;
 };
 
@@ -107,6 +117,15 @@ type BootstrapPayload = {
 };
 
 type SyncResults = Record<string, { error?: string; rowsCount?: number }>;
+
+type ClickupStatus = {
+  configured: boolean;
+  authSource: string;
+  listIdConfigured: boolean;
+  connected: boolean;
+  user?: { username?: string; email?: string } | null;
+  error?: string;
+};
 
 const reportWorkflow = [
   {
@@ -359,6 +378,8 @@ function App() {
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
+  const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
+  const [clickupCode, setClickupCode] = useState("");
   const [newUnit, setNewUnit] = useState({
     accountName: "",
     moduleName: "",
@@ -415,6 +436,44 @@ function App() {
       setWorkStatus("ready");
     } catch (moduleError) {
       setError(moduleError instanceof Error ? moduleError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function loadClickupStatus() {
+    try {
+      const status = await readJson<ClickupStatus>(await fetch("/api/clickup/status"));
+      setClickupStatus(status);
+    } catch (statusError) {
+      setClickupStatus({
+        configured: false,
+        authSource: "error",
+        listIdConfigured: false,
+        connected: false,
+        error: statusError instanceof Error ? statusError.message : "Error desconocido.",
+      });
+    }
+  }
+
+  async function exchangeClickupCode() {
+    if (!clickupCode.trim()) return;
+    setWorkStatus("loading");
+    setError("Conectando ClickUp con el codigo OAuth...");
+
+    try {
+      await readJson(
+        await fetch("/api/clickup/oauth/token", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code: clickupCode.trim() }),
+        }),
+      );
+      setClickupCode("");
+      await loadClickupStatus();
+      setError("ClickUp conectado. Ya puedes crear tareas desde los reportes.");
+      setWorkStatus("ready");
+    } catch (clickupError) {
+      setError(clickupError instanceof Error ? clickupError.message : "Error desconocido.");
       setWorkStatus("error");
     }
   }
@@ -682,6 +741,26 @@ function App() {
     }
   }
 
+  async function createClickupTask() {
+    if (!selectedReport) return;
+    setWorkStatus("loading");
+    setError("Creando tarea en ClickUp para este reporte...");
+
+    try {
+      const payload = await readJson<{ task: NonNullable<Report["clickupTask"]>; report: Report }>(
+        await fetch(`/api/clickup/reports/${selectedReport.id}/task`, { method: "POST" }),
+      );
+      setSelectedReport(payload.report);
+      setReports((current) => current.map((item) => (item.id === payload.report.id ? payload.report : item)));
+      setError(payload.task.url ? `Tarea creada en ClickUp: ${payload.task.url}` : "Tarea creada en ClickUp.");
+      await loadClickupStatus();
+      setWorkStatus("ready");
+    } catch (clickupError) {
+      setError(clickupError instanceof Error ? clickupError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
   async function sendEmail() {
     if (!selectedReport) return;
     setWorkStatus("loading");
@@ -712,7 +791,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (authStatus === "authenticated") loadModule();
+    if (authStatus === "authenticated") {
+      loadModule();
+      loadClickupStatus();
+    }
   }, [authStatus]);
 
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
@@ -1154,6 +1236,61 @@ function App() {
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
             <button className="primary-button" onClick={sendEmail}><Send size={17} /> Preparar/enviar email</button>
+          </div>
+        </section>
+
+        <section className="panel clickup-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">ClickUp</p>
+              <h2>Seguimiento operativo</h2>
+            </div>
+            <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupStatus}>
+              <RefreshCw size={17} /> Verificar
+            </button>
+          </div>
+          <div className="clickup-grid">
+            <article>
+              <span>Conexion</span>
+              <strong>{clickupStatus?.connected ? "Conectado" : "Por configurar"}</strong>
+              <small>
+                {clickupStatus?.connected
+                  ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"} · ${clickupStatus.authSource}`
+                  : clickupStatus?.error || "Configura token/lista o conecta OAuth."}
+              </small>
+            </article>
+            <article>
+              <span>Lista destino</span>
+              <strong>{clickupStatus?.listIdConfigured ? "Configurada" : "Falta CLICKUP_LIST_ID"}</strong>
+              <small>La tarea del reporte se crea en esa lista.</small>
+            </article>
+            <article>
+              <span>Tarea del reporte</span>
+              <strong>{selectedReport?.clickupTask?.id || "No creada"}</strong>
+              {selectedReport?.clickupTask?.url ? (
+                <a href={selectedReport.clickupTask.url} target="_blank" rel="noreferrer">
+                  Abrir en ClickUp <ExternalLink size={14} />
+                </a>
+              ) : (
+                <small>Genera una tarea para coordinar revision, PDF y envio.</small>
+              )}
+            </article>
+          </div>
+          <div className="clickup-actions">
+            <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
+              <Plus size={17} /> Crear tarea ClickUp
+            </button>
+            <label>
+              Codigo OAuth
+              <input
+                placeholder="Pega aqui el code de redirect si usan OAuth"
+                value={clickupCode}
+                onChange={(event) => setClickupCode(event.target.value)}
+              />
+            </label>
+            <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
+              Conectar OAuth
+            </button>
           </div>
         </section>
 
