@@ -1652,9 +1652,9 @@ function renderReportHtml(store, report) {
     @page { margin: 14mm; size: A4; }
     * { box-sizing: border-box; }
     body {
-      background: #eef3f1;
-      color: #172026;
-      font-family: Arial, Helvetica, sans-serif;
+      background: #eef4f3;
+      color: #393939;
+      font-family: "Ubuntu", "Avenir Next", Arial, Helvetica, sans-serif;
       line-height: 1.42;
       margin: 0;
       padding: 24px;
@@ -1673,7 +1673,7 @@ function renderReportHtml(store, report) {
       max-width: 1100px;
     }
     button {
-      background: #176b5a;
+      background: #054372;
       border: 0;
       border-radius: 8px;
       color: #ffffff;
@@ -1683,7 +1683,7 @@ function renderReportHtml(store, report) {
       padding: 0 14px;
     }
     header {
-      background: #10201d;
+      background: #001e43;
       color: #ffffff;
       padding: 28px 32px;
     }
@@ -1701,16 +1701,21 @@ function renderReportHtml(store, report) {
     }
     .brand-mark {
       align-items: center;
-      background: #f4b84a;
-      border-radius: 8px;
-      color: #10201d;
-      display: flex;
-      font-size: 20px;
-      font-weight: 800;
+      background: #ffffff;
+      border-radius: 50%;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, 1fr);
       height: 42px;
-      justify-content: center;
+      overflow: hidden;
+      padding: 2px;
       width: 42px;
     }
+    .brand-mark span { display: block; height: 100%; width: 100%; }
+    .brand-mark span:nth-child(1) { background: #90bf4f; }
+    .brand-mark span:nth-child(2) { background: #054372; }
+    .brand-mark span:nth-child(3) { background: #8bc6c1; }
+    .brand-mark span:nth-child(4) { background: #d6d6d6; }
     .meta {
       color: #b9c9c4;
       font-size: 12px;
@@ -1801,7 +1806,7 @@ function renderReportHtml(store, report) {
     }
     .comments {
       background: #f6f8f7;
-      border-left: 4px solid #176b5a;
+      border-left: 4px solid #90bf4f;
       border-radius: 8px;
       font-size: 14px;
       padding: 16px;
@@ -1838,7 +1843,7 @@ function renderReportHtml(store, report) {
       height: 100%;
     }
     .bar.positive {
-      background: #176b5a;
+      background: #90bf4f;
     }
     .bar.negative {
       background: #d66b58;
@@ -1880,7 +1885,7 @@ function renderReportHtml(store, report) {
   <article class="report">
     <header>
       <div class="brand-row">
-        <div class="brand"><div class="brand-mark">B</div><div><strong>Bevinco</strong><br><span>Reporte semanal de auditoria</span></div></div>
+        <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div><strong>Sculpture Hospitality</strong><br><span>Reporte semanal Bevinco</span></div></div>
         <div class="meta">Generado ${generatedAt}<br>Estado <span class="badge ${statusClassName}">${payload.status}</span></div>
       </div>
       <h1>${payload.client?.name || report.clientId}</h1>
@@ -1920,7 +1925,7 @@ function renderReportHtml(store, report) {
         <div class="section-body"><table><thead><tr><th>Item</th><th>Proveedor</th><th>Stock</th><th>Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div>
       </section>
     </main>
-    <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
+    <footer>Reporte generado por Sculpture Hospitality / Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
   </article>
 </body>
 </html>`;
@@ -1987,10 +1992,10 @@ function renderCostSvg(history, money) {
       realPoints.push(`${x},${realY}`);
 
       return `
-        <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#88c8bf" />
+        <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#8bc6c1" />
         <text x="${x}" y="${baseline + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
         <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
-        <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#05264d" />
+        <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#001e43" />
         <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>`;
     })
     .join("");
@@ -2000,13 +2005,13 @@ function renderCostSvg(history, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
-    <style>.axis-label{font:12px Poppins,Arial;fill:#8b918f}.bar-value{font:700 12px Poppins,Arial;fill:#fff}.point-label{font:700 10px Poppins,Arial;fill:#fff}</style>
+    <style>.axis-label{font:12px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 12px Ubuntu,Arial;fill:#fff}.point-label{font:700 10px Ubuntu,Arial;fill:#fff}</style>
     ${grid}
     ${bars}
-    <polyline points="${realPoints.join(" ")}" fill="none" stroke="#05264d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+    <polyline points="${realPoints.join(" ")}" fill="none" stroke="#001e43" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
     <g transform="translate(${left + 320},${height - 16})">
-      <rect width="14" height="4" fill="#88c8bf" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
-      <line x1="170" x2="196" y1="2" y2="2" stroke="#05264d" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
+      <rect width="14" height="4" fill="#8bc6c1" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
+      <line x1="170" x2="196" y1="2" y2="2" stroke="#001e43" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
     </g>
   </svg>`;
 }
@@ -2026,7 +2031,7 @@ function renderVarianceSvg(items, money) {
     const barWidth = Math.max(10, (Math.abs(amount) / maxValue) * maxBarWidth);
     const isNegative = amount < 0;
     const x = isNegative ? center - barWidth : center;
-    const color = isNegative ? "#6b4539" : "#4b9086";
+    const color = isNegative ? "#9f674f" : "#90bf4f";
     const textX = isNegative ? x - 6 : x + barWidth + 6;
     const textAnchor = isNegative ? "end" : "start";
     return `
@@ -2036,7 +2041,7 @@ function renderVarianceSvg(items, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
-    <style>.category-label{font:13px Poppins,Arial;fill:#565d5a}.amount-label{font:700 12px Poppins,Arial;fill:#172026}</style>
+    <style>.category-label{font:13px Ubuntu,Arial;fill:#66706d}.amount-label{font:700 12px Ubuntu,Arial;fill:#393939}</style>
     <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
     <text x="${center - 92}" y="22" text-anchor="middle" class="category-label">Faltantes</text>
     <text x="${center + 92}" y="22" text-anchor="middle" class="category-label">Ahorros</text>
@@ -2062,14 +2067,14 @@ function renderPurchaseSvg(items) {
     const suggestedWidth = Math.max(5, (item.suggested / maxValue) * maxBarWidth);
     return `
       <text x="16" y="${y + 6}" class="purchase-label">${escapeHtml(truncateLabel(item.label, 32))}</text>
-      <rect x="${left}" y="${y - 12}" width="${stockWidth}" height="10" rx="3" fill="#05264d" opacity="0.78" />
-      <rect x="${left}" y="${y + 3}" width="${suggestedWidth}" height="10" rx="3" fill="#8cc24a" opacity="0.9" />`;
+      <rect x="${left}" y="${y - 12}" width="${stockWidth}" height="10" rx="3" fill="#054372" opacity="0.9" />
+      <rect x="${left}" y="${y + 3}" width="${suggestedWidth}" height="10" rx="3" fill="#90bf4f" opacity="0.95" />`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stock versus compra sugerida">
-    <style>.purchase-label{font:13px Poppins,Arial;fill:#565d5a}.purchase-value{font:700 12px Poppins,Arial;fill:#565d5a}</style>
+    <style>.purchase-label{font:13px Ubuntu,Arial;fill:#66706d}.purchase-value{font:700 12px Ubuntu,Arial;fill:#66706d}</style>
     <text x="${left}" y="24" class="purchase-value">Stock actual</text>
-    <text x="${left + 150}" y="24" class="purchase-value" fill="#8cc24a">Compra sugerida</text>
+    <text x="${left + 150}" y="24" class="purchase-value" fill="#90bf4f">Compra sugerida</text>
     ${rowMarkup}
   </svg>`;
 }
@@ -2105,22 +2110,23 @@ function renderPolishedReportHtml(store, report) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
   <style>
-    @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap");
+    @import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
     @page { margin: 9mm; size: A4 landscape; }
     * { box-sizing: border-box; }
-    body { background: #e9efed; color: #16211f; font-family: "Poppins", Arial, Helvetica, sans-serif; line-height: 1.35; margin: 0; padding: 18px; }
+    body { background: #eef4f3; color: #393939; font-family: "Ubuntu", "Avenir Next", Arial, Helvetica, sans-serif; line-height: 1.35; margin: 0; padding: 18px; }
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 14px; max-width: 1120px; }
-    button { background: #0b2d55; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 40px; padding: 0 16px; }
+    button { background: #054372; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 40px; padding: 0 16px; }
     .sheet { background: #fff; border: 1px solid #d9e1df; margin: 0 auto; max-width: 1120px; min-height: 100vh; padding: 24px 30px; }
     .cover { display: grid; grid-template-columns: 108px 1fr 160px; align-items: start; gap: 22px; margin-bottom: 18px; }
     .mark-grid { display: grid; grid-template-columns: repeat(2, 42px); gap: 6px; }
-    .mark-grid span { border: 3px solid #8cc24a; border-radius: 11px; height: 42px; }
-    .mark-grid span:nth-child(2) { background: #8cc24a; }
-    .mark-grid span:nth-child(3) { background: #8ac8c2; border-color: #8ac8c2; }
-    .mark-grid span:nth-child(4) { background: #d8d8d8; border-color: #d8d8d8; }
-    h1 { color: #535353; font-size: 40px; letter-spacing: 0; line-height: 1; margin: 0; text-align: center; }
-    .green-rule { background: #7bb344; height: 4px; margin: 10px auto 0; max-width: 470px; }
-    .period-box { border: 3px solid #7bb344; color: #535353; display: grid; font-size: 12px; grid-template-columns: 1fr 1fr; margin-left: auto; padding: 6px; row-gap: 3px; text-align: right; }
+    .mark-grid span { border-radius: 50%; height: 42px; }
+    .mark-grid span:nth-child(1) { background: #90bf4f; }
+    .mark-grid span:nth-child(2) { background: #054372; }
+    .mark-grid span:nth-child(3) { background: #8bc6c1; }
+    .mark-grid span:nth-child(4) { background: #d6d6d6; }
+    h1 { color: #393939; font-size: 40px; letter-spacing: 0; line-height: 1; margin: 0; text-align: center; }
+    .green-rule { background: #90bf4f; height: 4px; margin: 10px auto 0; max-width: 470px; }
+    .period-box { border: 3px solid #90bf4f; color: #393939; display: grid; font-size: 12px; grid-template-columns: 1fr 1fr; margin-left: auto; padding: 6px; row-gap: 3px; text-align: right; }
     .period-box strong { text-align: center; grid-column: span 2; }
     .meta-line { color: #7d8582; font-size: 12px; text-align: center; margin-top: 8px; }
     .metrics { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin: 16px 0 18px; }
@@ -2128,27 +2134,27 @@ function renderPolishedReportHtml(store, report) {
     .metric span { color: #61706c; display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; }
     .metric strong { display: block; font-size: 22px; margin-top: 5px; }
     .section { border: 1px solid #dce4e2; border-radius: 6px; margin-bottom: 16px; overflow: hidden; page-break-inside: avoid; }
-    .section h2 { background: #f6f8f7; border-bottom: 1px solid #dce4e2; color: #1c2724; font-size: 19px; margin: 0; padding: 12px 16px; }
+    .section h2 { background: #f5f8f7; border-bottom: 1px solid #d6d6d6; color: #054372; font-size: 19px; margin: 0; padding: 12px 16px; }
     .section-body { padding: 14px 16px 16px; }
     .chart-card { border: 1px solid #e2e7e5; margin-bottom: 14px; padding: 10px; overflow: hidden; }
     .chart-card h3 { color: #909090; font-size: 18px; margin: 0 0 8px; text-align: center; }
     .chart-note { color: #5b6763; font-size: 12px; margin: 0 0 8px; }
     .report-svg { display: block; height: auto; width: 100%; }
-    .two-col { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.7fr) minmax(210px, 0.8fr); }
+    .two-col { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
     .summary-box { border: 1px solid #d8dfdc; color: #555; font-size: 13px; padding: 12px; white-space: pre-wrap; }
     .analysis-grid { border: 1px solid #d8dfdc; display: grid; gap: 12px; padding: 14px; }
-    .analysis-block h3 { color: #4eb0cf; font-size: 15px; margin: 0 0 7px; }
+    .analysis-block h3 { color: #054372; font-size: 15px; margin: 0 0 7px; }
     .analysis-block ul { display: grid; gap: 7px; margin: 0; padding: 0 0 0 18px; }
     .analysis-block li { color: #555; font-size: 12px; padding-left: 4px; }
     .agent-list { display: grid; gap: 8px; margin: 0; padding-left: 18px; }
     .agent-list li { color: #555; font-size: 12px; }
-    .stat-stack { display: grid; gap: 16px; align-content: start; }
-    .stat-box { border: 3px solid #0b2d55; text-align: center; }
-    .stat-box h3 { background: #0b2d55; color: #fff; font-size: 13px; margin: 0; padding: 5px; }
+    .stat-stack { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
+    .stat-box { border: 3px solid #054372; text-align: center; }
+    .stat-box h3 { background: #054372; color: #fff; font-size: 13px; margin: 0; padding: 5px; }
     .stat-box strong { color: #555; display: block; font-size: 22px; padding: 8px; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
     th, td { border-bottom: 1px solid #e5ebe8; font-size: 11px; overflow-wrap: anywhere; padding: 8px 10px; vertical-align: middle; }
-    th { background: #fbfcfc; color: #465c56; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    th { background: #f5f8f7; color: #054372; font-size: 10px; font-weight: 800; text-transform: uppercase; }
     tbody tr:nth-child(even) td { background: #fbfcfc; }
     .text-cell { text-align: left; }
     .strong-cell { font-weight: 800; }
@@ -2168,8 +2174,8 @@ function renderPolishedReportHtml(store, report) {
     .w-purchase-stock { width: 11%; }
     .w-purchase-suggested { width: 11%; }
     .w-purchase-note { width: 30%; }
-    .ok { color: #006b4f; }
-    .bad { color: #a22a22; }
+    .ok { color: #477626; }
+    .bad { color: #9f674f; }
     footer { border-top: 1px solid #dce4e2; color: #777; font-size: 11px; margin-top: 24px; padding-top: 12px; text-align: center; }
     .page-break { break-before: page; page-break-before: always; }
     @media print { body { background: #fff; padding: 0; } .toolbar { display: none; } .sheet { border: 0; max-width: none; padding: 0; } .section { break-inside: avoid; } }
@@ -2210,7 +2216,7 @@ function renderPolishedReportHtml(store, report) {
     <section class="section page-break"><h2>Variaciones por categoria</h2><div class="section-body"><table><colgroup><col class="w-category-name"><col class="w-category-money"><col class="w-category-percent"></colgroup><thead><tr><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div></section>
     <section class="section"><h2>Top productos con mayor variacion</h2><div class="section-body"><div class="chart-card">${productSvg}</div><table><colgroup><col class="w-product-name"><col class="w-product-category"><col class="w-product-money"><col class="w-product-percent"></colgroup><thead><tr><th class="text-cell">Producto</th><th class="text-cell">Categoria</th><th class="money-cell">Monto</th><th class="percent-cell">%</th></tr></thead><tbody>${productRows}</tbody></table></div></section>
     <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><p class="chart-note">Azul: stock actual. Verde: compra sugerida por Intelipar.</p><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
-    <footer>Reporte generado por Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
+    <footer>Reporte generado por Sculpture Hospitality / Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
   </main>
 </body>
 </html>`;

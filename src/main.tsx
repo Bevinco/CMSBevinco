@@ -342,6 +342,17 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
+function SculptureMark() {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -373,15 +384,15 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     <main className="login-shell">
       <section className="login-panel">
         <div className="brand login-brand">
-          <div className="brand-mark">B</div>
+          <SculptureMark />
           <div>
-            <strong>Bevinco CMS</strong>
-            <span>Acceso interno</span>
+            <strong>Sculpture Hospitality</strong>
+            <span>Bevinco CMS</span>
           </div>
         </div>
         <div>
-          <p className="eyebrow">Modulo 1</p>
-          <h1>Reportes automatizados Bevinco</h1>
+          <p className="eyebrow">Acceso interno</p>
+          <h1>Reportes semanales sin friccion</h1>
         </div>
         <form className="login-form" onSubmit={submitLogin}>
           <label>
@@ -1034,9 +1045,9 @@ function App() {
     return (
       <main className="loading-shell">
         <div className="brand">
-          <div className="brand-mark">B</div>
+          <SculptureMark />
           <div>
-            <strong>Bevinco CMS</strong>
+            <strong>Sculpture Hospitality</strong>
             <span>Validando sesion</span>
           </div>
         </div>
@@ -1050,10 +1061,10 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">B</div>
+          <SculptureMark />
           <div>
-            <strong>Bevinco CMS</strong>
-            <span>Reportes y operaciones</span>
+            <strong>Sculpture Hospitality</strong>
+            <span>Bevinco CMS</span>
           </div>
         </div>
         <nav className="nav-list" aria-label="Modulos">
