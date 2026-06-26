@@ -2382,33 +2382,37 @@ function truncateLabel(value, maxLength = 24) {
 function renderCostSvg(history, money) {
   const rows = [...(history || [])].reverse();
   const width = 1080;
-  const height = 360;
-  const left = 156;
-  const right = 60;
-  const top = 44;
-  const bottom = 76;
-  const chartWidth = width - left - right;
+  const height = 330;
+  const axisLabelX = 70;
+  const gridLeft = 126;
+  const plotLeft = 205;
+  const right = 56;
+  const top = 28;
+  const bottom = 62;
+  const chartWidth = width - plotLeft - right;
   const chartHeight = height - top - bottom;
   const baseline = top + chartHeight;
   const revenueBarHeight = chartHeight * 0.58;
-  const percentTop = top + 42;
-  const percentHeight = 116;
+  const percentTop = top + 32;
+  const percentHeight = 132;
   const maxRevenue = Math.max(...rows.map((item) => item.revenue || 0), 1);
-  const maxPercent = Math.max(40, ...rows.flatMap((item) => [item.costPercent || 0, item.idealCostPercent || 0]).map((value) => value + 8));
+  const maxObservedPercent = Math.max(...rows.flatMap((item) => [item.costPercent || 0, item.idealCostPercent || 0]), 0);
+  const percentScaleMax = Math.max(60, Math.ceil((maxObservedPercent + 8) / 15) * 15);
+  const percentTicks = Array.from({ length: 5 }, (_, index) => (percentScaleMax / 4) * index);
   const step = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
   const realPoints = [];
   const idealPoints = [];
   const bars = rows
     .map((item, index) => {
-      const x = left + index * step;
+      const x = plotLeft + index * step;
       const barHeight = ((item.revenue || 0) / maxRevenue) * revenueBarHeight;
       const barWidth = Math.min(88, chartWidth / Math.max(rows.length, 1) * 0.42);
       const barY = baseline - barHeight;
       const real = item.costPercent || 0;
       const ideal = item.idealCostPercent || 0;
-      const realY = percentTop + percentHeight - (real / maxPercent) * percentHeight;
-      const idealY = percentTop + percentHeight - (ideal / maxPercent) * percentHeight;
-      const realBadgeY = Math.max(top + 8, realY - 38);
+      const realY = percentTop + percentHeight - (Math.min(real, percentScaleMax) / percentScaleMax) * percentHeight;
+      const idealY = percentTop + percentHeight - (Math.min(ideal, percentScaleMax) / percentScaleMax) * percentHeight;
+      const realBadgeY = Math.max(top + 8, Math.min(realY - 38, barY - 34));
       realPoints.push(`${x},${realY}`);
       idealPoints.push(`${x},${idealY}`);
 
@@ -2421,9 +2425,9 @@ function renderCostSvg(history, money) {
         <circle cx="${x}" cy="${idealY}" r="4" fill="#90bf4f" />`;
     })
     .join("");
-  const grid = [0, 15, 30, 45, 60].map((tick) => {
-    const y = percentTop + percentHeight - (tick / 60) * percentHeight;
-    return `<line x1="${left}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#edf1f0" /><text x="${left - 12}" y="${y + 4}" text-anchor="end" class="axis-label">${tick}%</text>`;
+  const grid = percentTicks.map((tick) => {
+    const y = percentTop + percentHeight - (tick / percentScaleMax) * percentHeight;
+    return `<line x1="${gridLeft}" x2="${width - right}" y1="${y}" y2="${y}" stroke="#edf1f0" /><text x="${axisLabelX}" y="${y + 5}" text-anchor="end" class="axis-label">${Math.round(tick)}%</text>`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
@@ -2432,7 +2436,7 @@ function renderCostSvg(history, money) {
     ${bars}
     <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#90bf4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#001e43" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <g transform="translate(${left + 320},${height - 16})">
+    <g transform="translate(${plotLeft + 275},${height - 16})">
       <rect width="18" height="6" fill="#8bc6c1" /><text x="26" y="6" class="axis-label">Suma de ingresos</text>
       <line x1="210" x2="244" y1="3" y2="3" stroke="#001e43" stroke-width="5" /><text x="254" y="6" class="axis-label">% costo real</text>
       <line x1="410" x2="444" y1="3" y2="3" stroke="#90bf4f" stroke-width="4" /><text x="454" y="6" class="axis-label">% costo ideal</text>
@@ -2441,7 +2445,9 @@ function renderCostSvg(history, money) {
 }
 
 function renderVarianceSvg(items, money) {
-  const rows = items.slice(0, 8);
+  const rows = items
+    .filter((item) => Math.abs(item.amount ?? item.varianceAmount ?? 0) > 0)
+    .slice(0, 8);
   const width = 980;
   const rowHeight = 40;
   const height = 82 + rows.length * rowHeight;
@@ -2451,6 +2457,14 @@ function renderVarianceSvg(items, money) {
   const negativeMaxWidth = 230;
   const positiveMaxWidth = 320;
   const maxValue = Math.max(...rows.map((item) => Math.abs(item.amount || item.varianceAmount || 0)), 1);
+  if (!rows.length) {
+    return `<svg class="report-svg" viewBox="0 0 ${width} 230" role="img" aria-label="Sin ahorro o faltantes relevantes">
+      <style>.empty-title{font:700 24px Ubuntu,Arial;fill:#393939}.empty-text{font:18px Ubuntu,Arial;fill:#66706d}</style>
+      <rect x="16" y="18" width="${width - 32}" height="194" rx="8" fill="#f6f8f7" stroke="#e1e8e6" />
+      <text x="${width / 2}" y="96" text-anchor="middle" class="empty-title">Sin ahorro/faltantes relevantes</text>
+      <text x="${width / 2}" y="132" text-anchor="middle" class="empty-text">No hay diferencias monetarias para graficar en este periodo.</text>
+    </svg>`;
+  }
   const rowMarkup = rows.map((item, index) => {
     const amount = item.amount ?? item.varianceAmount ?? 0;
     const label = item.name || item.category || "Sin nombre";
