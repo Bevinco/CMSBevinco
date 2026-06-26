@@ -2408,7 +2408,7 @@ function renderCostSvg(history, money) {
       const ideal = item.idealCostPercent || 0;
       const realY = percentTop + percentHeight - (real / maxPercent) * percentHeight;
       const idealY = percentTop + percentHeight - (ideal / maxPercent) * percentHeight;
-      const realBadgeY = Math.max(top + 8, realY - 32);
+      const realBadgeY = Math.max(top + 8, realY - 38);
       realPoints.push(`${x},${realY}`);
       idealPoints.push(`${x},${idealY}`);
 
@@ -2416,8 +2416,8 @@ function renderCostSvg(history, money) {
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#8bc6c1" />
         <text x="${x}" y="${baseline + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
         <text x="${x}" y="${Math.max(barY + 22, top + 24)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
-        <rect x="${x - 28}" y="${realBadgeY}" width="56" height="22" rx="5" fill="#001e43" />
-        <text x="${x}" y="${realBadgeY + 15}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
+        <rect x="${x - 38}" y="${realBadgeY}" width="76" height="30" rx="6" fill="#001e43" />
+        <text x="${x}" y="${realBadgeY + 21}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
         <circle cx="${x}" cy="${idealY}" r="4" fill="#90bf4f" />`;
     })
     .join("");
@@ -2427,15 +2427,15 @@ function renderCostSvg(history, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
-    <style>.axis-label{font:13px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 14px Ubuntu,Arial;fill:#fff}.point-label{font:700 11px Ubuntu,Arial;fill:#fff}</style>
+    <style>.axis-label{font:18px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 20px Ubuntu,Arial;fill:#fff}.point-label{font:700 16px Ubuntu,Arial;fill:#fff}</style>
     ${grid}
     ${bars}
     <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#90bf4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#001e43" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
     <g transform="translate(${left + 320},${height - 16})">
-      <rect width="14" height="4" fill="#8bc6c1" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
-      <line x1="170" x2="196" y1="2" y2="2" stroke="#001e43" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
-      <line x1="330" x2="356" y1="2" y2="2" stroke="#90bf4f" stroke-width="3" /><text x="364" y="4" class="axis-label">% costo ideal</text>
+      <rect width="18" height="6" fill="#8bc6c1" /><text x="26" y="6" class="axis-label">Suma de ingresos</text>
+      <line x1="210" x2="244" y1="3" y2="3" stroke="#001e43" stroke-width="5" /><text x="254" y="6" class="axis-label">% costo real</text>
+      <line x1="410" x2="444" y1="3" y2="3" stroke="#90bf4f" stroke-width="4" /><text x="454" y="6" class="axis-label">% costo ideal</text>
     </g>
   </svg>`;
 }
@@ -2471,7 +2471,7 @@ function renderVarianceSvg(items, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
-    <style>.category-label{font:700 14px Ubuntu,Arial;fill:#393939}.category-sub{font:12px Ubuntu,Arial;fill:#66706d}.amount-label{font:700 13px Ubuntu,Arial;fill:#393939}</style>
+    <style>.category-label{font:700 20px Ubuntu,Arial;fill:#393939}.category-sub{font:17px Ubuntu,Arial;fill:#66706d}.amount-label{font:700 18px Ubuntu,Arial;fill:#393939}</style>
     <line x1="${labelWidth}" x2="${labelWidth}" y1="28" y2="${height - 18}" stroke="#eef2f1" />
     <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
     <text x="${center - 128}" y="22" text-anchor="middle" class="category-sub">Faltantes</text>
@@ -2746,9 +2746,9 @@ function renderTwoPageReportHtml(store, report) {
     @page { margin: 6mm; size: A4 landscape; }
     * { box-sizing: border-box; }
     body { background: #e8efed; color: #393939; font-family: "Ubuntu", Arial, sans-serif; margin: 0; padding: 8px; }
-    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 8px; max-width: 1120px; }
+    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 8px; max-width: 1240px; }
     .toolbar button { background: #054372; border: 0; border-radius: 6px; color: #fff; font-weight: 700; padding: 10px 16px; }
-    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 12px; margin: 0 auto 12px; max-width: 1160px; min-height: 775px; padding: 20px 26px; page-break-after: always; }
+    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 12px; margin: 0 auto 12px; max-width: 1240px; min-height: 775px; padding: 20px 26px; page-break-after: always; }
     .pdf-page:last-child { page-break-after: auto; }
     .topbar { align-items: center; display: grid; gap: 16px; grid-template-columns: 86px 1fr 170px; }
     .mark { display: grid; gap: 5px; grid-template-columns: repeat(2, 34px); }
@@ -2758,27 +2758,27 @@ function renderTwoPageReportHtml(store, report) {
     .mark span:nth-child(3) { background: #8bc6c1; }
     .mark span:nth-child(4) { background: #d6d6d6; }
     h1 { color: #393939; font-size: 40px; line-height: 1; margin: 0; text-align: center; }
-    h2 { color: #054372; font-size: 18px; margin: 0 0 4px; }
-    h3 { color: #054372; font-size: 13px; margin: 0 0 6px; text-transform: uppercase; }
+    h2 { color: #054372; font-size: 20px; margin: 0 0 5px; }
+    h3 { color: #054372; font-size: 14px; margin: 0 0 6px; text-transform: uppercase; }
     .rule { background: #90bf4f; height: 4px; margin: 8px auto 0; max-width: 420px; }
     .period { border: 2px solid #90bf4f; color: #526862; font-size: 12px; padding: 8px; text-align: right; }
     .period strong { color: #393939; display: block; font-size: 13px; margin-bottom: 3px; text-align: center; }
     .subline { color: #6d7a77; font-size: 12px; margin: 6px 0 0; text-align: center; }
     .metrics { display: grid; gap: 8px; grid-template-columns: 1.45fr repeat(4, 1fr); }
     .metric, .panel { border: 1px solid #dce4e2; border-radius: 6px; padding: 12px; }
-    .metric span { color: #526862; display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-    .metric strong { display: block; font-size: 24px; margin-top: 4px; }
+    .metric span { color: #526862; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .metric strong { display: block; font-size: 26px; margin-top: 4px; }
     .grid-main { display: grid; gap: 10px; grid-template-columns: 1.4fr 0.85fr; }
     .grid-even { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
     .chart-card { border: 1px solid #e1e8e6; padding: 6px; }
     .report-svg { display: block; width: 100%; height: auto; max-height: 320px; }
     .small-chart .report-svg { max-height: 230px; }
     .notes { display: grid; gap: 6px; margin: 0; padding-left: 16px; }
-    .notes li { color: #4f5d59; font-size: 13px; line-height: 1.32; }
+    .notes li { color: #4f5d59; font-size: 14px; line-height: 1.36; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    th, td { border-bottom: 1px solid #e7edeb; font-size: 12px; padding: 7px 8px; vertical-align: middle; overflow-wrap: anywhere; }
-    th { background: #f6f8f7; color: #054372; font-size: 10px; font-weight: 800; text-transform: uppercase; }
-    td span { color: #6d7a77; display: block; font-size: 10px; margin-top: 2px; }
+    th, td { border-bottom: 1px solid #e7edeb; font-size: 13px; padding: 7px 8px; vertical-align: middle; overflow-wrap: anywhere; }
+    th { background: #f6f8f7; color: #054372; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    td span { color: #6d7a77; display: block; font-size: 11px; margin-top: 2px; }
     .num { text-align: right; white-space: nowrap; }
     .ok { color: #477626; }
     .bad { color: #9f674f; }
