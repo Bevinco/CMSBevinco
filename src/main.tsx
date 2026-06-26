@@ -454,7 +454,7 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [commentsDraft, setCommentsDraft] = useState("");
   const [emailDraft, setEmailDraft] = useState("");
-  const [activeView, setActiveView] = useState<ActiveView>("module1");
+  const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [csvSourceType, setCsvSourceType] = useState("auto");
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
@@ -1108,7 +1108,7 @@ function App() {
   }, [authStatus]);
 
   useEffect(() => {
-    if (authStatus === "authenticated" && activeView === "tasks") {
+    if (authStatus === "authenticated" && ["dashboard", "tasks"].includes(activeView)) {
       loadClickupStatus();
       loadClickupMeta();
       loadClickupTasks(0, clickupStatusFilter);
@@ -1137,6 +1137,69 @@ function App() {
     clickupTasks.forEach((task) => statusSet.add(task.status));
     return Array.from(statusSet).filter(Boolean);
   }, [clickupMeta, clickupTasks]);
+  const dashboardSummary = useMemo(() => {
+    const sourceKeys = Object.keys(sourceLabels);
+    const reportsWithSources = reports.map((report) => {
+      const loadedSources = sourceKeys.filter((key) => ["Sincronizado", "Datos cargados"].includes(report.sourceStatus?.[key] || ""));
+      const missingSources = sourceKeys.filter((key) => !loadedSources.includes(key));
+      return { report, loadedSources, missingSources };
+    });
+    const blockedReports = reportsWithSources.filter((item) => item.missingSources.length > 0);
+    const draftReports = reports.filter((report) => report.status === "Borrador");
+    const readyReports = reports.filter((report) => report.status === "Listo para revisar");
+    const sentReports = reports.filter((report) => report.status === "Enviado");
+    const highVarianceReports = [...reports]
+      .filter((report) => Math.abs(report.summary?.varianceAmount || 0) > 0 || Math.abs(report.summary?.variancePercent || 0) > 0)
+      .sort((left, right) => Math.abs(right.summary?.varianceAmount || 0) - Math.abs(left.summary?.varianceAmount || 0))
+      .slice(0, 4);
+    const dueTasks = [...clickupTasks]
+      .filter((task) => task.dueDate)
+      .sort((left, right) => Number(left.dueDate || 0) - Number(right.dueDate || 0))
+      .slice(0, 5);
+    const attentionItems = [
+      ...blockedReports.slice(0, 3).map((item) => ({
+        id: `sources-${item.report.id}`,
+        title: item.report.client?.name || item.report.clientId,
+        meta: item.report.period?.label || item.report.periodId,
+        detail: `Falta revisar: ${item.missingSources.map((key) => sourceLabels[key]).join(", ")}.`,
+        action: "Abrir reporte",
+        onClick: () => {
+          setSelectedClientId(item.report.clientId);
+          setSelectedPeriodId(item.report.periodId);
+          setSelectedReport(item.report);
+          setCommentsDraft(item.report.comments || "");
+          setEmailDraft(item.report.emailDraft || "");
+          setActiveView("module1");
+        },
+      })),
+      ...readyReports.slice(0, 2).map((report) => ({
+        id: `ready-${report.id}`,
+        title: report.client?.name || report.clientId,
+        meta: report.period?.label || report.periodId,
+        detail: "Reporte listo para revision final, PDF y envio al cliente.",
+        action: "Revisar",
+        onClick: () => {
+          setSelectedClientId(report.clientId);
+          setSelectedPeriodId(report.periodId);
+          setSelectedReport(report);
+          setCommentsDraft(report.comments || "");
+          setEmailDraft(report.emailDraft || "");
+          setActiveView("module1");
+        },
+      })),
+    ].slice(0, 5);
+
+    return {
+      reportsWithSources,
+      blockedReports,
+      draftReports,
+      readyReports,
+      sentReports,
+      highVarianceReports,
+      dueTasks,
+      attentionItems,
+    };
+  }, [reports, clickupTasks]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
@@ -1198,61 +1261,188 @@ function App() {
         </header>
 
         {activeView === "dashboard" ? (
-          <>
-            <section className="module-roadmap" aria-label="Modulos del CMS">
-              <button className="module-card module-card-button" onClick={() => setActiveView("module1")}>
-                <div className="module-card-top">
-                  <span>01</span>
-                  <small>Activo</small>
-                </div>
-                <h2>Reportes Bevinco</h2>
-                <p>Genera el reporte semanal con Variance, Intelipar, resumen ejecutivo, export PDF y email.</p>
-                <div className="module-tags">
-                  <span>Variance detailed</span>
-                  <span>Intelipar</span>
-                  <span>Historico 4 periodos</span>
-                  <span>PDF y email</span>
-                </div>
-              </button>
-              <button className="module-card module-card-button" onClick={() => setActiveView("tasks")}>
-                <div className="module-card-top">
-                  <span>02</span>
-                  <small>ClickUp</small>
-                </div>
-                <h2>Pendientes operativos</h2>
-                <p>Sincroniza tareas de auditoria, estados del flujo y creacion de tareas desde los reportes del CMS.</p>
-                <div className="module-tags">
-                  <span>Auditorias Chile</span>
-                  <span>Estados</span>
-                  <span>Tareas</span>
-                  <span>Seguimiento</span>
-                </div>
-              </button>
-              <button className="module-card module-card-button" onClick={() => setActiveView("criteria")}>
-                <div className="module-card-top">
-                  <span>03</span>
-                  <small>Base</small>
-                </div>
-                <h2>Criterios del agente</h2>
-                <p>Sube documentos internos para que el generador de reportes use reglas, tono, observaciones y aprendizajes del equipo.</p>
-                <div className="module-tags">
-                  <span>TXT</span>
-                  <span>Markdown</span>
-                  <span>CSV</span>
-                  <span>JSON</span>
-                </div>
-              </button>
-            </section>
-            <section className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Modulo activo</p>
-                  <h2>Reportes Bevinco/Sculpture</h2>
-                </div>
-                <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Abrir modulo</button>
+          <section className="dashboard-view">
+            <section className="dashboard-hero">
+              <div>
+                <p className="eyebrow">Operacion semanal</p>
+                <h2>Prioriza reportes, datos faltantes y envios desde una sola vista.</h2>
+              </div>
+              <div className="dashboard-hero-actions">
+                <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Generar reporte</button>
+                <button className="secondary-button" onClick={() => setActiveView("tasks")}><ListChecks size={17} /> Ver pendientes</button>
               </div>
             </section>
-          </>
+
+            <section className="dashboard-kpis" aria-label="Resumen operativo">
+              <article>
+                <span><FileText size={17} /> Reportes</span>
+                <strong>{reports.length}</strong>
+                <small>{dashboardSummary.sentReports.length} enviados</small>
+              </article>
+              <article>
+                <span><Cloud size={17} /> Datos por revisar</span>
+                <strong>{dashboardSummary.blockedReports.length}</strong>
+                <small>Fuentes Sculpture incompletas</small>
+              </article>
+              <article>
+                <span><PencilLine size={17} /> En revision</span>
+                <strong>{dashboardSummary.readyReports.length}</strong>
+                <small>{dashboardSummary.draftReports.length} borradores</small>
+              </article>
+              <article>
+                <span><ListChecks size={17} /> ClickUp</span>
+                <strong>{clickupTasks.length}</strong>
+                <small>{clickupStatus?.connected ? "Conectado" : "Sin conexion visible"}</small>
+              </article>
+            </section>
+
+            <section className="dashboard-grid">
+              <div className="panel attention-panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Atencion hoy</p>
+                    <h2>Proximas acciones</h2>
+                  </div>
+                  <Bot size={22} />
+                </div>
+                <div className="attention-list">
+                  {dashboardSummary.attentionItems.length ? dashboardSummary.attentionItems.map((item) => (
+                    <button key={item.id} onClick={item.onClick}>
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small>{item.meta}</small>
+                        <em>{item.detail}</em>
+                      </span>
+                      <b>{item.action}</b>
+                    </button>
+                  )) : (
+                    <div className="empty-state">
+                      <strong>Sin bloqueos visibles</strong>
+                      <small>Los reportes cargados no tienen fuentes pendientes ni revisiones urgentes.</small>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="panel health-panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Salud del sistema</p>
+                    <h2>Integraciones y base de trabajo</h2>
+                  </div>
+                  <Database size={22} />
+                </div>
+                <div className="health-list">
+                  <article>
+                    <span className={clickupStatus?.connected ? "health-dot ok" : "health-dot warn"} />
+                    <div>
+                      <strong>ClickUp</strong>
+                      <small>{clickupStatus?.connected ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Cuenta conectada"}` : "Revisar token/lista configurada"}</small>
+                    </div>
+                  </article>
+                  <article>
+                    <span className={sculptureDirectoryLoaded && sculptureUnits.length ? "health-dot ok" : "health-dot warn"} />
+                    <div>
+                      <strong>Sculpture</strong>
+                      <small>{sculptureUnits.length ? `${sculptureUnits.length} restaurantes detectados` : "Abrir Modulo 1 para consultar restaurantes"}</small>
+                    </div>
+                  </article>
+                  <article>
+                    <span className={criteriaDocuments.length ? "health-dot ok" : "health-dot neutral"} />
+                    <div>
+                      <strong>Criterios del agente</strong>
+                      <small>{criteriaDocuments.length ? `${criteriaDocuments.length} documento(s) cargados` : "Sin biblioteca de criterios cargada"}</small>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
+
+            <section className="dashboard-grid dashboard-grid-bottom">
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Variaciones</p>
+                    <h2>Reportes con mayor impacto</h2>
+                  </div>
+                  <BarChart3 size={22} />
+                </div>
+                <div className="impact-list">
+                  {dashboardSummary.highVarianceReports.length ? dashboardSummary.highVarianceReports.map((report) => (
+                    <button
+                      key={report.id}
+                      onClick={() => {
+                        setSelectedClientId(report.clientId);
+                        setSelectedPeriodId(report.periodId);
+                        setSelectedReport(report);
+                        setCommentsDraft(report.comments || "");
+                        setEmailDraft(report.emailDraft || "");
+                        setActiveView("module1");
+                      }}
+                    >
+                      <span>
+                        <strong>{report.client?.name || report.clientId}</strong>
+                        <small>{report.period?.label || report.periodId}</small>
+                      </span>
+                      <b className={(report.summary?.varianceAmount || 0) < 0 ? "bad-text" : "ok-text"}>{money(report.summary?.varianceAmount || 0)}</b>
+                    </button>
+                  )) : <p className="muted-copy">Aun no hay variaciones relevantes en los reportes cargados.</p>}
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Pendientes ClickUp</p>
+                    <h2>Fechas cercanas</h2>
+                  </div>
+                  <ListChecks size={22} />
+                </div>
+                <div className="due-list">
+                  {dashboardSummary.dueTasks.length ? dashboardSummary.dueTasks.map((task) => (
+                    <a href={task.url} key={task.id} target="_blank" rel="noreferrer">
+                      <span>
+                        <strong>{task.name}</strong>
+                        <small>{task.status}</small>
+                      </span>
+                      <b>{shortDate(task.dueDate)}</b>
+                    </a>
+                  )) : <p className="muted-copy">No hay tareas con fecha limite cargadas en esta vista.</p>}
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Ultimos reportes</p>
+                    <h2>Bandeja reciente</h2>
+                  </div>
+                  <FileText size={22} />
+                </div>
+                <div className="recent-report-list">
+                  {reports.slice(0, 5).map((report) => (
+                    <button
+                      key={report.id}
+                      onClick={() => {
+                        setSelectedClientId(report.clientId);
+                        setSelectedPeriodId(report.periodId);
+                        setSelectedReport(report);
+                        setCommentsDraft(report.comments || "");
+                        setEmailDraft(report.emailDraft || "");
+                        setActiveView("module1");
+                      }}
+                    >
+                      <span>
+                        <strong>{report.client?.name || report.clientId}</strong>
+                        <small>{report.period?.label || report.periodId}</small>
+                      </span>
+                      <i className={statusClass(report.status)}>{report.status}</i>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </section>
         ) : null}
 
         {activeView === "module1" ? (
