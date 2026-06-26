@@ -59,6 +59,7 @@ const clickupDefaultStatuses = (process.env.CLICKUP_VISIBLE_STATUSES ||
 const clickupDefaultTaskStatus = process.env.CLICKUP_DEFAULT_TASK_STATUS || "LISTO PARA REPORTE";
 const authUsername = process.env.CMS_AUTH_USERNAME;
 const authPassword = process.env.CMS_AUTH_PASSWORD;
+const cmsSuperadminEmail = (process.env.CMS_SUPERADMIN_EMAIL || "gerencia@bevinco.com").toLowerCase();
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
@@ -180,6 +181,27 @@ function sessionUserPayload(user) {
   };
 }
 
+function isSuperadminIdentity(value) {
+  const login = String(value || "").toLowerCase();
+  return Boolean(login && (login === cmsSuperadminEmail || login === String(authUsername || "").toLowerCase()));
+}
+
+function enrichSession(session) {
+  if (!session) return null;
+  if (session.role === "Superadmin" || isSuperadminIdentity(session.email) || isSuperadminIdentity(session.username)) {
+    return {
+      ...session,
+      id: session.id || "env-superadmin",
+      username: session.username || cmsSuperadminEmail,
+      name: session.name || "Gerencia Bevinco",
+      email: session.email || cmsSuperadminEmail,
+      role: "Superadmin",
+      permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
+    };
+  }
+  return session;
+}
+
 function readSession(request) {
   const cookies = parseCookies(request.headers.cookie);
   const token = cookies[sessionCookieName];
@@ -191,7 +213,7 @@ function readSession(request) {
   try {
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!session.expiresAt || session.expiresAt < Date.now()) return null;
-    return session;
+    return enrichSession(session);
   } catch {
     return null;
   }
@@ -2971,12 +2993,12 @@ app.post("/api/auth/login", async (request, response) => {
 
   const { username, password } = request.body || {};
 
-  if (timingSafeEqual(username, authUsername) && timingSafeEqual(password, authPassword)) {
+  if ((timingSafeEqual(username, authUsername) || timingSafeEqual(String(username || "").toLowerCase(), cmsSuperadminEmail)) && timingSafeEqual(password, authPassword)) {
     const envUser = {
       id: "env-superadmin",
-      username,
-      name: username,
-      email: username,
+      username: cmsSuperadminEmail,
+      name: "Gerencia Bevinco",
+      email: cmsSuperadminEmail,
       role: "Superadmin",
       permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
     };
@@ -3012,8 +3034,8 @@ app.get("/api/users", requireAuth, requirePermission("users"), async (_request, 
     users: [
       {
         id: "env-superadmin",
-        name: authUsername || "Superadmin",
-        email: authUsername || "",
+        name: "Gerencia Bevinco",
+        email: cmsSuperadminEmail,
         role: "Superadmin",
         permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
         source: "env",

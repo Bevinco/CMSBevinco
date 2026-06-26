@@ -1243,14 +1243,19 @@ button:disabled {
 
 .users-view {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .users-header {
   align-items: center;
+  background: #ffffff;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(16, 32, 29, 0.045);
   display: flex;
   justify-content: space-between;
   gap: 16px;
+  padding: 16px 18px;
 }
 
 .users-header h2,
@@ -1260,18 +1265,18 @@ button:disabled {
 
 .users-header h2 {
   color: #172026;
-  font-size: 1.25rem;
+  font-size: 1.05rem;
 }
 
 .users-header p {
   color: #526862;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   margin-top: 4px;
 }
 
 .users-list {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .user-card {
@@ -1281,10 +1286,10 @@ button:disabled {
   border-radius: 8px;
   box-shadow: 0 8px 20px rgba(16, 32, 29, 0.055);
   display: grid;
-  gap: 14px;
+  gap: 12px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 104px;
-  padding: 18px 20px;
+  min-height: 88px;
+  padding: 14px 16px;
 }
 
 .user-avatar {
@@ -1294,9 +1299,9 @@ button:disabled {
   color: #054372;
   display: flex;
   font-weight: 800;
-  height: 42px;
+  height: 40px;
   justify-content: center;
-  width: 42px;
+  width: 40px;
 }
 
 .user-main {
@@ -1357,6 +1362,11 @@ button:disabled {
 .user-actions {
   display: flex;
   gap: 10px;
+}
+
+.user-actions button {
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 .danger-button {
@@ -2366,6 +2376,7 @@ button:disabled {
 :root[data-theme="dark"] .metrics article,
 :root[data-theme="dark"] .dashboard-kpis article,
 :root[data-theme="dark"] .dashboard-hero,
+:root[data-theme="dark"] .users-header,
 :root[data-theme="dark"] .user-card,
 :root[data-theme="dark"] .login-panel,
 :root[data-theme="dark"] .control-bar,

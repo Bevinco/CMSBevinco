@@ -1562,44 +1562,6 @@ function App() {
 
         {activeView === "module1" ? (
           <>
-        <section className="control-bar">
-          <label>
-            Cliente / unidad
-            <select
-              value={selectedClientId}
-              onChange={(event) => {
-                setSelectedClientId(event.target.value);
-                loadSelectedReport(event.target.value, selectedPeriodId);
-              }}
-            >
-              {clients.map((client) => <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>)}
-            </select>
-          </label>
-          <label>
-            Periodo
-            <select
-              value={selectedPeriodId}
-              onChange={(event) => {
-                setSelectedPeriodId(event.target.value);
-                loadSelectedReport(selectedClientId, event.target.value);
-              }}
-            >
-              {periods.map((period) => <option key={period.id} value={period.id}>{period.label}</option>)}
-            </select>
-          </label>
-          <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={syncReport}>
-            <RefreshCw size={17} /> Sincronizar fuentes
-          </button>
-          <button className="secondary-button" disabled={workStatus === "loading"} onClick={importSamples}>
-            <Database size={17} /> Cargar ejemplo Bardot
-          </button>
-          {selectedReport ? (
-            <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
-              <Printer size={17} /> Exportar PDF
-            </a>
-          ) : null}
-        </section>
-
         {error ? <p className="connector-error">{error}</p> : null}
 
         <section className="panel unit-panel">
@@ -1685,6 +1647,11 @@ function App() {
                 <button className="primary-button" disabled={workStatus === "loading" || (!selectedSculptureUnitId && !selectedClientId)} onClick={querySculptureReports} type="button">
                   <Database size={17} /> Generar reporte
                 </button>
+                {selectedReport ? (
+                  <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
+                    <Printer size={17} /> Exportar PDF
+                  </a>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2276,8 +2243,8 @@ function App() {
           <section className="users-view">
             <div className="users-header">
               <div>
-                <h2>Usuarios</h2>
-                <p>Gestiona usuarios del CMS, roles y permisos de acceso por modulo.</p>
+                <h2>Equipo del CMS</h2>
+                <p>{cmsUsers.length} usuario(s) con acceso configurado. Gerencia Bevinco conserva acceso total.</p>
               </div>
               <button className="primary-button" onClick={openCreateUserModal}><Plus size={17} /> Nuevo usuario</button>
             </div>
@@ -2307,6 +2274,12 @@ function App() {
                   </div>
                 </article>
               ))}
+              {!cmsUsers.length ? (
+                <div className="empty-state">
+                  <strong>No hay usuarios cargados</strong>
+                  <small>Crea el primer usuario operativo para asignar permisos por modulo.</small>
+                </div>
+              ) : null}
             </div>
           </section>
         ) : null}
