@@ -736,6 +736,10 @@ function historyForReport(store, report) {
       label: period.label,
       revenue: existing?.summary?.revenue || Math.round((report.summary.revenue || 0) * (1 - index * 0.04)),
       costPercent: existing?.summary?.costPercent || Number((report.summary.costPercent + index * 0.7).toFixed(1)),
+      idealCostPercent:
+        existing?.summary?.idealCostPercent ||
+        report.summary.idealCostPercent ||
+        Number(Math.max(0, (report.summary.costPercent || 0) - 1.5).toFixed(1)),
       varianceAmount:
         existing?.summary?.varianceAmount || Math.round((report.summary.varianceAmount || 0) * (1 - index * 0.18)),
     };
@@ -1140,6 +1144,7 @@ function extractReportMetrics(parsedTable) {
       grandSummary = {
         revenue: rowRevenue,
         costPercent: rowCostPercent,
+        idealCostPercent: parseNumber(pickRecordValue(row.record, ["idealCostPercent", "porcentajeDeCostoIdeal", "porcentajeCostoIdeal"])),
         variancePercent: parseNumber(percentValue),
         varianceAmount: amount,
       };
@@ -1182,6 +1187,7 @@ function extractReportMetrics(parsedTable) {
     summary: grandSummary || {
       revenue,
       costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
+      idealCostPercent: 0,
       variancePercent: soldCost ? Number(((varianceTotal / soldCost) * 100).toFixed(1)) : 0,
       varianceAmount: varianceTotal,
     },
@@ -1191,6 +1197,23 @@ function extractReportMetrics(parsedTable) {
       .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
       .slice(0, 8),
   };
+}
+
+function extractPurchaseActuals(parsedTable) {
+  return (parsedTable.rows || [])
+    .map((row) => {
+      const values = row.values || [];
+      const item = pickRecordValue(row.record, ["itemName", "item", "product", "productName", "nombreArticulo", "nombreArtículo", "nombreArtCulo"], values[0] || "");
+      const purchased = parseNumber(pickRecordValue(row.record, ["purchases", "compras", "quantityPurchased"], values[2] || ""));
+
+      return {
+        item,
+        purchased,
+        unit: pickRecordValue(row.record, ["unit", "udm", "uom", "unidad"], ""),
+      };
+    })
+    .filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total|^total\s+/i.test(row.item) && row.purchased)
+    .sort((left, right) => Math.abs(right.purchased) - Math.abs(left.purchased));
 }
 
 function reportForClientPeriod(store, clientId, periodId) {
@@ -1889,6 +1912,10 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         }
         if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
         if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
+        if (type === "varianceDetailed") {
+          const purchaseActuals = extractPurchaseActuals(data);
+          if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
+        }
       }
 
       if (type === "intelipar") {
@@ -2353,6 +2380,7 @@ function truncateLabel(value, maxLength = 24) {
 }
 
 function renderCostSvg(history, money) {
+  const rows = [...(history || [])].reverse();
   const width = 1080;
   const height = 340;
   const left = 72;
@@ -2365,27 +2393,32 @@ function renderCostSvg(history, money) {
   const revenueBarHeight = chartHeight * 0.62;
   const percentTop = top + 18;
   const percentHeight = 92;
-  const maxRevenue = Math.max(...history.map((item) => item.revenue || 0), 1);
-  const maxPercent = Math.max(40, ...history.map((item) => (item.costPercent || 0) + 8));
-  const step = history.length > 1 ? chartWidth / (history.length - 1) : chartWidth;
+  const maxRevenue = Math.max(...rows.map((item) => item.revenue || 0), 1);
+  const maxPercent = Math.max(40, ...rows.flatMap((item) => [item.costPercent || 0, item.idealCostPercent || 0]).map((value) => value + 8));
+  const step = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
   const realPoints = [];
-  const bars = history
+  const idealPoints = [];
+  const bars = rows
     .map((item, index) => {
       const x = left + index * step;
       const barHeight = ((item.revenue || 0) / maxRevenue) * revenueBarHeight;
-      const barWidth = Math.min(78, chartWidth / Math.max(history.length, 1) * 0.36);
+      const barWidth = Math.min(78, chartWidth / Math.max(rows.length, 1) * 0.36);
       const barY = baseline - barHeight;
       const real = item.costPercent || 0;
+      const ideal = item.idealCostPercent || 0;
       const realY = percentTop + percentHeight - (real / maxPercent) * percentHeight;
+      const idealY = percentTop + percentHeight - (ideal / maxPercent) * percentHeight;
       const realBadgeY = Math.max(top + 2, realY - 28);
       realPoints.push(`${x},${realY}`);
+      idealPoints.push(`${x},${idealY}`);
 
       return `
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#8bc6c1" />
         <text x="${x}" y="${baseline + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
         <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
         <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#001e43" />
-        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>`;
+        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
+        <circle cx="${x}" cy="${idealY}" r="4" fill="#90bf4f" />`;
     })
     .join("");
   const grid = [0, 15, 30, 45, 60].map((tick) => {
@@ -2397,10 +2430,12 @@ function renderCostSvg(history, money) {
     <style>.axis-label{font:12px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 12px Ubuntu,Arial;fill:#fff}.point-label{font:700 10px Ubuntu,Arial;fill:#fff}</style>
     ${grid}
     ${bars}
+    <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#90bf4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
     <polyline points="${realPoints.join(" ")}" fill="none" stroke="#001e43" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
     <g transform="translate(${left + 320},${height - 16})">
       <rect width="14" height="4" fill="#8bc6c1" /><text x="20" y="4" class="axis-label">Suma de ingresos</text>
       <line x1="170" x2="196" y1="2" y2="2" stroke="#001e43" stroke-width="4" /><text x="204" y="4" class="axis-label">% costo real</text>
+      <line x1="330" x2="356" y1="2" y2="2" stroke="#90bf4f" stroke-width="3" /><text x="364" y="4" class="axis-label">% costo ideal</text>
     </g>
   </svg>`;
 }
@@ -2607,6 +2642,185 @@ function renderPolishedReportHtml(store, report) {
     <section class="section"><h2>Sugerencia de compra Intelipar</h2><div class="section-body"><p class="chart-note">Azul: stock actual. Verde: compra sugerida por Intelipar.</p><div class="chart-card">${purchaseSvg}</div><table><colgroup><col class="w-purchase-item"><col class="w-purchase-provider"><col class="w-purchase-stock"><col class="w-purchase-suggested"><col class="w-purchase-note"></colgroup><thead><tr><th class="text-cell">Item</th><th class="text-cell">Proveedor</th><th class="small-number-cell">Stock</th><th class="small-number-cell">Sugerido</th><th class="note-cell">Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></div></section>
     <footer>Reporte generado por Sculpture Hospitality / Bevinco CMS. Revisar comentarios y proveedores antes del envio final.</footer>
   </main>
+</body>
+</html>`;
+}
+
+function periodSortValue(store, periodId) {
+  const period = store.periods.find((candidate) => candidate.id === periodId);
+  return Date.parse(period?.startsAt || period?.endsAt || "") || 0;
+}
+
+function purchaseDeviationsForReport(store, report) {
+  const currentDate = periodSortValue(store, report.periodId);
+  const previousReport = store.reports
+    .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id)
+    .map((candidate) => ({ report: candidate, date: periodSortValue(store, candidate.periodId) }))
+    .filter((candidate) => candidate.date && (!currentDate || candidate.date < currentDate))
+    .sort((left, right) => right.date - left.date)[0]?.report;
+
+  if (!previousReport?.purchaseSuggestions?.length || !report.purchaseActuals?.length) return [];
+
+  const actuals = new Map(
+    report.purchaseActuals.map((item) => [slugify(item.item), item]),
+  );
+
+  return previousReport.purchaseSuggestions
+    .map((suggestion) => {
+      const actual = actuals.get(slugify(suggestion.item));
+      if (!actual) return null;
+      const suggested = parseNumber(suggestion.suggested);
+      const purchased = parseNumber(actual.purchased);
+      const deviation = purchased - suggested;
+
+      return {
+        item: suggestion.item,
+        suggested,
+        purchased,
+        deviation,
+        provider: suggestion.provider || "Por validar",
+      };
+    })
+    .filter(Boolean)
+    .filter((item) => item.suggested || item.purchased || item.deviation)
+    .sort((left, right) => Math.abs(right.deviation) - Math.abs(left.deviation))
+    .slice(0, 3);
+}
+
+function formatPercentDelta(value) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toFixed(1)} pp`;
+}
+
+function renderTwoPageReportHtml(store, report) {
+  const payload = buildReportPayload(store, report);
+  const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+  const generatedAt = new Intl.DateTimeFormat("es-CL", { dateStyle: "medium" }).format(new Date());
+  const analysis = payload.analysis || generateReportAnalysis(payload);
+  const chronologicalHistory = [...(payload.history || [])].reverse();
+  const currentIndex = chronologicalHistory.findIndex((item) => item.periodId === report.periodId);
+  const previousPoint = currentIndex > 0 ? chronologicalHistory[currentIndex - 1] : chronologicalHistory[chronologicalHistory.length - 2];
+  const costDelta = previousPoint ? (payload.summary.costPercent || 0) - (previousPoint.costPercent || 0) : 0;
+  const idealCost = payload.summary.idealCostPercent || 0;
+  const idealGap = idealCost ? (payload.summary.costPercent || 0) - idealCost : 0;
+  const varianceClassName = (payload.summary.varianceAmount || 0) < 0 ? "bad" : "ok";
+  const topCategory = [...payload.categoryVariances].sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))[0];
+  const costSvg = renderCostSvg(payload.history, money);
+  const varianceSvg = renderVarianceSvg(payload.categoryVariances.slice(0, 7), money);
+  const productSvg = renderVarianceSvg(payload.topProducts.slice(0, 6), money);
+  const deviations = purchaseDeviationsForReport(store, report);
+  const executiveNotes = [
+    `El periodo cierra con ${money.format(payload.summary.revenue)} en ingresos y ${payload.summary.costPercent || 0}% de costo real.`,
+    idealCost ? `La brecha contra costo ideal es ${formatPercentDelta(idealGap)} y ${money.format(payload.summary.varianceAmount || 0)}.` : `La diferencia acumulada es ${money.format(payload.summary.varianceAmount || 0)}.`,
+    previousPoint ? `Versus la semana anterior, el costo real cambia ${formatPercentDelta(costDelta)}.` : "No hay semana anterior suficiente para comparar tendencia.",
+    topCategory ? `Mayor impacto por categoria: ${topCategory.category} (${money.format(topCategory.amount)}, ${topCategory.percent || 0}%).` : "Sin categoria dominante para este periodo.",
+  ];
+  const categoryRows = payload.categoryVariances.slice(0, 8).map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="num ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="num">${item.percent || 0}%</td></tr>`).join("");
+  const productRows = payload.topProducts.slice(0, 7).map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.category)}</span></td><td class="num ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="num">${item.variancePercent || 0}%</td></tr>`).join("");
+  const purchaseRows = payload.purchaseSuggestions.slice(0, 8).map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${escapeHtml(item.stock)}</td><td class="num">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
+  const deviationRows = deviations.length
+    ? deviations.map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${item.suggested}</td><td class="num">${item.purchased}</td><td class="num ${item.deviation < 0 ? "bad" : "ok"}">${item.deviation > 0 ? "+" : ""}${item.deviation}</td></tr>`).join("")
+    : `<tr><td colspan="4">Se mostrara cuando exista sugerencia de la semana anterior y compra real de la semana actual para el mismo item.</td></tr>`;
+  const analysisRows = [
+    ...(analysis.bestOfWeek || []).slice(0, 1),
+    ...(analysis.weeklyChallenges || []).slice(0, 2),
+    ...(analysis.stockEfficiency || []).slice(0, 1),
+  ].map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
+    @page { margin: 7mm; size: A4 landscape; }
+    * { box-sizing: border-box; }
+    body { background: #e8efed; color: #393939; font-family: "Ubuntu", Arial, sans-serif; margin: 0; padding: 12px; }
+    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 8px; max-width: 1120px; }
+    .toolbar button { background: #054372; border: 0; border-radius: 6px; color: #fff; font-weight: 700; padding: 10px 16px; }
+    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 10px; margin: 0 auto 12px; max-width: 1120px; min-height: 775px; padding: 18px 22px; page-break-after: always; }
+    .pdf-page:last-child { page-break-after: auto; }
+    .topbar { align-items: center; display: grid; gap: 16px; grid-template-columns: 86px 1fr 170px; }
+    .mark { display: grid; gap: 5px; grid-template-columns: repeat(2, 34px); }
+    .mark span { border-radius: 50%; height: 34px; }
+    .mark span:nth-child(1) { background: #90bf4f; }
+    .mark span:nth-child(2) { background: #054372; }
+    .mark span:nth-child(3) { background: #8bc6c1; }
+    .mark span:nth-child(4) { background: #d6d6d6; }
+    h1 { color: #393939; font-size: 34px; line-height: 1; margin: 0; text-align: center; }
+    h2 { color: #054372; font-size: 15px; margin: 0; }
+    h3 { color: #054372; font-size: 12px; margin: 0 0 6px; text-transform: uppercase; }
+    .rule { background: #90bf4f; height: 4px; margin: 8px auto 0; max-width: 420px; }
+    .period { border: 2px solid #90bf4f; color: #526862; font-size: 11px; padding: 7px; text-align: right; }
+    .period strong { color: #393939; display: block; font-size: 12px; margin-bottom: 3px; text-align: center; }
+    .subline { color: #6d7a77; font-size: 11px; margin: 6px 0 0; text-align: center; }
+    .metrics { display: grid; gap: 8px; grid-template-columns: 1.45fr repeat(4, 1fr); }
+    .metric, .panel { border: 1px solid #dce4e2; border-radius: 6px; padding: 10px; }
+    .metric span { color: #526862; display: block; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .metric strong { display: block; font-size: 20px; margin-top: 4px; }
+    .grid-main { display: grid; gap: 10px; grid-template-columns: 1.4fr 0.85fr; }
+    .grid-even { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+    .chart-card { border: 1px solid #e1e8e6; padding: 6px; }
+    .report-svg { display: block; width: 100%; height: auto; max-height: 260px; }
+    .small-chart .report-svg { max-height: 190px; }
+    .notes { display: grid; gap: 6px; margin: 0; padding-left: 16px; }
+    .notes li { color: #4f5d59; font-size: 11px; line-height: 1.28; }
+    table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+    th, td { border-bottom: 1px solid #e7edeb; font-size: 10px; padding: 6px 7px; vertical-align: middle; overflow-wrap: anywhere; }
+    th { background: #f6f8f7; color: #054372; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    td span { color: #6d7a77; display: block; font-size: 9px; margin-top: 2px; }
+    .num { text-align: right; white-space: nowrap; }
+    .ok { color: #477626; }
+    .bad { color: #9f674f; }
+    .footer { border-top: 1px solid #dce4e2; color: #77827f; font-size: 9px; padding-top: 7px; text-align: center; }
+    @media print { body { background: #fff; padding: 0; } .toolbar { display: none; } .pdf-page { border: 0; margin: 0; max-width: none; min-height: auto; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>
+  <section class="pdf-page">
+    <header class="topbar">
+      <div class="mark"><span></span><span></span><span></span><span></span></div>
+      <div><h1>${escapeHtml(payload.client?.name || report.clientId)}</h1><div class="rule"></div><p class="subline">Reporte semanal Bevinco / Sculpture · ${escapeHtml(payload.client?.area || "")} · ${escapeHtml(generatedAt)}</p></div>
+      <div class="period"><strong>Periodo</strong>${escapeHtml(payload.period?.label || report.periodId)}</div>
+    </header>
+    <section class="metrics">
+      <div class="metric"><span>Ingresos</span><strong>${money.format(payload.summary.revenue || 0)}</strong></div>
+      <div class="metric"><span>% costo real</span><strong>${payload.summary.costPercent || 0}%</strong></div>
+      <div class="metric"><span>% costo ideal</span><strong>${idealCost || 0}%</strong></div>
+      <div class="metric"><span>Diferencia % costo</span><strong class="${idealGap > 0 ? "bad" : "ok"}">${formatPercentDelta(idealGap)}</strong></div>
+      <div class="metric"><span>Diferencia $$</span><strong class="${varianceClassName}">${money.format(payload.summary.varianceAmount || 0)}</strong></div>
+    </section>
+    <section class="grid-main">
+      <div class="panel"><h2>Ingresos, costo real y costo ideal</h2><div class="chart-card">${costSvg}</div></div>
+      <div class="panel"><h2>Lectura ejecutiva</h2><ul class="notes">${executiveNotes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+    </section>
+    <section class="grid-even">
+      <div class="panel small-chart"><h2>Ahorro/faltantes por categoria</h2>${varianceSvg}</div>
+      <div class="panel"><h2>Detalle por categoria</h2><table><thead><tr><th>Categoria</th><th class="num">Monto</th><th class="num">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div>
+    </section>
+    <div class="footer">Sculpture Hospitality / Bevinco CMS · Pagina 1 de 2</div>
+  </section>
+  <section class="pdf-page">
+    <header class="topbar">
+      <div class="mark"><span></span><span></span><span></span><span></span></div>
+      <div><h1>${escapeHtml(payload.client?.name || report.clientId)}</h1><div class="rule"></div><p class="subline">Analisis operativo y compras · ${escapeHtml(payload.period?.label || report.periodId)}</p></div>
+      <div class="period"><strong>Estado</strong>${escapeHtml(payload.status || "Borrador")}</div>
+    </header>
+    <section class="grid-even">
+      <div class="panel small-chart"><h2>Top productos con mayor variacion</h2>${productSvg}</div>
+      <div class="panel"><h2>Productos a revisar</h2><table><thead><tr><th>Producto</th><th class="num">Monto</th><th class="num">%</th></tr></thead><tbody>${productRows}</tbody></table></div>
+    </section>
+    <section class="grid-even">
+      <div class="panel"><h2>Compra real vs sugerencia anterior</h2><table><thead><tr><th>Item</th><th class="num">Sugerido ant.</th><th class="num">Compra real</th><th class="num">Desv.</th></tr></thead><tbody>${deviationRows}</tbody></table></div>
+      <div class="panel"><h2>Comentarios generados</h2><ul class="notes">${analysisRows || "<li>Genera el resumen del reporte para completar esta lectura.</li>"}</ul></div>
+    </section>
+    <section class="panel"><h2>Sugerencia de compra Intelipar</h2><table><thead><tr><th>Item / proveedor</th><th class="num">Stock</th><th class="num">Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></section>
+    <div class="footer">Comparacion de compra: sugerencia de la semana anterior versus compra real de la semana actual cuando ambos datos existen · Pagina 2 de 2</div>
+  </section>
 </body>
 </html>`;
 }
@@ -3080,7 +3294,7 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
   }
 
   response.setHeader("content-type", "text/html; charset=utf-8");
-  response.send(renderPolishedReportHtml(store, report));
+  response.send(renderTwoPageReportHtml(store, report));
 });
 
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
