@@ -2441,34 +2441,41 @@ function renderCostSvg(history, money) {
 }
 
 function renderVarianceSvg(items, money) {
-  const rows = items.slice(0, 10);
+  const rows = items.slice(0, 8);
   const width = 980;
-  const rowHeight = 34;
-  const height = 76 + rows.length * rowHeight;
-  const center = 520;
+  const rowHeight = 40;
+  const height = 82 + rows.length * rowHeight;
+  const labelX = 18;
+  const labelWidth = 250;
+  const center = 565;
+  const negativeMaxWidth = 230;
+  const positiveMaxWidth = 320;
   const maxValue = Math.max(...rows.map((item) => Math.abs(item.amount || item.varianceAmount || 0)), 1);
-  const maxBarWidth = 360;
   const rowMarkup = rows.map((item, index) => {
     const amount = item.amount ?? item.varianceAmount ?? 0;
     const label = item.name || item.category || "Sin nombre";
-    const y = 52 + index * rowHeight;
-    const barWidth = Math.max(10, (Math.abs(amount) / maxValue) * maxBarWidth);
+    const subtitle = item.name ? item.category : "";
+    const y = 58 + index * rowHeight;
     const isNegative = amount < 0;
+    const maxBarWidth = isNegative ? negativeMaxWidth : positiveMaxWidth;
+    const barWidth = Math.max(12, (Math.abs(amount) / maxValue) * maxBarWidth);
     const x = isNegative ? center - barWidth : center;
     const color = isNegative ? "#9f674f" : "#90bf4f";
     const textX = isNegative ? x - 6 : x + barWidth + 6;
     const textAnchor = isNegative ? "end" : "start";
     return `
-      <text x="18" y="${y + 5}" class="category-label">${escapeHtml(truncateLabel(label, 34))}</text>
-      <rect x="${x}" y="${y - 12}" width="${barWidth}" height="18" rx="3" fill="${color}" />
-      <text x="${textX}" y="${y + 2}" text-anchor="${textAnchor}" class="amount-label">${compactMoney(amount)}</text>`;
+      <text x="${labelX}" y="${y - 4}" class="category-label">${escapeHtml(truncateLabel(label, 30))}</text>
+      ${subtitle ? `<text x="${labelX}" y="${y + 12}" class="category-sub">${escapeHtml(truncateLabel(subtitle, 28))}</text>` : ""}
+      <rect x="${x}" y="${y - 15}" width="${barWidth}" height="18" rx="3" fill="${color}" />
+      <text x="${textX}" y="${y - 2}" text-anchor="${textAnchor}" class="amount-label">${compactMoney(amount)}</text>`;
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ahorro y faltantes de inventario">
-    <style>.category-label{font:13px Ubuntu,Arial;fill:#66706d}.amount-label{font:700 12px Ubuntu,Arial;fill:#393939}</style>
+    <style>.category-label{font:700 14px Ubuntu,Arial;fill:#393939}.category-sub{font:12px Ubuntu,Arial;fill:#66706d}.amount-label{font:700 13px Ubuntu,Arial;fill:#393939}</style>
+    <line x1="${labelWidth}" x2="${labelWidth}" y1="28" y2="${height - 18}" stroke="#eef2f1" />
     <line x1="${center}" x2="${center}" y1="34" y2="${height - 20}" stroke="#dfe5e3" />
-    <text x="${center - 92}" y="22" text-anchor="middle" class="category-label">Faltantes</text>
-    <text x="${center + 92}" y="22" text-anchor="middle" class="category-label">Ahorros</text>
+    <text x="${center - 128}" y="22" text-anchor="middle" class="category-sub">Faltantes</text>
+    <text x="${center + 150}" y="22" text-anchor="middle" class="category-sub">Ahorros</text>
     ${rowMarkup}
   </svg>`;
 }
@@ -2716,9 +2723,9 @@ function renderTwoPageReportHtml(store, report) {
     previousPoint ? `Versus la semana anterior, el costo real cambia ${formatPercentDelta(costDelta)}.` : "No hay semana anterior suficiente para comparar tendencia.",
     topCategory ? `Mayor impacto por categoria: ${topCategory.category} (${money.format(topCategory.amount)}, ${topCategory.percent || 0}%).` : "Sin categoria dominante para este periodo.",
   ];
-  const categoryRows = payload.categoryVariances.slice(0, 8).map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="num ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="num">${item.percent || 0}%</td></tr>`).join("");
-  const productRows = payload.topProducts.slice(0, 7).map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.category)}</span></td><td class="num ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="num">${item.variancePercent || 0}%</td></tr>`).join("");
-  const purchaseRows = payload.purchaseSuggestions.slice(0, 8).map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${escapeHtml(item.stock)}</td><td class="num">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
+  const categoryRows = payload.categoryVariances.slice(0, 7).map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="num ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="num">${item.percent || 0}%</td></tr>`).join("");
+  const productRows = payload.topProducts.slice(0, 6).map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.category)}</span></td><td class="num ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="num">${item.variancePercent || 0}%</td></tr>`).join("");
+  const purchaseRows = payload.purchaseSuggestions.slice(0, 6).map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${escapeHtml(item.stock)}</td><td class="num">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
   const deviationRows = deviations.length
     ? deviations.map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${item.suggested}</td><td class="num">${item.purchased}</td><td class="num ${item.deviation < 0 ? "bad" : "ok"}">${item.deviation > 0 ? "+" : ""}${item.deviation}</td></tr>`).join("")
     : `<tr><td colspan="4">Se mostrara cuando exista sugerencia de la semana anterior y compra real de la semana actual para el mismo item.</td></tr>`;
@@ -2736,12 +2743,12 @@ function renderTwoPageReportHtml(store, report) {
   <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
-    @page { margin: 7mm; size: A4 landscape; }
+    @page { margin: 6mm; size: A4 landscape; }
     * { box-sizing: border-box; }
-    body { background: #e8efed; color: #393939; font-family: "Ubuntu", Arial, sans-serif; margin: 0; padding: 12px; }
+    body { background: #e8efed; color: #393939; font-family: "Ubuntu", Arial, sans-serif; margin: 0; padding: 8px; }
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 8px; max-width: 1120px; }
     .toolbar button { background: #054372; border: 0; border-radius: 6px; color: #fff; font-weight: 700; padding: 10px 16px; }
-    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 10px; margin: 0 auto 12px; max-width: 1120px; min-height: 775px; padding: 18px 22px; page-break-after: always; }
+    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 12px; margin: 0 auto 12px; max-width: 1160px; min-height: 775px; padding: 20px 26px; page-break-after: always; }
     .pdf-page:last-child { page-break-after: auto; }
     .topbar { align-items: center; display: grid; gap: 16px; grid-template-columns: 86px 1fr 170px; }
     .mark { display: grid; gap: 5px; grid-template-columns: repeat(2, 34px); }
@@ -2750,32 +2757,32 @@ function renderTwoPageReportHtml(store, report) {
     .mark span:nth-child(2) { background: #054372; }
     .mark span:nth-child(3) { background: #8bc6c1; }
     .mark span:nth-child(4) { background: #d6d6d6; }
-    h1 { color: #393939; font-size: 34px; line-height: 1; margin: 0; text-align: center; }
-    h2 { color: #054372; font-size: 15px; margin: 0; }
-    h3 { color: #054372; font-size: 12px; margin: 0 0 6px; text-transform: uppercase; }
+    h1 { color: #393939; font-size: 40px; line-height: 1; margin: 0; text-align: center; }
+    h2 { color: #054372; font-size: 18px; margin: 0 0 4px; }
+    h3 { color: #054372; font-size: 13px; margin: 0 0 6px; text-transform: uppercase; }
     .rule { background: #90bf4f; height: 4px; margin: 8px auto 0; max-width: 420px; }
-    .period { border: 2px solid #90bf4f; color: #526862; font-size: 11px; padding: 7px; text-align: right; }
-    .period strong { color: #393939; display: block; font-size: 12px; margin-bottom: 3px; text-align: center; }
-    .subline { color: #6d7a77; font-size: 11px; margin: 6px 0 0; text-align: center; }
+    .period { border: 2px solid #90bf4f; color: #526862; font-size: 12px; padding: 8px; text-align: right; }
+    .period strong { color: #393939; display: block; font-size: 13px; margin-bottom: 3px; text-align: center; }
+    .subline { color: #6d7a77; font-size: 12px; margin: 6px 0 0; text-align: center; }
     .metrics { display: grid; gap: 8px; grid-template-columns: 1.45fr repeat(4, 1fr); }
-    .metric, .panel { border: 1px solid #dce4e2; border-radius: 6px; padding: 10px; }
-    .metric span { color: #526862; display: block; font-size: 9px; font-weight: 800; text-transform: uppercase; }
-    .metric strong { display: block; font-size: 20px; margin-top: 4px; }
+    .metric, .panel { border: 1px solid #dce4e2; border-radius: 6px; padding: 12px; }
+    .metric span { color: #526862; display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .metric strong { display: block; font-size: 24px; margin-top: 4px; }
     .grid-main { display: grid; gap: 10px; grid-template-columns: 1.4fr 0.85fr; }
     .grid-even { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
     .chart-card { border: 1px solid #e1e8e6; padding: 6px; }
-    .report-svg { display: block; width: 100%; height: auto; max-height: 260px; }
-    .small-chart .report-svg { max-height: 190px; }
+    .report-svg { display: block; width: 100%; height: auto; max-height: 285px; }
+    .small-chart .report-svg { max-height: 220px; }
     .notes { display: grid; gap: 6px; margin: 0; padding-left: 16px; }
-    .notes li { color: #4f5d59; font-size: 11px; line-height: 1.28; }
+    .notes li { color: #4f5d59; font-size: 13px; line-height: 1.32; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    th, td { border-bottom: 1px solid #e7edeb; font-size: 10px; padding: 6px 7px; vertical-align: middle; overflow-wrap: anywhere; }
-    th { background: #f6f8f7; color: #054372; font-size: 9px; font-weight: 800; text-transform: uppercase; }
-    td span { color: #6d7a77; display: block; font-size: 9px; margin-top: 2px; }
+    th, td { border-bottom: 1px solid #e7edeb; font-size: 12px; padding: 7px 8px; vertical-align: middle; overflow-wrap: anywhere; }
+    th { background: #f6f8f7; color: #054372; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    td span { color: #6d7a77; display: block; font-size: 10px; margin-top: 2px; }
     .num { text-align: right; white-space: nowrap; }
     .ok { color: #477626; }
     .bad { color: #9f674f; }
-    .footer { border-top: 1px solid #dce4e2; color: #77827f; font-size: 9px; padding-top: 7px; text-align: center; }
+    .footer { border-top: 1px solid #dce4e2; color: #77827f; font-size: 10px; padding-top: 7px; text-align: center; }
     @media print { body { background: #fff; padding: 0; } .toolbar { display: none; } .pdf-page { border: 0; margin: 0; max-width: none; min-height: auto; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
   </style>
 </head>
