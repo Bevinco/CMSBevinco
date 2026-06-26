@@ -15,22 +15,27 @@ import {
   Lock,
   LogOut,
   Mail,
+  Moon,
   PencilLine,
   Plus,
   Printer,
   RefreshCw,
   Send,
+  Sun,
   Trash2,
   Upload,
+  Users,
   ShoppingCart,
   Workflow,
+  X,
 } from "lucide-react";
 import "./styles.css";
 
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "tasks" | "reports" | "criteria";
+type ActiveView = "dashboard" | "module1" | "tasks" | "reports" | "criteria" | "users";
+type ThemeMode = "light" | "dark";
 
 type Client = {
   id: string;
@@ -187,6 +192,17 @@ type ClickupMeta = {
   defaultTaskStatus: string;
 };
 
+type CmsUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: "Superadmin" | "Administrador" | "Operaciones" | "Usuario" | string;
+  permissions: string[];
+  source?: "env" | string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 const reportWorkflow = [
   {
     icon: Database,
@@ -280,6 +296,34 @@ const moduleOneChecklist = [
     status: "Por revisar",
   },
 ];
+
+const userPermissionOptions = [
+  { id: "dashboard", label: "Inicio" },
+  { id: "module1", label: "Modulo 1" },
+  { id: "tasks", label: "Pendientes" },
+  { id: "reports", label: "Reportes" },
+  { id: "criteria", label: "Criterios" },
+  { id: "users", label: "Usuarios" },
+];
+
+const roleOptions = ["Usuario", "Operaciones", "Administrador", "Superadmin"];
+
+function emptyUserForm() {
+  return {
+    id: "",
+    name: "",
+    email: "",
+    password: "",
+    role: "Usuario",
+    permissions: ["dashboard", "module1", "tasks", "reports"],
+  };
+}
+
+function userCanAccess(user: Pick<CmsUser, "role" | "permissions"> | null, permission: ActiveView) {
+  if (!user) return true;
+  if (user.role === "Superadmin") return true;
+  return user.permissions?.includes(permission);
+}
 
 function taskStatusClass(status: string) {
   if (status === "Por revisar") return "task-status pending";
@@ -444,6 +488,8 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
   const [currentUser, setCurrentUser] = useState("");
+  const [currentUserInfo, setCurrentUserInfo] = useState<CmsUser | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => (localStorage.getItem("bevinco-theme") === "dark" ? "dark" : "light"));
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -473,6 +519,10 @@ function App() {
   const [clickupColumnPages, setClickupColumnPages] = useState<Record<string, number>>({});
   const [clickupStatusFilter, setClickupStatusFilter] = useState("important");
   const [clickupCode, setClickupCode] = useState("");
+  const [cmsUsers, setCmsUsers] = useState<CmsUser[]>([]);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState("");
+  const [userForm, setUserForm] = useState(emptyUserForm());
   const [newPending, setNewPending] = useState({
     name: "",
     description: "",
@@ -492,12 +542,13 @@ function App() {
 
   async function checkSession() {
     try {
-      const payload = await readJson<{ authenticated: boolean; user: { username: string } | null }>(
+      const payload = await readJson<{ authenticated: boolean; user: CmsUser & { username?: string } | null }>(
         await fetch("/api/auth/me"),
       );
 
       if (payload.authenticated) {
-        setCurrentUser(payload.user?.username || "");
+        setCurrentUser(payload.user?.name || payload.user?.username || payload.user?.email || "");
+        setCurrentUserInfo(payload.user || null);
         setAuthStatus("authenticated");
         return;
       }
@@ -508,9 +559,85 @@ function App() {
     setAuthStatus("anonymous");
   }
 
+  async function loadUsers() {
+    try {
+      const payload = await readJson<{ users: CmsUser[] }>(await fetch("/api/users"));
+      setCmsUsers(payload.users || []);
+    } catch (usersError) {
+      setError(usersError instanceof Error ? usersError.message : "No se pudieron cargar los usuarios.");
+    }
+  }
+
+  function openCreateUserModal() {
+    setEditingUserId("");
+    setUserForm(emptyUserForm());
+    setUserModalOpen(true);
+  }
+
+  function openEditUserModal(user: CmsUser) {
+    setEditingUserId(user.id);
+    setUserForm({
+      id: user.id,
+      name: user.name || "",
+      email: user.email || "",
+      password: "",
+      role: user.role || "Usuario",
+      permissions: user.permissions?.length ? user.permissions : ["dashboard"],
+    });
+    setUserModalOpen(true);
+  }
+
+  async function saveUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const body = {
+        name: userForm.name,
+        email: userForm.email,
+        password: userForm.password,
+        role: userForm.role,
+        permissions: userForm.permissions,
+      };
+      const endpoint = editingUserId ? `/api/users/${editingUserId}` : "/api/users";
+      const method = editingUserId ? "PATCH" : "POST";
+      const payload = await readJson<{ users: CmsUser[] }>(
+        await fetch(endpoint, {
+          method,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(editingUserId && !userForm.password ? { ...body, password: undefined } : body),
+        }),
+      );
+      setCmsUsers(payload.users || []);
+      setUserModalOpen(false);
+      setEditingUserId("");
+      setUserForm(emptyUserForm());
+      setWorkStatus("ready");
+    } catch (userError) {
+      setError(userError instanceof Error ? userError.message : "No se pudo guardar el usuario.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function deleteUser(userId: string) {
+    setWorkStatus("loading");
+    setError("");
+
+    try {
+      const payload = await readJson<{ users: CmsUser[] }>(await fetch(`/api/users/${userId}`, { method: "DELETE" }));
+      setCmsUsers(payload.users || []);
+      setWorkStatus("ready");
+    } catch (userError) {
+      setError(userError instanceof Error ? userError.message : "No se pudo eliminar el usuario.");
+      setWorkStatus("error");
+    }
+  }
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     setCurrentUser("");
+    setCurrentUserInfo(null);
     setAuthStatus("anonymous");
     setSelectedReport(null);
   }
@@ -1101,11 +1228,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    localStorage.setItem("bevinco-theme", themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
     if (authStatus === "authenticated") {
       loadModule();
       loadClickupStatus();
+      if (userCanAccess(currentUserInfo, "users")) loadUsers();
     }
-  }, [authStatus]);
+  }, [authStatus, currentUserInfo]);
 
   useEffect(() => {
     if (authStatus === "authenticated" && ["dashboard", "tasks"].includes(activeView)) {
@@ -1120,6 +1253,12 @@ function App() {
       loadSculptureUnits({ quiet: true });
     }
   }, [authStatus, activeView, sculptureDirectoryLoaded]);
+
+  useEffect(() => {
+    if (authStatus === "authenticated" && activeView === "users") {
+      loadUsers();
+    }
+  }, [authStatus, activeView]);
 
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const clickupTasksByStatus = useMemo(() => {
@@ -1211,6 +1350,7 @@ function App() {
     tasks: ["Gestion operativa", "Pendientes ClickUp"],
     reports: ["Bandeja", "Reportes guardados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
+    users: ["Administracion", "Usuarios y permisos"],
   }[activeView];
 
   if (authStatus === "checking") {
@@ -1240,11 +1380,12 @@ function App() {
           </div>
         </div>
         <nav className="nav-list" aria-label="Modulos">
-          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button>
-          <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button>
-          <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}><ListChecks size={18} /> Pendientes</button>
-          <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button>
-          <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><Upload size={18} /> Criterios</button>
+          {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button> : null}
+          {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
+          {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button> : null}
+          {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><Upload size={18} /> Criterios</button> : null}
+          {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
       </aside>
 
@@ -1256,6 +1397,13 @@ function App() {
           </div>
           <div className="topbar-actions">
             <span>{currentUser}</span>
+            <button
+              aria-label={themeMode === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+              className="icon-button"
+              onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+            >
+              {themeMode === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
             <button className="secondary-button" onClick={logout}><LogOut size={17} /> Salir</button>
           </div>
         </header>
@@ -1296,7 +1444,7 @@ function App() {
               </article>
             </section>
 
-            <section className="dashboard-grid">
+            <section className="dashboard-focus">
               <div className="panel attention-panel">
                 <div className="panel-header">
                   <div>
@@ -1321,39 +1469,6 @@ function App() {
                       <small>Los reportes cargados no tienen fuentes pendientes ni revisiones urgentes.</small>
                     </div>
                   )}
-                </div>
-              </div>
-
-              <div className="panel health-panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Salud del sistema</p>
-                    <h2>Integraciones y base de trabajo</h2>
-                  </div>
-                  <Database size={22} />
-                </div>
-                <div className="health-list">
-                  <article>
-                    <span className={clickupStatus?.connected ? "health-dot ok" : "health-dot warn"} />
-                    <div>
-                      <strong>ClickUp</strong>
-                      <small>{clickupStatus?.connected ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Cuenta conectada"}` : "Revisar token/lista configurada"}</small>
-                    </div>
-                  </article>
-                  <article>
-                    <span className={sculptureDirectoryLoaded && sculptureUnits.length ? "health-dot ok" : "health-dot warn"} />
-                    <div>
-                      <strong>Sculpture</strong>
-                      <small>{sculptureUnits.length ? `${sculptureUnits.length} restaurantes detectados` : "Abrir Modulo 1 para consultar restaurantes"}</small>
-                    </div>
-                  </article>
-                  <article>
-                    <span className={criteriaDocuments.length ? "health-dot ok" : "health-dot neutral"} />
-                    <div>
-                      <strong>Criterios del agente</strong>
-                      <small>{criteriaDocuments.length ? `${criteriaDocuments.length} documento(s) cargados` : "Sin biblioteca de criterios cargada"}</small>
-                    </div>
-                  </article>
                 </div>
               </div>
             </section>
@@ -2157,6 +2272,45 @@ function App() {
         </section>
         ) : null}
 
+        {activeView === "users" ? (
+          <section className="users-view">
+            <div className="users-header">
+              <div>
+                <h2>Usuarios</h2>
+                <p>Gestiona usuarios del CMS, roles y permisos de acceso por modulo.</p>
+              </div>
+              <button className="primary-button" onClick={openCreateUserModal}><Plus size={17} /> Nuevo usuario</button>
+            </div>
+            {error ? <p className="connector-error">{error}</p> : null}
+            <div className="users-list">
+              {cmsUsers.map((user) => (
+                <article className="user-card" key={user.id}>
+                  <div className="user-avatar">{(user.name || user.email || "U").slice(0, 1).toUpperCase()}</div>
+                  <div className="user-main">
+                    <div className="user-title-row">
+                      <strong>{user.name || user.email}</strong>
+                      <span>{user.role || "Usuario"}</span>
+                    </div>
+                    <small>{user.email || "Sin email"}</small>
+                    <div className="permission-chips">
+                      {user.permissions.map((permission) => (
+                        <span className="permission-chip enabled" key={`${user.id}-${permission}`}>
+                          {userPermissionOptions.find((item) => item.id === permission)?.label || permission}
+                        </span>
+                      ))}
+                      {user.source === "env" ? <span className="permission-chip locked">Variable ENV</span> : null}
+                    </div>
+                  </div>
+                  <div className="user-actions">
+                    <button className="secondary-button" disabled={user.source === "env"} onClick={() => openEditUserModal(user)}>Editar</button>
+                    <button className="danger-button" disabled={user.source === "env"} onClick={() => deleteUser(user.id)}>Eliminar</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {activeView === "criteria" ? (
           <section className="page-grid">
             <div className="panel">
@@ -2239,6 +2393,73 @@ function App() {
               </div>
             </div>
           </section>
+        ) : null}
+
+        {userModalOpen ? (
+          <div className="modal-backdrop" role="presentation">
+            <section className="user-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+              <button className="modal-close icon-button" aria-label="Cerrar" onClick={() => setUserModalOpen(false)}>
+                <X size={17} />
+              </button>
+              <form onSubmit={saveUser}>
+                <h2 id="user-modal-title">{editingUserId ? "Editar usuario" : "Crear nuevo usuario"}</h2>
+                <label>
+                  Nombre
+                  <input required value={userForm.name} onChange={(event) => setUserForm((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label>
+                  Email
+                  <input required type="email" value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} />
+                </label>
+                <label>
+                  Contrasena
+                  <input
+                    minLength={editingUserId ? undefined : 6}
+                    placeholder={editingUserId ? "Dejar vacia para no cambiar" : "Minimo 6 caracteres"}
+                    required={!editingUserId}
+                    type="password"
+                    value={userForm.password}
+                    onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Rol
+                  <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>
+                    {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </label>
+                <div className="permission-editor">
+                  <strong>Permisos de acceso a modulos</strong>
+                  {userPermissionOptions.map((permission) => {
+                    const checked = userForm.permissions.includes(permission.id);
+                    return (
+                      <label className="toggle-row" key={permission.id}>
+                        <span>{permission.label}</span>
+                        <input
+                          checked={checked}
+                          type="checkbox"
+                          onChange={(event) => setUserForm((current) => ({
+                            ...current,
+                            permissions: event.target.checked
+                              ? Array.from(new Set([...current.permissions, permission.id]))
+                              : current.permissions.filter((item) => item !== permission.id),
+                          }))}
+                        />
+                        <i aria-hidden="true" />
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="modal-help">El usuario configurado en variables de entorno siempre conserva acceso total como superadmin.</p>
+                <div className="modal-actions">
+                  <button className="secondary-button" type="button" onClick={() => setUserModalOpen(false)}>Cancelar</button>
+                  <button className="primary-button" disabled={workStatus === "loading"} type="submit">
+                    {editingUserId ? "Guardar cambios" : "Crear usuario"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
         ) : null}
 
       </section>

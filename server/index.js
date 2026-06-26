@@ -142,12 +142,42 @@ function signPayload(payload) {
 function createSessionToken(username) {
   const payload = Buffer.from(
     JSON.stringify({
-      username,
+      ...(typeof username === "string" ? { username } : username),
       expiresAt: Date.now() + 1000 * 60 * 60 * 12,
     }),
   ).toString("base64url");
 
   return `${payload}.${signPayload(payload)}`;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const hash = crypto.scryptSync(String(password || ""), salt, 64).toString("base64url");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, passwordHash) {
+  const [salt, hash] = String(passwordHash || "").split(":");
+  if (!salt || !hash) return false;
+  const candidate = crypto.scryptSync(String(password || ""), salt, 64).toString("base64url");
+  return timingSafeEqual(candidate, hash);
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  const { passwordHash: _passwordHash, ...safeUser } = user;
+  return safeUser;
+}
+
+function sessionUserPayload(user) {
+  return {
+    id: user.id,
+    username: user.email || user.username || user.name,
+    name: user.name || user.email || user.username,
+    email: user.email || "",
+    role: user.role || "Usuario",
+    permissions: user.permissions || [],
+  };
 }
 
 function readSession(request) {
@@ -186,6 +216,19 @@ function requireAuth(request, response, next) {
 
   request.session = session;
   next();
+}
+
+function requirePermission(permission) {
+  return (request, response, next) => {
+    const session = request.session || readSession(request);
+    const permissions = session?.permissions || [];
+    if (session?.role === "Superadmin" || permissions.includes(permission)) {
+      request.session = session;
+      next();
+      return;
+    }
+    response.status(403).json({ error: "No tienes permisos para acceder a este modulo." });
+  };
 }
 
 function normalizeHeader(value) {
@@ -706,6 +749,7 @@ async function readStore() {
   store.periods ||= [];
   store.reports ||= [];
   store.criteriaDocuments ||= [];
+  store.users ||= [];
   return store;
 }
 
@@ -2908,11 +2952,18 @@ app.get("/api/auth/me", (request, response) => {
   const session = readSession(request);
   response.json({
     authenticated: Boolean(session),
-    user: session ? { username: session.username } : null,
+    user: session ? {
+      id: session.id,
+      username: session.username,
+      name: session.name || session.username,
+      email: session.email || "",
+      role: session.role || "Superadmin",
+      permissions: session.permissions || [],
+    } : null,
   });
 });
 
-app.post("/api/auth/login", (request, response) => {
+app.post("/api/auth/login", async (request, response) => {
   if (!authUsername || !authPassword) {
     response.status(503).json({ error: "CMS login is not configured." });
     return;
@@ -2920,18 +2971,137 @@ app.post("/api/auth/login", (request, response) => {
 
   const { username, password } = request.body || {};
 
-  if (!timingSafeEqual(username, authUsername) || !timingSafeEqual(password, authPassword)) {
+  if (timingSafeEqual(username, authUsername) && timingSafeEqual(password, authPassword)) {
+    const envUser = {
+      id: "env-superadmin",
+      username,
+      name: username,
+      email: username,
+      role: "Superadmin",
+      permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
+    };
+    response.setHeader("Set-Cookie", sessionCookie(createSessionToken(envUser)));
+    response.json({ authenticated: true, user: envUser });
+    return;
+  }
+
+  const store = await readStore();
+  const user = (store.users || []).find((candidate) => {
+    const login = String(username || "").toLowerCase();
+    return [candidate.email, candidate.username, candidate.name].filter(Boolean).some((value) => String(value).toLowerCase() === login);
+  });
+
+  if (!user || !verifyPassword(password, user.passwordHash)) {
     response.status(401).json({ error: "Usuario o contrasena incorrectos." });
     return;
   }
 
-  response.setHeader("Set-Cookie", sessionCookie(createSessionToken(username)));
-  response.json({ authenticated: true, user: { username } });
+  const sessionUser = sessionUserPayload(user);
+  response.setHeader("Set-Cookie", sessionCookie(createSessionToken(sessionUser)));
+  response.json({ authenticated: true, user: sessionUser });
 });
 
 app.post("/api/auth/logout", (_request, response) => {
   response.setHeader("Set-Cookie", clearSessionCookie());
   response.json({ authenticated: false });
+});
+
+app.get("/api/users", requireAuth, requirePermission("users"), async (_request, response) => {
+  const store = await readStore();
+  response.json({
+    users: [
+      {
+        id: "env-superadmin",
+        name: authUsername || "Superadmin",
+        email: authUsername || "",
+        role: "Superadmin",
+        permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
+        source: "env",
+      },
+      ...(store.users || []).map(publicUser),
+    ],
+  });
+});
+
+app.post("/api/users", requireAuth, requirePermission("users"), async (request, response) => {
+  const store = await readStore();
+  const { name, email, password, role = "Usuario", permissions = [] } = request.body || {};
+
+  if (!name || !email || !password || String(password).length < 6) {
+    response.status(400).json({ error: "Nombre, email y contrasena de minimo 6 caracteres son requeridos." });
+    return;
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const exists = (store.users || []).some((user) => String(user.email || "").toLowerCase() === normalizedEmail) ||
+    timingSafeEqual(normalizedEmail, String(authUsername || "").toLowerCase());
+  if (exists) {
+    response.status(409).json({ error: "Ya existe un usuario con ese email." });
+    return;
+  }
+
+  const user = {
+    id: crypto.randomUUID(),
+    name: String(name).trim(),
+    email: normalizedEmail,
+    role,
+    permissions: Array.isArray(permissions) ? permissions : [],
+    passwordHash: hashPassword(password),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  store.users ||= [];
+  store.users.unshift(user);
+  await writeStore(store);
+  response.status(201).json({ user: publicUser(user), users: store.users.map(publicUser) });
+});
+
+app.patch("/api/users/:userId", requireAuth, requirePermission("users"), async (request, response) => {
+  const store = await readStore();
+  const user = (store.users || []).find((candidate) => candidate.id === request.params.userId);
+
+  if (!user) {
+    response.status(404).json({ error: "Usuario no encontrado." });
+    return;
+  }
+
+  const { name, email, password, role, permissions } = request.body || {};
+  if (email) {
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const exists = (store.users || []).some((candidate) => candidate.id !== user.id && String(candidate.email || "").toLowerCase() === normalizedEmail);
+    if (exists || timingSafeEqual(normalizedEmail, String(authUsername || "").toLowerCase())) {
+      response.status(409).json({ error: "Ya existe un usuario con ese email." });
+      return;
+    }
+    user.email = normalizedEmail;
+  }
+  if (name) user.name = String(name).trim();
+  if (role) user.role = role;
+  if (Array.isArray(permissions)) user.permissions = permissions;
+  if (password) {
+    if (String(password).length < 6) {
+      response.status(400).json({ error: "La nueva contrasena debe tener minimo 6 caracteres." });
+      return;
+    }
+    user.passwordHash = hashPassword(password);
+  }
+  user.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  response.json({ user: publicUser(user), users: store.users.map(publicUser) });
+});
+
+app.delete("/api/users/:userId", requireAuth, requirePermission("users"), async (request, response) => {
+  const store = await readStore();
+  const before = (store.users || []).length;
+  store.users = (store.users || []).filter((user) => user.id !== request.params.userId);
+
+  if (store.users.length === before) {
+    response.status(404).json({ error: "Usuario no encontrado." });
+    return;
+  }
+
+  await writeStore(store);
+  response.json({ users: store.users.map(publicUser) });
 });
 
 app.get("/api/sculpture/requisition", requireAuth, async (request, response) => {
