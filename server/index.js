@@ -2382,17 +2382,17 @@ function truncateLabel(value, maxLength = 24) {
 function renderCostSvg(history, money) {
   const rows = [...(history || [])].reverse();
   const width = 1080;
-  const height = 340;
-  const left = 72;
-  const right = 48;
-  const top = 36;
-  const bottom = 78;
+  const height = 360;
+  const left = 156;
+  const right = 60;
+  const top = 44;
+  const bottom = 76;
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const baseline = top + chartHeight;
-  const revenueBarHeight = chartHeight * 0.62;
-  const percentTop = top + 18;
-  const percentHeight = 92;
+  const revenueBarHeight = chartHeight * 0.58;
+  const percentTop = top + 42;
+  const percentHeight = 116;
   const maxRevenue = Math.max(...rows.map((item) => item.revenue || 0), 1);
   const maxPercent = Math.max(40, ...rows.flatMap((item) => [item.costPercent || 0, item.idealCostPercent || 0]).map((value) => value + 8));
   const step = rows.length > 1 ? chartWidth / (rows.length - 1) : chartWidth;
@@ -2402,22 +2402,22 @@ function renderCostSvg(history, money) {
     .map((item, index) => {
       const x = left + index * step;
       const barHeight = ((item.revenue || 0) / maxRevenue) * revenueBarHeight;
-      const barWidth = Math.min(78, chartWidth / Math.max(rows.length, 1) * 0.36);
+      const barWidth = Math.min(88, chartWidth / Math.max(rows.length, 1) * 0.42);
       const barY = baseline - barHeight;
       const real = item.costPercent || 0;
       const ideal = item.idealCostPercent || 0;
       const realY = percentTop + percentHeight - (real / maxPercent) * percentHeight;
       const idealY = percentTop + percentHeight - (ideal / maxPercent) * percentHeight;
-      const realBadgeY = Math.max(top + 2, realY - 28);
+      const realBadgeY = Math.max(top + 8, realY - 32);
       realPoints.push(`${x},${realY}`);
       idealPoints.push(`${x},${idealY}`);
 
       return `
         <rect x="${x - barWidth / 2}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="4" fill="#8bc6c1" />
         <text x="${x}" y="${baseline + 34}" text-anchor="middle" class="axis-label">${escapeHtml(shortPeriodLabel(item.label))}</text>
-        <text x="${x}" y="${Math.max(barY + 18, top + 18)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
-        <rect x="${x - 24}" y="${realBadgeY}" width="48" height="20" rx="4" fill="#001e43" />
-        <text x="${x}" y="${realBadgeY + 14}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
+        <text x="${x}" y="${Math.max(barY + 22, top + 24)}" text-anchor="middle" class="bar-value">${compactMoney(item.revenue)}</text>
+        <rect x="${x - 28}" y="${realBadgeY}" width="56" height="22" rx="5" fill="#001e43" />
+        <text x="${x}" y="${realBadgeY + 15}" text-anchor="middle" class="point-label">${real.toFixed(1)}%</text>
         <circle cx="${x}" cy="${idealY}" r="4" fill="#90bf4f" />`;
     })
     .join("");
@@ -2427,7 +2427,7 @@ function renderCostSvg(history, money) {
   }).join("");
 
   return `<svg class="report-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Ingresos y porcentaje de costo real">
-    <style>.axis-label{font:12px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 12px Ubuntu,Arial;fill:#fff}.point-label{font:700 10px Ubuntu,Arial;fill:#fff}</style>
+    <style>.axis-label{font:13px Ubuntu,Arial;fill:#66706d}.bar-value{font:700 14px Ubuntu,Arial;fill:#fff}.point-label{font:700 11px Ubuntu,Arial;fill:#fff}</style>
     ${grid}
     ${bars}
     <polyline points="${idealPoints.join(" ")}" fill="none" stroke="#90bf4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
@@ -2771,8 +2771,8 @@ function renderTwoPageReportHtml(store, report) {
     .grid-main { display: grid; gap: 10px; grid-template-columns: 1.4fr 0.85fr; }
     .grid-even { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
     .chart-card { border: 1px solid #e1e8e6; padding: 6px; }
-    .report-svg { display: block; width: 100%; height: auto; max-height: 285px; }
-    .small-chart .report-svg { max-height: 220px; }
+    .report-svg { display: block; width: 100%; height: auto; max-height: 320px; }
+    .small-chart .report-svg { max-height: 230px; }
     .notes { display: grid; gap: 6px; margin: 0; padding-left: 16px; }
     .notes li { color: #4f5d59; font-size: 13px; line-height: 1.32; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
