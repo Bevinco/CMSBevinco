@@ -1246,16 +1246,26 @@ button:disabled {
   gap: 14px;
 }
 
+.workspace-users {
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.workspace-users .topbar {
+  justify-content: flex-end;
+  min-height: 40px;
+}
+
+.workspace-users .topbar > div:first-child {
+  display: none;
+}
+
 .users-header {
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #dce4e2;
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(16, 32, 29, 0.045);
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 18px;
+  padding: 0 0 12px;
 }
 
 .users-header h2,
@@ -1265,7 +1275,7 @@ button:disabled {
 
 .users-header h2 {
   color: #172026;
-  font-size: 1.05rem;
+  font-size: 1.35rem;
 }
 
 .users-header p {
@@ -1288,8 +1298,8 @@ button:disabled {
   display: grid;
   gap: 12px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 88px;
-  padding: 14px 16px;
+  min-height: 96px;
+  padding: 16px 18px;
 }
 
 .user-avatar {
@@ -1367,6 +1377,16 @@ button:disabled {
 .user-actions button {
   min-height: 34px;
   padding: 0 12px;
+}
+
+.system-user-note {
+  background: #eaf1f8;
+  border-radius: 999px;
+  color: var(--sculpture-blue);
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 7px 10px;
+  white-space: nowrap;
 }
 
 .danger-button {
@@ -2376,7 +2396,6 @@ button:disabled {
 :root[data-theme="dark"] .metrics article,
 :root[data-theme="dark"] .dashboard-kpis article,
 :root[data-theme="dark"] .dashboard-hero,
-:root[data-theme="dark"] .users-header,
 :root[data-theme="dark"] .user-card,
 :root[data-theme="dark"] .login-panel,
 :root[data-theme="dark"] .control-bar,
@@ -2448,6 +2467,7 @@ button:disabled {
 }
 
 :root[data-theme="dark"] .user-title-row span,
+:root[data-theme="dark"] .system-user-note,
 :root[data-theme="dark"] .pill.neutral,
 :root[data-theme="dark"] .badge.neutral {
   background: #1d3731;

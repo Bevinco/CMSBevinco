@@ -325,6 +325,10 @@ function userCanAccess(user: Pick<CmsUser, "role" | "permissions"> | null, permi
   return user.permissions?.includes(permission);
 }
 
+function isSystemUser(user: CmsUser) {
+  return user.id === "env-superadmin" || user.source === "env";
+}
+
 function taskStatusClass(status: string) {
   if (status === "Por revisar") return "task-status pending";
   if (status === "En curso") return "task-status working";
@@ -640,6 +644,11 @@ function App() {
     setCurrentUserInfo(null);
     setAuthStatus("anonymous");
     setSelectedReport(null);
+  }
+
+  function navigateTo(view: ActiveView) {
+    setError("");
+    setActiveView(view);
   }
 
   function applyBootstrapPayload(payload: BootstrapPayload) {
@@ -1380,16 +1389,16 @@ function App() {
           </div>
         </div>
         <nav className="nav-list" aria-label="Modulos">
-          {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
-          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => setActiveView("module1")}><ClipboardList size={18} /> Modulo 1</button> : null}
-          {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
-          {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}><FileText size={18} /> Reportes</button> : null}
-          {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => setActiveView("criteria")}><Upload size={18} /> Criterios</button> : null}
-          {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}><Users size={18} /> Usuarios</button> : null}
+          {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Modulo 1</button> : null}
+          {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
+          {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Reportes</button> : null}
+          {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
+          {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
       </aside>
 
-      <section className="workspace">
+      <section className={`workspace workspace-${activeView}`}>
         <header className="topbar" id="dashboard">
           <div>
             <p className="eyebrow">{viewMeta[0]}</p>
@@ -2243,12 +2252,11 @@ function App() {
           <section className="users-view">
             <div className="users-header">
               <div>
-                <h2>Equipo del CMS</h2>
-                <p>{cmsUsers.length} usuario(s) con acceso configurado. Gerencia Bevinco conserva acceso total.</p>
+                <h2>Usuarios</h2>
+                <p>Gestiona usuarios del CMS y sus permisos de acceso.</p>
               </div>
               <button className="primary-button" onClick={openCreateUserModal}><Plus size={17} /> Nuevo usuario</button>
             </div>
-            {error ? <p className="connector-error">{error}</p> : null}
             <div className="users-list">
               {cmsUsers.map((user) => (
                 <article className="user-card" key={user.id}>
@@ -2269,8 +2277,14 @@ function App() {
                     </div>
                   </div>
                   <div className="user-actions">
-                    <button className="secondary-button" disabled={user.source === "env"} onClick={() => openEditUserModal(user)}>Editar</button>
-                    <button className="danger-button" disabled={user.source === "env"} onClick={() => deleteUser(user.id)}>Eliminar</button>
+                    {isSystemUser(user) ? (
+                      <span className="system-user-note">Acceso total</span>
+                    ) : (
+                      <>
+                        <button className="secondary-button" onClick={() => openEditUserModal(user)}>Editar</button>
+                        <button className="danger-button" onClick={() => deleteUser(user.id)}>Eliminar</button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))}
