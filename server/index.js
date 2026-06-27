@@ -61,6 +61,8 @@ const authUsername = process.env.CMS_AUTH_USERNAME;
 const authPassword = process.env.CMS_AUTH_PASSWORD;
 const cmsSuperadminEmail = (process.env.CMS_SUPERADMIN_EMAIL || "gerencia@bevinco.com").toLowerCase();
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const openaiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || "";
+const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
@@ -1098,6 +1100,148 @@ function generateReportAnalysis(payload) {
       .map((paragraph) => paragraph.trim())
       .filter(Boolean)
       .slice(0, 5),
+  };
+}
+
+function extractJsonPayload(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) {
+      try {
+        return JSON.parse(fenced[1].trim());
+      } catch {
+        // Continue to object extraction.
+      }
+    }
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(raw.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractOpenAiText(payload) {
+  if (payload?.output_text) return payload.output_text;
+  const chunks = [];
+  for (const output of payload?.output || []) {
+    for (const content of output.content || []) {
+      if (content.text) chunks.push(content.text);
+      if (content.type === "output_text" && content.text) chunks.push(content.text);
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+async function generateChatGptCriteriaDocuments({ projectName, sections, files }) {
+  if (!openaiApiKey) {
+    const error = new Error("OPENAI_API_KEY no esta configurada en el servidor.");
+    error.status = 503;
+    throw error;
+  }
+
+  const sectionText = Object.entries(sections || {})
+    .filter(([, value]) => String(value || "").trim())
+    .map(([key, value]) => `## ${key}\n${String(value).trim()}`)
+    .join("\n\n");
+  const fileText = (files || [])
+    .filter((file) => String(file.text || "").trim())
+    .map((file) => `## Archivo: ${file.name}\n${String(file.text).trim().slice(0, 12000)}`)
+    .join("\n\n");
+  const combined = [sectionText, fileText].filter(Boolean).join("\n\n---\n\n").slice(0, 60000);
+
+  if (!combined.trim()) {
+    const error = new Error("No hay contenido para procesar con OpenAI.");
+    error.status = 400;
+    throw error;
+  }
+
+  const prompt = `
+Convierte el siguiente contenido de un Project de ChatGPT usado por Bevinco en documentos de criterio para un CMS de reportes.
+
+Objetivo del CMS:
+- Generar reportes semanales de auditoria Bevinco/Sculpture Hospitality.
+- Explicar costo real vs costo ideal, diferencias en puntos porcentuales y diferencia en pesos.
+- Comentar aumentos o disminuciones relevantes contra semanas anteriores.
+- Comparar compra real contra sugerencia de compra de la semana anterior.
+- Detectar top 3 desviaciones y criterios de operaciones.
+
+Devuelve SOLO JSON valido con esta forma:
+{
+  "summary": "resumen corto de lo importado",
+  "documents": [
+    {
+      "name": "nombre claro del documento",
+      "category": "project_instructions|report_prompt|analysis_rules|purchase_rules|comment_examples|operations_questionnaire|project_file",
+      "text": "contenido depurado en markdown, sin inventar informacion"
+    }
+  ]
+}
+
+Reglas:
+- No inventes datos. Si algo falta, incluyelo como pendiente dentro del documento adecuado.
+- Separa reglas repetidas y consolida duplicados.
+- Escribe en espanol claro para operaciones.
+- Maximo 8 documentos.
+- Cada text debe servir directamente como criterio que el agente pueda consultar.
+
+Proyecto: ${projectName || "Proyecto ChatGPT Bevinco"}
+
+Contenido:
+${combined}
+`.trim();
+
+  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${openaiApiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: openaiModel,
+      input: prompt,
+      max_output_tokens: 5000,
+    }),
+  });
+
+  const payload = await openaiResponse.json().catch(() => ({}));
+
+  if (!openaiResponse.ok) {
+    const error = new Error(payload?.error?.message || "OpenAI no pudo procesar los criterios.");
+    error.status = openaiResponse.status;
+    throw error;
+  }
+
+  const parsed = extractJsonPayload(extractOpenAiText(payload));
+  const documents = Array.isArray(parsed?.documents) ? parsed.documents : [];
+
+  if (!documents.length) {
+    const error = new Error("OpenAI no devolvio documentos validos para guardar en biblioteca.");
+    error.status = 502;
+    throw error;
+  }
+
+  return {
+    summary: String(parsed.summary || "Contenido procesado con OpenAI."),
+    documents: documents
+      .map((document, index) => ({
+        name: String(document.name || `Criterio ChatGPT ${index + 1}`).trim(),
+        category: String(document.category || "project_file").trim(),
+        text: String(document.text || "").replace(/\0/g, "").trim(),
+      }))
+      .filter((document) => document.text)
+      .slice(0, 8),
   };
 }
 
@@ -3210,6 +3354,54 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
   });
+});
+
+app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (request, response) => {
+  try {
+    const store = await readStore();
+    const files = Array.isArray(request.body?.files) ? request.body.files : [];
+    const projectName = String(request.body?.projectName || "Proyecto ChatGPT Bevinco").trim();
+    const sections = {
+      instrucciones: request.body?.instructions,
+      prompt_reporte_semanal: request.body?.reportPrompt,
+      ejemplos_comentarios: request.body?.examples,
+      notas_reglas_cuestionario: request.body?.notes,
+    };
+    const aiImport = await generateChatGptCriteriaDocuments({ projectName, sections, files });
+
+    const documents = aiImport.documents.map((document) => {
+      const text = String(document.text || "").replace(/\0/g, "").trim();
+
+      return {
+        id: `${Date.now()}-${crypto.randomUUID()}`,
+        name: `ChatGPT - ${projectName} - ${document.name}`.slice(0, 180),
+        type: "text/markdown",
+        text: text.slice(0, 30000),
+        size: text.length,
+        source: "chatgpt-api",
+        category: document.category,
+        uploadedAt: new Date().toISOString(),
+      };
+    });
+
+    store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 30);
+    store.reports.forEach((report) => {
+      report.analysis = null;
+    });
+    await writeStore(store);
+
+    response.json({
+      clients: store.clients,
+      periods: store.periods,
+      criteriaDocuments: store.criteriaDocuments,
+      reports: store.reports.map((item) => buildReportPayload(store, item)),
+      selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
+      importSummary: aiImport.summary,
+      importedCount: documents.length,
+    });
+  } catch (error) {
+    response.status(error.status || 500).json({ error: error.message || "No se pudo importar contenido desde ChatGPT con OpenAI." });
+  }
 });
 
 app.delete("/api/module1/criteria-documents/:documentId", requireAuth, async (request, response) => {
