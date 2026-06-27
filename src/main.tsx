@@ -133,6 +133,8 @@ type CriteriaDocument = {
   text: string;
   size: number;
   uploadedAt: string;
+  source?: string;
+  category?: string;
 };
 
 type BootstrapPayload = {
@@ -509,6 +511,14 @@ function App() {
   const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
+  const [selectedChatGptFiles, setSelectedChatGptFiles] = useState<File[]>([]);
+  const [chatGptImport, setChatGptImport] = useState({
+    projectName: "",
+    instructions: "",
+    reportPrompt: "",
+    examples: "",
+    notes: "",
+  });
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
@@ -1076,6 +1086,69 @@ function App() {
       setWorkStatus("ready");
     } catch (criteriaError) {
       setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function importChatGptProject() {
+    const projectName = chatGptImport.projectName.trim() || "Proyecto ChatGPT";
+    const textBlocks = [
+      { key: "instructions", label: "Instrucciones del proyecto", text: chatGptImport.instructions, category: "project_instructions" },
+      { key: "prompt", label: "Prompt de reporte semanal", text: chatGptImport.reportPrompt, category: "report_prompt" },
+      { key: "examples", label: "Ejemplos de comentarios", text: chatGptImport.examples, category: "comment_examples" },
+      { key: "notes", label: "Notas y reglas adicionales", text: chatGptImport.notes, category: "operational_notes" },
+    ].filter((block) => block.text.trim());
+    const totalSize = selectedChatGptFiles.reduce((sum, file) => sum + file.size, 0) +
+      textBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+    if (!textBlocks.length && !selectedChatGptFiles.length) {
+      setError("Pega instrucciones, prompts, ejemplos o sube archivos descargados de ChatGPT.");
+      setWorkStatus("error");
+      return;
+    }
+
+    if (totalSize > 5 * 1024 * 1024) {
+      setError("La importacion desde ChatGPT supera 5 MB. Divide el contenido por proyecto o por tema.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError("Importando contenido desde ChatGPT a la biblioteca de criterios...");
+
+    try {
+      const textDocuments = textBlocks.map((block) => ({
+        name: `ChatGPT - ${projectName} - ${block.label}.md`,
+        type: "text/markdown",
+        size: block.text.length,
+        text: [`# ${block.label}`, "", `Proyecto: ${projectName}`, "", block.text.trim()].join("\n"),
+        source: "chatgpt",
+        category: block.category,
+      }));
+      const fileDocuments = await Promise.all(
+        selectedChatGptFiles.map(async (file) => ({
+          name: `ChatGPT - ${projectName} - ${file.name}`,
+          type: file.type || "text/plain",
+          size: file.size,
+          text: await file.text(),
+          source: "chatgpt",
+          category: "project_file",
+        })),
+      );
+      const payload = await readJson<BootstrapPayload>(
+        await fetch("/api/module1/criteria-documents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ files: [...textDocuments, ...fileDocuments], source: "chatgpt" }),
+        }),
+      );
+      applyBootstrapPayload(payload);
+      setSelectedChatGptFiles([]);
+      setChatGptImport({ projectName: "", instructions: "", reportPrompt: "", examples: "", notes: "" });
+      setError("Contenido de ChatGPT importado en la biblioteca. El agente lo usara al generar reportes.");
+      setWorkStatus("ready");
+    } catch (criteriaError) {
+      setError(criteriaError instanceof Error ? criteriaError.message : "No se pudo importar contenido desde ChatGPT.");
       setWorkStatus("error");
     }
   }
@@ -2300,6 +2373,91 @@ function App() {
 
         {activeView === "criteria" ? (
           <section className="page-grid">
+            {error ? <p className="connector-error">{error}</p> : null}
+            <div className="panel chatgpt-import-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Importar desde ChatGPT</p>
+                  <h2>Traer proyectos a la biblioteca</h2>
+                </div>
+                <Bot size={22} />
+              </div>
+              <p className="muted-copy">Pega las instrucciones, prompts o ejemplos del Project de ChatGPT. El CMS los guarda como criterios y el agente los toma al generar reportes.</p>
+              <div className="chatgpt-import-grid">
+                <label>
+                  Nombre del proyecto
+                  <input
+                    placeholder="Ej. Bevinco reportes semanales"
+                    value={chatGptImport.projectName}
+                    onChange={(event) => setChatGptImport((current) => ({ ...current, projectName: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Instrucciones del Project
+                  <textarea
+                    placeholder="Pega aqui las instrucciones del proyecto de ChatGPT..."
+                    value={chatGptImport.instructions}
+                    onChange={(event) => setChatGptImport((current) => ({ ...current, instructions: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Prompt de reporte semanal
+                  <textarea
+                    placeholder="Pega el prompt que usan para crear reportes..."
+                    value={chatGptImport.reportPrompt}
+                    onChange={(event) => setChatGptImport((current) => ({ ...current, reportPrompt: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Ejemplos de buenos comentarios
+                  <textarea
+                    placeholder="Pega comentarios buenos generados o corregidos por el equipo..."
+                    value={chatGptImport.examples}
+                    onChange={(event) => setChatGptImport((current) => ({ ...current, examples: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Notas, reglas o cuestionario operaciones
+                  <textarea
+                    placeholder="Pega reglas de costo ideal, compra sugerida, cuestionario de operaciones, etc."
+                    value={chatGptImport.notes}
+                    onChange={(event) => setChatGptImport((current) => ({ ...current, notes: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Archivos descargados de ChatGPT
+                  <input
+                    accept=".txt,.md,.csv,.json,.html,text/plain,text/markdown,text/csv,application/json,text/html"
+                    multiple
+                    type="file"
+                    onChange={(event) => setSelectedChatGptFiles(Array.from(event.target.files || []))}
+                  />
+                </label>
+              </div>
+              {selectedChatGptFiles.length ? (
+                <div className="selected-files">
+                  {selectedChatGptFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
+                </div>
+              ) : (
+                <small className="muted-copy">Para export ZIP completo aun conviene extraer/copiar los archivos utiles antes de subirlos. PDFs/DOCX requieren un extractor adicional.</small>
+              )}
+              <div className="upload-actions">
+                <button className="primary-button" disabled={workStatus === "loading"} onClick={importChatGptProject}>
+                  <Bot size={17} /> Importar a biblioteca
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={workStatus === "loading"}
+                  onClick={() => {
+                    setSelectedChatGptFiles([]);
+                    setChatGptImport({ projectName: "", instructions: "", reportPrompt: "", examples: "", notes: "" });
+                  }}
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+
             <div className="panel">
               <div className="panel-header">
                 <div>
@@ -2308,7 +2466,6 @@ function App() {
                 </div>
                 <Upload size={22} />
               </div>
-              {error ? <p className="connector-error">{error}</p> : null}
               <div className="upload-box criteria-uploader">
                 <label>
                   Archivos de criterio
@@ -2359,9 +2516,17 @@ function App() {
                 {criteriaDocuments.length ? criteriaDocuments.map((document) => (
                   <article key={document.id}>
                     <div>
-                      <strong>{document.name}</strong>
+                      <div className="criteria-doc-title">
+                        <strong>{document.name}</strong>
+                        {document.source ? (
+                          <span className={`criteria-source ${document.source === "chatgpt" ? "chatgpt" : ""}`}>
+                            {document.source === "chatgpt" ? "ChatGPT" : "Manual"}
+                          </span>
+                        ) : null}
+                      </div>
                       <small>
                         {new Date(document.uploadedAt).toLocaleDateString("es-CL")} - {Math.max(1, Math.round(document.size / 1024))} KB
+                        {document.category ? ` - ${document.category.replaceAll("_", " ")}` : ""}
                       </small>
                       <p>{document.text.slice(0, 240)}{document.text.length > 240 ? "..." : ""}</p>
                     </div>

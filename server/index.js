@@ -3191,6 +3191,8 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
       type: String(file.type || "text/plain"),
       text: text.slice(0, 30000),
       size: Number(file.size || text.length || 0),
+      source: String(file.source || request.body?.source || "manual"),
+      category: String(file.category || request.body?.category || "criteria"),
       uploadedAt: new Date().toISOString(),
     };
   });

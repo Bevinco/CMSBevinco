@@ -907,6 +907,52 @@ button:disabled {
   flex: 1 1 180px;
 }
 
+.chatgpt-import-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.chatgpt-import-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chatgpt-import-grid label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.76rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.chatgpt-import-grid label:first-child,
+.chatgpt-import-grid label:nth-child(2),
+.chatgpt-import-grid label:last-child {
+  grid-column: 1 / -1;
+}
+
+.chatgpt-import-grid input,
+.chatgpt-import-grid textarea {
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  font: inherit;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.chatgpt-import-grid input {
+  min-height: 38px;
+}
+
+.chatgpt-import-grid textarea {
+  line-height: 1.45;
+  min-height: 118px;
+  resize: vertical;
+}
+
 .summary-help {
   background: #f6f8f7;
   border: 1px solid #dce4e2;
@@ -970,6 +1016,13 @@ button:disabled {
   padding: 14px;
 }
 
+.criteria-doc-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .criteria-doc-list strong,
 .criteria-doc-list small {
   display: block;
@@ -985,6 +1038,21 @@ button:disabled {
   font-size: 0.86rem;
   line-height: 1.5;
   margin: 10px 0 0;
+}
+
+.criteria-source {
+  background: #edf1f0;
+  border-radius: 999px;
+  color: #46605a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.criteria-source.chatgpt {
+  background: rgba(139, 198, 193, 0.26);
+  color: var(--sculpture-blue);
 }
 
 .wrap-actions {
@@ -2291,6 +2359,8 @@ button:disabled {
 .task-toolbar select:focus,
 .upload-box input:focus,
 .upload-box select:focus,
+.chatgpt-import-grid input:focus,
+.chatgpt-import-grid textarea:focus,
 .login-form input:focus,
 .draft-panel textarea:focus,
 #comments textarea:focus {
@@ -2446,6 +2516,8 @@ button:disabled {
 :root[data-theme="dark"] input,
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .chatgpt-import-grid input,
+:root[data-theme="dark"] .chatgpt-import-grid textarea,
 :root[data-theme="dark"] .user-modal input,
 :root[data-theme="dark"] .user-modal select {
   background: #0b1c18;
@@ -2468,10 +2540,16 @@ button:disabled {
 
 :root[data-theme="dark"] .user-title-row span,
 :root[data-theme="dark"] .system-user-note,
+:root[data-theme="dark"] .criteria-source,
 :root[data-theme="dark"] .pill.neutral,
 :root[data-theme="dark"] .badge.neutral {
   background: #1d3731;
   color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .criteria-source.chatgpt {
+  background: rgba(139, 198, 193, 0.18);
+  color: var(--sculpture-teal);
 }
 
 @media (max-width: 1080px) {
@@ -2511,6 +2589,7 @@ button:disabled {
   .page-grid,
   .unit-grid,
   .sculpture-picker-row,
+  .chatgpt-import-grid,
   .clickup-actions,
   .clickup-board,
   .pending-form,
