@@ -1046,6 +1046,34 @@ function generateReportSummary(store, report) {
   ].join("\n");
 }
 
+const criteriaCategoryLabels = {
+  project_instructions: "Instrucciones del proyecto",
+  report_prompt: "Prompt de reporte",
+  analysis_rules: "Reglas de analisis",
+  purchase_rules: "Reglas de compra",
+  comment_examples: "Ejemplos de comentarios",
+  operations_questionnaire: "Cuestionario de operaciones",
+  project_file: "Documento del proyecto",
+};
+
+// Resumen legible de un criterio para mostrar en "Criterios aplicados" (modo
+// plantilla): nombre, tipo y las secciones que cubre, sin volcar el texto crudo.
+function summarizeCriteriaForDisplay(document) {
+  const label = criteriaCategoryLabels[document.category] || "Criterio";
+  const headings = String(document.text || "")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^#{1,6}\s+(.*)$/)?.[1]?.trim())
+    .filter(Boolean)
+    .filter((heading) => !/^radici|^#/i.test(heading))
+    .slice(0, 5);
+
+  if (headings.length) {
+    return `${document.name} (${label}): cubre ${headings.join(", ")}. Se aplicara al generar el reporte con IA.`;
+  }
+  const excerpt = String(document.text || "").replace(/\s+/g, " ").trim().slice(0, 140);
+  return `${document.name} (${label}): ${excerpt || "criterio disponible para el reporte."}`;
+}
+
 function generateReportAnalysis(payload) {
   const money = new Intl.NumberFormat("es-CL", {
     currency: "CLP",
@@ -1067,15 +1095,9 @@ function generateReportAnalysis(payload) {
   const purchaseItems = (payload.purchaseSuggestions || [])
     .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
     .slice(0, 4);
-  const criteriaApplied = (payload.criteriaDocuments || [])
+  const criteriaApplied = criteriaForClient(payload.criteriaDocuments || [], payload.client?.name)
     .slice(0, 4)
-    .map((document) => {
-      const excerpt = String(document.text || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 180);
-      return `${document.name}: ${excerpt || "criterio disponible para revisar al preparar el reporte."}`;
-    });
+    .map((document) => summarizeCriteriaForDisplay(document));
 
   return {
     bestOfWeek: bestProducts.map(
