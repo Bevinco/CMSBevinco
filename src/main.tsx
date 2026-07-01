@@ -114,6 +114,8 @@ type Report = {
   };
   comments: string;
   emailDraft: string;
+  isAccumulated?: boolean;
+  includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
     id?: string;
     url?: string;
@@ -147,8 +149,23 @@ type BootstrapPayload = {
 
 type SyncResults = Record<string, { error?: string; rowsCount?: number; endpoint?: string; cmd?: string; attempts?: Array<{ endpoint?: string; status?: number; rowsCount?: number; error?: string }> }>;
 
+type AccumulatedReport = {
+  id: string;
+  clientId: string;
+  isAccumulated: true;
+  client?: Client;
+  period: Period;
+  includedPeriods: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
+  summary: Report["summary"];
+  categoryVariances: Report["categoryVariances"];
+  topProducts: Report["topProducts"];
+  purchaseSuggestions: Report["purchaseSuggestions"];
+  sourceStatus?: Record<string, string>;
+};
+
 type SculptureQueryPayload = BootstrapPayload & {
   queriedReports?: Report[];
+  accumulatedReport?: AccumulatedReport | null;
   syncResultsByPeriod?: Record<string, SyncResults>;
 };
 
@@ -525,6 +542,8 @@ function App() {
   const [sculptureDirectoryLoaded, setSculptureDirectoryLoaded] = useState(false);
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
+  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
+  const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
@@ -926,6 +945,34 @@ function App() {
     }
   }
 
+  async function deleteClient(clientId: string) {
+    const target = clients.find((client) => client.id === clientId);
+    if (!target) return;
+    if (!window.confirm(`Eliminar "${clientDisplayName(target)}" del CMS? Se quitaran tambien sus reportes guardados.`)) {
+      return;
+    }
+
+    setWorkStatus("loading");
+    setError(`Eliminando ${clientDisplayName(target)}...`);
+
+    try {
+      const payload = await readJson<{ removedClientId: string; removedReports: number; clients: Client[]; reports: Report[] }>(
+        await fetch(`/api/module1/clients/${clientId}`, { method: "DELETE" }),
+      );
+      setClients(payload.clients);
+      setReports(payload.reports);
+      if (selectedClientId === clientId) {
+        setSelectedClientId(payload.clients[0]?.id || "");
+        setSelectedReport(null);
+      }
+      setError(`Restaurante eliminado. Se quitaron ${payload.removedReports} reporte(s) asociado(s).`);
+      setWorkStatus("ready");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "No se pudo eliminar el restaurante.");
+      setWorkStatus("error");
+    }
+  }
+
   async function loadSculptureUnits({ quiet = false } = {}) {
     setWorkStatus("loading");
     if (!quiet) setError("Cargando restaurantes y periodos desde Sculpture...");
@@ -1002,6 +1049,20 @@ function App() {
     }
   }
 
+  function togglePeriodSelection(periodId: string) {
+    setSelectedPeriodIds((current) =>
+      current.includes(periodId) ? current.filter((id) => id !== periodId) : [...current, periodId],
+    );
+  }
+
+  const periodsInMonthRange = sculpturePeriods.filter((period) => {
+    const month = monthFromPeriod(period);
+    if (!month) return true;
+    if (fromMonth && month < fromMonth) return false;
+    if (toMonth && month > toMonth) return false;
+    return true;
+  });
+
   async function querySculptureReports() {
     const selectedUnit = sculptureUnits.find((item) => item.id === selectedSculptureUnitId);
 
@@ -1025,11 +1086,13 @@ function App() {
             periodId: selectedPeriodId,
             fromMonth,
             toMonth,
+            periodIds: selectedPeriodIds,
             periods: sculpturePeriods,
           }),
         }),
       );
       applyBootstrapPayload(payload);
+      setAccumulatedReport(payload.accumulatedReport || null);
       const count = payload.queriedReports?.length || 0;
       const syncSummary = summarizeSculptureSync(payload.syncResultsByPeriod);
 
@@ -1725,6 +1788,33 @@ function App() {
                   <span>{sculpturePeriods.length ? `${sculpturePeriods.length} periodos detectados en Sculpture` : "Al abrir el selector, el CMS intenta traer restaurantes y periodos desde Sculpture."}</span>
                 </div>
               </div>
+              {periodsInMonthRange.length ? (
+                <div className="period-picker">
+                  <div className="period-picker-header">
+                    <strong>Periodos semanales de la auditoria</strong>
+                    <span>{selectedPeriodIds.length ? `${selectedPeriodIds.length} seleccionado(s) para acumular` : "Sin seleccion: se consulta todo el rango de meses"}</span>
+                  </div>
+                  <ul className="period-picker-list">
+                    {periodsInMonthRange.map((period) => (
+                      <li key={period.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selectedPeriodIds.includes(period.id)}
+                            onChange={() => togglePeriodSelection(period.id)}
+                          />
+                          <span>{period.label}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                  {selectedPeriodIds.length ? (
+                    <button className="period-picker-clear" type="button" onClick={() => setSelectedPeriodIds([])}>
+                      Limpiar seleccion
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="query-actions">
                 <button className="primary-button" disabled={workStatus === "loading" || (!selectedSculptureUnitId && !selectedClientId)} onClick={querySculptureReports} type="button">
                   <Database size={17} /> Generar reporte
@@ -1737,6 +1827,39 @@ function App() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="panel unit-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Restaurantes en el CMS</p>
+              <h2>Gestionar restaurantes cargados</h2>
+            </div>
+            <Building2 size={22} />
+          </div>
+          {clients.length ? (
+            <ul className="managed-clients">
+              {clients.map((client) => (
+                <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
+                  <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
+                    <strong>{clientDisplayName(client)}</strong>
+                    <span>{client.area || "Food"} · CID {client.sculptureCid || client.cid || "s/i"}</span>
+                  </button>
+                  <button
+                    className="managed-client-delete"
+                    type="button"
+                    disabled={workStatus === "loading"}
+                    onClick={() => deleteClient(client.id)}
+                    aria-label={`Eliminar ${clientDisplayName(client)}`}
+                  >
+                    Eliminar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="query-note">No hay restaurantes cargados en el CMS todavia.</p>
+          )}
         </section>
 
         <section className="metrics" aria-label="Resumen">
@@ -1761,6 +1884,48 @@ function App() {
             <small>{workStatus === "loading" ? "Actualizando" : "Operativo"}</small>
           </article>
         </section>
+
+        {accumulatedReport ? (
+          <section className="panel accumulated-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Acumulado mensual</p>
+                <h2>{accumulatedReport.period?.label || "Acumulado de periodos"}</h2>
+              </div>
+              <FileSpreadsheet size={22} />
+            </div>
+            <p className="query-note accumulated-note">
+              Ingresos, ventas y variacion se suman entre periodos; las existencias/stock toman el ultimo periodo, como en Sculpture.
+            </p>
+            <div className="metrics accumulated-metrics">
+              <article>
+                <span><FileSpreadsheet size={18} /> Ingresos (suma)</span>
+                <strong>{money(accumulatedReport.summary.revenue || 0)}</strong>
+                <small>{accumulatedReport.includedPeriods.length} periodo(s)</small>
+              </article>
+              <article>
+                <span><BarChart3 size={18} /> % costo</span>
+                <strong>{accumulatedReport.summary.costPercent || 0}%</strong>
+                <small>Sobre ingresos acumulados</small>
+              </article>
+              <article>
+                <span><FileText size={18} /> Variance (suma)</span>
+                <strong>{accumulatedReport.summary.variancePercent || 0}%</strong>
+                <small>{money(accumulatedReport.summary.varianceAmount || 0)}</small>
+              </article>
+              <article>
+                <span><ListChecks size={18} /> Stock</span>
+                <strong className="metric-status">Ultimo periodo</strong>
+                <small>{accumulatedReport.purchaseSuggestions.length} articulo(s)</small>
+              </article>
+            </div>
+            <div className="accumulated-periods">
+              {accumulatedReport.includedPeriods.map((period) => (
+                <span key={period.id} className="accumulated-chip">{period.label}</span>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="panel module-one" id="module-reports">
           <div className="panel-header">

@@ -975,6 +975,8 @@ function buildSummary(varianceRows) {
 
   return {
     revenue,
+    usedCost,
+    soldCost,
     costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
     variancePercent: soldCost ? Number(((varianceAmount / soldCost) * 100).toFixed(1)) : 0,
     varianceAmount,
@@ -1101,6 +1103,120 @@ function generateReportAnalysis(payload) {
       .filter(Boolean)
       .slice(0, 5),
   };
+}
+
+// Selecciona los criterios de la biblioteca que corresponden al cliente del
+// reporte. Prioriza los documentos que mencionan al cliente; si no hay match,
+// usa los criterios generales.
+function criteriaForClient(criteriaDocuments = [], clientName = "") {
+  const clientKey = String(clientName || "").toLowerCase().trim();
+  const accountKey = clientKey.split(" - ")[0].trim();
+  const matched = clientKey
+    ? criteriaDocuments.filter((document) => {
+        const haystack = `${document.name} ${document.category} ${document.text}`.toLowerCase();
+        return haystack.includes(clientKey) || (accountKey && haystack.includes(accountKey));
+      })
+    : [];
+  return (matched.length ? matched : criteriaDocuments).slice(0, 6);
+}
+
+// Genera el analisis ejecutivo con OpenAI usando los criterios del cliente.
+// Devuelve null ante cualquier problema para que el flujo caiga en la plantilla.
+async function generateReportAnalysisAI(payload) {
+  if (!openaiApiKey) return null;
+
+  const summary = payload.summary || {};
+  const clientName = payload.client?.name || payload.clientId;
+  const periodLabel = payload.period?.label || payload.periodId;
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName).map((document) => ({
+    nombre: document.name,
+    categoria: document.category,
+    contenido: String(document.text || "").replace(/\s+/g, " ").trim().slice(0, 1500),
+  }));
+
+  const reportData = {
+    cliente: clientName,
+    periodo: periodLabel,
+    resumen: {
+      ingresos: summary.revenue || 0,
+      costoPorcentaje: summary.costPercent || 0,
+      variancePorcentaje: summary.variancePercent || 0,
+      varianceMonto: summary.varianceAmount || 0,
+    },
+    categorias: (payload.categoryVariances || []).slice(0, 10),
+    productos: (payload.topProducts || []).slice(0, 10),
+    sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 12),
+    historico: (payload.history || []).slice(0, 4),
+  };
+
+  const prompt = `
+Eres el analista de auditoria de Bevinco. Analiza el reporte semanal de Sculpture Hospitality y redacta comentarios ejecutivos para el cliente.
+
+Aplica ESTRICTAMENTE los criterios del cliente cuando existan. No inventes datos: usa solo las cifras entregadas. Escribe en espanol claro para operaciones y formatea montos en pesos chilenos (CLP).
+
+Devuelve SOLO JSON valido con esta forma:
+{
+  "comments": "resumen ejecutivo en 1-3 parrafos para el cuerpo del reporte",
+  "emailDraft": "cuerpo de correo breve y profesional para enviar al cliente, con saludo y cierre",
+  "analysis": {
+    "bestOfWeek": ["frases con lo mejor de la semana"],
+    "weeklyChallenges": ["frases con los desafios/diferencias negativas a revisar"],
+    "stockEfficiency": ["frases sobre stock, compras y proveedores a validar"],
+    "criteriaApplied": ["que criterio del cliente se aplico y como"],
+    "agentNotes": ["notas u observaciones adicionales"]
+  }
+}
+
+Cada arreglo debe tener entre 1 y 5 frases. Si falta informacion para una seccion, incluye una frase indicando el pendiente.
+
+Criterios del cliente:
+${criteria.length ? JSON.stringify(criteria, null, 2) : "Sin criterios cargados para este cliente; aplica buenas practicas de auditoria Bevinco."}
+
+Datos del reporte:
+${JSON.stringify(reportData, null, 2)}
+`.trim();
+
+  try {
+    const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${openaiApiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: openaiModel,
+        input: prompt,
+        max_output_tokens: 4000,
+      }),
+    });
+
+    const responsePayload = await openaiResponse.json().catch(() => ({}));
+    if (!openaiResponse.ok) {
+      console.error("OpenAI analysis error:", responsePayload?.error?.message || openaiResponse.status);
+      return null;
+    }
+
+    const parsed = extractJsonPayload(extractOpenAiText(responsePayload));
+    if (!parsed?.analysis) return null;
+
+    const toList = (value) =>
+      Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean).slice(0, 5) : [];
+
+    return {
+      comments: String(parsed.comments || "").trim(),
+      emailDraft: String(parsed.emailDraft || "").trim(),
+      analysis: {
+        bestOfWeek: toList(parsed.analysis.bestOfWeek),
+        weeklyChallenges: toList(parsed.analysis.weeklyChallenges),
+        stockEfficiency: toList(parsed.analysis.stockEfficiency),
+        criteriaApplied: toList(parsed.analysis.criteriaApplied),
+        agentNotes: toList(parsed.analysis.agentNotes),
+      },
+    };
+  } catch (aiError) {
+    console.error("OpenAI analysis exception:", aiError?.message || aiError);
+    return null;
+  }
 }
 
 function extractJsonPayload(text) {
@@ -2187,6 +2303,116 @@ function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", f
     store.periods[0];
 
   return selected ? [selected] : [];
+}
+
+function periodSortKey(payload) {
+  return String(payload?.period?.startsAt || payload?.period?.endsAt || payload?.updatedAt || "");
+}
+
+function summaryUsedCost(summary = {}) {
+  if (Number.isFinite(summary.usedCost)) return summary.usedCost;
+  return ((summary.costPercent || 0) / 100) * (summary.revenue || 0);
+}
+
+function summarySoldCost(summary = {}) {
+  if (Number.isFinite(summary.soldCost)) return summary.soldCost;
+  if (summary.variancePercent) return (summary.varianceAmount || 0) / (summary.variancePercent / 100);
+  return 0;
+}
+
+// Acumula varios reportes semanales en uno mensual: los flujos (ingresos, ventas,
+// costo usado, variacion) se SUMAN; las existencias/stock (sugerencia de compra)
+// se toman del ULTIMO periodo, tal como opera Sculpture.
+function accumulateReportPayloads(payloads = []) {
+  const valid = payloads.filter(Boolean);
+  if (valid.length <= 1) return null;
+
+  const ordered = [...valid].sort((left, right) => periodSortKey(left).localeCompare(periodSortKey(right)));
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+
+  let revenue = 0;
+  let usedCost = 0;
+  let soldCost = 0;
+  let varianceAmount = 0;
+  const categoryMap = new Map();
+  const productMap = new Map();
+
+  for (const payload of ordered) {
+    const summary = payload.summary || {};
+    revenue += summary.revenue || 0;
+    usedCost += summaryUsedCost(summary);
+    soldCost += summarySoldCost(summary);
+    varianceAmount += summary.varianceAmount || 0;
+
+    for (const category of payload.categoryVariances || []) {
+      const key = category.category || "Sin categoria";
+      const current = categoryMap.get(key) || { category: key, amount: 0 };
+      current.amount += category.amount || 0;
+      categoryMap.set(key, current);
+    }
+
+    for (const product of payload.topProducts || []) {
+      const key = `${product.name || "Sin nombre"}::${product.category || ""}`;
+      const current = productMap.get(key) || {
+        name: product.name || "Sin nombre",
+        category: product.category || "",
+        varianceAmount: 0,
+      };
+      current.varianceAmount += product.varianceAmount || 0;
+      productMap.set(key, current);
+    }
+  }
+
+  const round1 = (value) => Number((value || 0).toFixed(1));
+  const categoryVariances = [...categoryMap.values()]
+    .map((item) => ({
+      ...item,
+      percent: soldCost ? round1((item.amount / soldCost) * 100) : 0,
+    }))
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const topProducts = [...productMap.values()]
+    .map((item) => ({
+      ...item,
+      variancePercent: soldCost ? round1((item.varianceAmount / soldCost) * 100) : 0,
+    }))
+    .sort((a, b) => Math.abs(b.varianceAmount) - Math.abs(a.varianceAmount))
+    .slice(0, 10);
+
+  const includedPeriods = ordered.map((payload) => ({
+    id: payload.periodId,
+    label: payload.period?.label || payload.periodId,
+    startsAt: payload.period?.startsAt || "",
+    endsAt: payload.period?.endsAt || "",
+  }));
+
+  return {
+    id: `accumulated-${first.clientId || "cliente"}`,
+    clientId: first.clientId,
+    isAccumulated: true,
+    status: "Borrador",
+    client: first.client,
+    period: {
+      id: `accumulated-${includedPeriods.map((item) => item.id).join("-")}`,
+      label: `Acumulado ${first.period?.label || ""} -> ${last.period?.label || ""}`.trim(),
+      startsAt: first.period?.startsAt || "",
+      endsAt: last.period?.endsAt || "",
+    },
+    includedPeriods,
+    summary: {
+      revenue,
+      usedCost,
+      soldCost,
+      costPercent: revenue ? round1((usedCost / revenue) * 100) : 0,
+      variancePercent: soldCost ? round1((varianceAmount / soldCost) * 100) : 0,
+      varianceAmount,
+    },
+    categoryVariances,
+    topProducts,
+    // Las existencias/stock son una foto: se toman del ultimo periodo, no se suman.
+    purchaseSuggestions: last.purchaseSuggestions || [],
+    sourceStatus: last.sourceStatus || {},
+  };
 }
 
 function buildReportPayload(store, report) {
@@ -3428,6 +3654,29 @@ app.post("/api/module1/clients", requireAuth, async (request, response) => {
   response.json({ client, clients: store.clients });
 });
 
+app.delete("/api/module1/clients/:clientId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const { clientId } = request.params;
+  const client = store.clients.find((candidate) => candidate.id === clientId);
+
+  if (!client) {
+    response.status(404).json({ error: "No se encontro el restaurante/local indicado." });
+    return;
+  }
+
+  const removedReports = store.reports.filter((report) => report.clientId === clientId).length;
+  store.clients = store.clients.filter((candidate) => candidate.id !== clientId);
+  store.reports = store.reports.filter((report) => report.clientId !== clientId);
+  await writeStore(store);
+
+  response.json({
+    removedClientId: clientId,
+    removedReports,
+    clients: store.clients,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+  });
+});
+
 app.get("/api/module1/sculpture-units", requireAuth, async (_request, response) => {
   try {
     const payload = await discoverSculptureUnits();
@@ -3472,7 +3721,7 @@ app.post("/api/module1/sculpture-units/import", requireAuth, async (request, res
 
 app.post("/api/module1/sculpture/query", requireAuth, async (request, response) => {
   const store = await readStore();
-  const { unit, clientId, periodId, fromMonth, toMonth, periods: incomingPeriods = [] } = request.body || {};
+  const { unit, clientId, periodId, fromMonth, toMonth, periodIds = [], periods: incomingPeriods = [] } = request.body || {};
   const resolvedUnit = unit || store.clients.find((candidate) => candidate.id === clientId);
 
   if (!resolvedUnit) {
@@ -3502,12 +3751,23 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
   } catch {
     sculptureClientPeriods = [];
   }
-  const selectedPeriods = resolvePeriodsForSculptureQuery(store, {
+  let selectedPeriods = resolvePeriodsForSculptureQuery(store, {
     periods: sculptureClientPeriods.length ? sculptureClientPeriods : incomingPeriods,
     periodId,
     fromMonth,
     toMonth,
   });
+
+  // Si el usuario eligio periodos semanales puntuales, respetamos esa seleccion.
+  const requestedPeriodIds = Array.isArray(periodIds) ? periodIds.filter(Boolean) : [];
+  if (requestedPeriodIds.length) {
+    const poolPeriods = (sculptureClientPeriods.length ? sculptureClientPeriods : incomingPeriods)
+      .map((period) => ensurePeriod(store, period))
+      .filter(Boolean);
+    const pool = poolPeriods.length ? poolPeriods : store.periods;
+    const matched = pool.filter((period) => requestedPeriodIds.includes(period.id) || requestedPeriodIds.includes(period.pid) || requestedPeriodIds.includes(period.sculpturePid));
+    if (matched.length) selectedPeriods = matched;
+  }
 
   if (!selectedPeriods.length) {
     response.status(400).json({ error: "No hay periodos disponibles para el rango seleccionado." });
@@ -3530,12 +3790,15 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
 
   await writeStore(store);
 
+  const accumulatedReport = accumulateReportPayloads(queriedReports);
+
   response.json({
     client,
     clients: store.clients,
     periods: store.periods,
     selectedReport: queriedReports[0] || null,
     queriedReports,
+    accumulatedReport,
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     syncResultsByPeriod,
   });
@@ -3673,10 +3936,15 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   await syncSculptureSources(store, report);
-  const generatedSummary = generateReportSummary(store, report);
+
+  const templateSummary = generateReportSummary(store, report);
+  const payloadForAI = buildReportPayload(store, report);
+  const aiResult = await generateReportAnalysisAI(payloadForAI);
+
+  const generatedSummary = aiResult?.comments || templateSummary;
   report.comments = generatedSummary;
-  report.analysis = generateReportAnalysis(buildReportPayload(store, report));
-  report.emailDraft = [
+  report.analysis = aiResult?.analysis || generateReportAnalysis(buildReportPayload(store, report));
+  report.emailDraft = aiResult?.emailDraft || [
     `Hola,`,
     "",
     `Compartimos el reporte semanal de auditoria de ${client?.name || report.clientId}.`,
@@ -3685,6 +3953,7 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
     "",
     "Quedamos atentos a cualquier duda o comentario.",
   ].join("\n");
+  report.analysisSource = aiResult ? "openai" : "template";
   report.updatedAt = new Date().toISOString();
 
   await writeStore(store);

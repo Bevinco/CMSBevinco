@@ -510,6 +510,141 @@ button:disabled {
   padding: 0 10px;
 }
 
+.managed-clients {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.managed-clients li {
+  align-items: center;
+  background: #f5f8f7;
+  border: 1px solid #e7eceb;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.managed-clients li.is-selected {
+  border-color: #90bf4f;
+  box-shadow: 0 0 0 1px #90bf4f inset;
+}
+
+.managed-client-info {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  text-align: left;
+}
+
+.managed-client-info strong {
+  color: #14302b;
+  font-size: 0.9rem;
+}
+
+.managed-client-info span {
+  color: #66706d;
+  font-size: 0.76rem;
+}
+
+.managed-client-delete {
+  background: #fbe9e9;
+  border: 1px solid #f0c9c9;
+  border-radius: 8px;
+  color: #b3261e;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+}
+
+.managed-client-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.period-picker {
+  background: #f5f8f7;
+  border: 1px solid #e7eceb;
+  border-radius: 10px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.period-picker-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.period-picker-header strong {
+  color: #14302b;
+  font-size: 0.85rem;
+}
+
+.period-picker-header span {
+  color: #66706d;
+  font-size: 0.74rem;
+}
+
+.period-picker-list {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.period-picker-list label {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 0.8rem;
+  gap: 6px;
+}
+
+.period-picker-clear {
+  background: none;
+  border: none;
+  color: #054372;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-top: 8px;
+  padding: 0;
+}
+
+.accumulated-note {
+  margin-bottom: 12px;
+}
+
+.accumulated-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.accumulated-chip {
+  background: #eef4ea;
+  border: 1px solid #d5e5c6;
+  border-radius: 999px;
+  color: #3b5a24;
+  font-size: 0.74rem;
+  padding: 4px 10px;
+}
+
 .query-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2446,6 +2581,40 @@ button:disabled {
   background: #071613;
 }
 
+:root[data-theme="dark"] .managed-clients li {
+  background: #0c221d;
+  border-color: #1c3a33;
+}
+
+:root[data-theme="dark"] .managed-client-info span {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .managed-client-delete {
+  background: #2a1210;
+  border-color: #5a2420;
+  color: #f2a9a2;
+}
+
+:root[data-theme="dark"] .period-picker {
+  background: #0c221d;
+  border-color: #1c3a33;
+}
+
+:root[data-theme="dark"] .period-picker-header strong {
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .period-picker-header span {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .accumulated-chip {
+  background: #142e12;
+  border-color: #2c4a1f;
+  color: #c7e3b1;
+}
+
 :root[data-theme="dark"] .topbar h1,
 :root[data-theme="dark"] .panel h2,
 :root[data-theme="dark"] .dashboard-hero h2,
@@ -2454,6 +2623,7 @@ button:disabled {
 :root[data-theme="dark"] .user-modal h2,
 :root[data-theme="dark"] .sculpture-picker strong,
 :root[data-theme="dark"] .unit-summary strong,
+:root[data-theme="dark"] .managed-client-info strong,
 :root[data-theme="dark"] .clickup-task-main strong,
 :root[data-theme="dark"] .attention-list strong,
 :root[data-theme="dark"] .impact-list strong,
