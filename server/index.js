@@ -1183,11 +1183,20 @@ async function generateReportAnalysisAI(payload) {
   const summary = payload.summary || {};
   const clientName = payload.client?.name || payload.clientId;
   const periodLabel = payload.period?.label || payload.periodId;
-  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName).map((document) => ({
-    nombre: document.name,
-    categoria: document.category,
-    contenido: String(document.text || "").replace(/\s+/g, " ").trim().slice(0, 1500),
-  }));
+  // Presupuesto de caracteres para los criterios del cliente. Se usa el documento
+  // (casi) completo para no perder reglas ni ejemplos, con un tope total que
+  // controla el costo por reporte.
+  const CRITERIA_PER_DOC = 8000;
+  const CRITERIA_TOTAL_BUDGET = 20000;
+  let criteriaBudget = CRITERIA_TOTAL_BUDGET;
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName)
+    .map((document) => {
+      if (criteriaBudget <= 0) return null;
+      const contenido = String(document.text || "").trim().slice(0, Math.min(CRITERIA_PER_DOC, criteriaBudget));
+      criteriaBudget -= contenido.length;
+      return { nombre: document.name, categoria: document.category, contenido };
+    })
+    .filter(Boolean);
 
   const reportData = {
     cliente: clientName,
@@ -1208,6 +1217,8 @@ async function generateReportAnalysisAI(payload) {
 ${BEVINCO_ANALYSIS_METHOD}
 
 Aplica ESTRICTAMENTE los criterios especificos del cliente cuando existan (tienen prioridad sobre las reglas generales si hay conflicto). No inventes datos: usa solo las cifras entregadas.
+
+Si los criterios del cliente incluyen EJEMPLOS de comentarios o reportes anteriores, imita fielmente ese estilo, estructura y redaccion (no copies los productos ni las cifras del ejemplo: usa solo los datos del reporte actual).
 
 Devuelve SOLO JSON valido con esta forma:
 {
