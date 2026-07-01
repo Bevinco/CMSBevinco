@@ -1120,6 +1120,39 @@ function criteriaForClient(criteriaDocuments = [], clientName = "") {
   return (matched.length ? matched : criteriaDocuments).slice(0, 6);
 }
 
+// Metodologia estandar de analisis Bevinco (prompt maestro compartido por el
+// equipo). Se aplica a todos los reportes; los criterios por cliente la refinan.
+const BEVINCO_ANALYSIS_METHOD = `
+Eres el analista de auditoria de Bevinco. Analizas reportes semanales de Sculpture Hospitality (variance detailed y summary) y redactas comentarios ejecutivos para el cliente.
+
+REGLAS BASE
+- El reporte (variance) es la fuente principal y prioritaria. Los comentarios de operaciones (OPS) son solo contexto y se usan unicamente si ayudan a explicar una desviacion relevante; no fuerces explicaciones sin sustento en los datos.
+- Prioriza siempre el impacto economico real. No comentes ruido ni desviaciones insignificantes.
+- Clasifica cada producto antes de redactar como: positivo, desafio o ruido. Un mismo producto NO puede aparecer en "Lo mejor" y en "Los desafios".
+- No comentes familias de forma general si la desviacion la explica uno o pocos productos: identifica el producto que explica la mayor parte de la desviacion y enfoca el comentario en ese producto.
+
+FORMATO DE DESVIACIONES
+- Toda desviacion relevante se muestra asi: En [producto] (kgs o unidades / % / $). Ejemplo: "En merluza (-3,5 kgs / 22% / $31.500)". Usa solo los datos disponibles, sin inventar. Formatea montos en pesos chilenos (CLP).
+
+REGLAS DE INTERPRETACION
+- Si el rendimiento coincide con el registrado en sistema y aun asi hay diferencia: interpretar como posible servicio/porcionado y sugerir revisar porciones.
+- Si un ahorro se explica por despuntes, insumos no auditados, prestamos o reasignaciones: es resultado no estructural, no lo presentes como mejora real de gestion.
+- Si una desviacion es extrema (>50%): interpretala primero como problema de registro (factura faltante, error de conteo o desfase de ingreso), no como operacion salvo evidencia clara.
+- Si no hay explicacion clara: escribe "sin explicacion" o "se sugiere conversar internamente para revisar la causa".
+- Evita frases vagas ("control incompleto", "podria haber error", "hay que revisar") salvo que precises exactamente que revisar y por que importa.
+- Si una desviacion compensa una opuesta de la semana anterior: interpretala como posible ajuste intersemanal o error de conteo, no como mejora real.
+
+PRIORIZACION: ordena hallazgos por 1) impacto en $, 2) impacto en margen, 3) relevancia operativa, 4) recurrencia historica.
+
+FORMATO DE ENTREGA
+- DIAGNOSTICO (interno): 3 a 5 bullets breves y tecnicos.
+- LO MEJOR DE LA SEMANA: maximo 2-3 puntos, solo hallazgos positivos atribuibles a buena gestion (no resultados por error de registro o compensaciones). Directo, sin titulo por punto.
+- LOS DESAFIOS DE LA SEMANA: maximo 3-5 puntos, enfoca en el producto que explica la desviacion, explica causa si aplica, incluye impacto en formato kgs/%/$ y recomendacion solo si agrega valor.
+- EFICIENCIA DE STOCK Y COMPRA: evalua cobertura (dias), coherencia compra vs consumo, sobrestock o riesgo de quiebre. No fuerces comentario si no hay hallazgos; si esta alineado, dilo breve.
+
+TONO Y ESTILO: tecnico, claro, consultivo, no acusatorio, breve y directo. Usa "se observa", "se detecta", "podria estar asociado", "se sugiere revisar/conversar internamente". Sin emojis, sin subtitulos dentro de cada bullet, sin repetir ideas, con la menor cantidad de palabras posible sin perder claridad.
+`.trim();
+
 // Genera el analisis ejecutivo con OpenAI usando los criterios del cliente.
 // Devuelve null ante cualquier problema para que el flujo caiga en la plantilla.
 async function generateReportAnalysisAI(payload) {
@@ -1150,27 +1183,27 @@ async function generateReportAnalysisAI(payload) {
   };
 
   const prompt = `
-Eres el analista de auditoria de Bevinco. Analiza el reporte semanal de Sculpture Hospitality y redacta comentarios ejecutivos para el cliente.
+${BEVINCO_ANALYSIS_METHOD}
 
-Aplica ESTRICTAMENTE los criterios del cliente cuando existan. No inventes datos: usa solo las cifras entregadas. Escribe en espanol claro para operaciones y formatea montos en pesos chilenos (CLP).
+Aplica ESTRICTAMENTE los criterios especificos del cliente cuando existan (tienen prioridad sobre las reglas generales si hay conflicto). No inventes datos: usa solo las cifras entregadas.
 
 Devuelve SOLO JSON valido con esta forma:
 {
   "comments": "resumen ejecutivo en 1-3 parrafos para el cuerpo del reporte",
   "emailDraft": "cuerpo de correo breve y profesional para enviar al cliente, con saludo y cierre",
   "analysis": {
-    "bestOfWeek": ["frases con lo mejor de la semana"],
-    "weeklyChallenges": ["frases con los desafios/diferencias negativas a revisar"],
-    "stockEfficiency": ["frases sobre stock, compras y proveedores a validar"],
+    "bestOfWeek": ["frases de lo mejor de la semana, formato 'En [producto] (.../%/$)...'"],
+    "weeklyChallenges": ["frases de desafios, enfocadas en el producto que explica la desviacion, con impacto kgs/%/$"],
+    "stockEfficiency": ["frases sobre cobertura en dias, compra vs consumo y sobrestock/quiebre"],
     "criteriaApplied": ["que criterio del cliente se aplico y como"],
-    "agentNotes": ["notas u observaciones adicionales"]
+    "agentNotes": ["DIAGNOSTICO interno: 3-5 bullets breves y tecnicos"]
   }
 }
 
-Cada arreglo debe tener entre 1 y 5 frases. Si falta informacion para una seccion, incluye una frase indicando el pendiente.
+Respeta los maximos por seccion (Lo mejor 2-3, Desafios 3-5). Si falta informacion para una seccion, incluye una frase indicando el pendiente.
 
-Criterios del cliente:
-${criteria.length ? JSON.stringify(criteria, null, 2) : "Sin criterios cargados para este cliente; aplica buenas practicas de auditoria Bevinco."}
+Criterios especificos del cliente:
+${criteria.length ? JSON.stringify(criteria, null, 2) : "Sin criterios especificos cargados para este cliente; aplica la metodologia estandar Bevinco de arriba."}
 
 Datos del reporte:
 ${JSON.stringify(reportData, null, 2)}
