@@ -799,9 +799,12 @@ function historyForReport(store, report) {
       (candidate) => candidate.clientId === report.clientId && candidate.periodId === period.id,
     );
 
+    const summarySource = existing?.summary || (period.id === report.periodId ? report.summary : null);
+
     return {
       periodId: period.id,
       label: period.label,
+      endsAt: period.endsAt || "",
       revenue: existing?.summary?.revenue || Math.round((report.summary.revenue || 0) * (1 - index * 0.04)),
       costPercent: existing?.summary?.costPercent || Number((report.summary.costPercent + index * 0.7).toFixed(1)),
       idealCostPercent:
@@ -810,6 +813,10 @@ function historyForReport(store, report) {
         Number(Math.max(0, (report.summary.costPercent || 0) - 1.5).toFixed(1)),
       varianceAmount:
         existing?.summary?.varianceAmount || Math.round((report.summary.varianceAmount || 0) * (1 - index * 0.18)),
+      usedCost: summarySource?.usedCost || Math.round(((summarySource?.costPercent || 0) / 100) * (summarySource?.revenue || 0)),
+      inventoryCost: summarySource?.inventoryCost || 0,
+      purchasedCost: summarySource?.purchasedCost || 0,
+      suggestedCost: summarySource?.suggestedCost || 0,
     };
   });
 }
@@ -907,6 +914,83 @@ function currentCategoryFromTotal(name, fallback) {
   return cleanTotalName(name);
 }
 
+// Agrupa las subcategorias del variance (Vodka, Chardonnay, Schop...) en las
+// 6 familias que usa el reporte Bevinco. "Otros" solo aparece si tiene monto.
+const REPORT_FAMILIES = ["Destilados", "Vinos", "Espumantes", "Cervezas y Sidra", "Barriles", "Sin Alcohol"];
+
+function familyForCategory(name) {
+  const text = String(name || "").toLowerCase();
+  if (/schop|barril/.test(text)) return "Barriles";
+  if (/espumante|champagne|sparkling|prosecco|brut|spritz/.test(text)) return "Espumantes";
+  if (/cerveza|sidra|beer|cider/.test(text)) return "Cervezas y Sidra";
+  if (/agua|bebida|energizante|kombucha|jugo|gaseosa|sin alcohol|s\/alcohol|cafe|café|leche|nectar|néctar/.test(text)) return "Sin Alcohol";
+  if (/cabernet|carmenere|carménère|chardonnay|merlot|pinot|sauvignon|syrah|ensamblaje|late harvest|vino|rosé|rose\b|blend|malbec|riesling|viognier|moscato|torontel|cinsault|garnacha|tempranillo|zinfandel|petit|sangria|sangría/.test(text)) return "Vinos";
+  if (/whisk|bourbon|scotch|irish|vodka|gin\b|ron\b|rum\b|tequila|mezcal|pisco|licor|aperitivo|vermouth|vermut|brandy|cognac|cachaca|cachaça|destilado|amargo|bitter|anis|anís|grappa|sake|soju|absenta|premium/.test(text)) return "Destilados";
+  return "Otros";
+}
+
+function aggregateByFamily(entries) {
+  const map = new Map(REPORT_FAMILIES.map((family) => [family, 0]));
+  for (const { category, value } of entries) {
+    const family = familyForCategory(category);
+    map.set(family, (map.get(family) || 0) + (value || 0));
+  }
+  return [...map.entries()]
+    .filter(([family, value]) => REPORT_FAMILIES.includes(family) || value)
+    .map(([family, value]) => ({ family, value: Math.round(value) }));
+}
+
+// Variaciones (ahorro/faltante) agregadas por familia, para el grafico de
+// barras divergentes del PDF.
+function buildFamilyVariances(varianceRows) {
+  const entries = varianceRows
+    .filter((row) => isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => ({
+      category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
+      value: parseNumber(row["Diferencia (Costo)"]),
+    }));
+  return aggregateByFamily(entries).map(({ family, value }) => ({ family, amount: value }));
+}
+
+// Compra realizada ($) por familia, desde los totales del variance.
+function buildFamilyPurchases(varianceRows) {
+  const entries = varianceRows
+    .filter((row) => isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => ({
+      category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
+      value: parseNumber(row["Compras (Costo)"]),
+    }));
+  return aggregateByFamily(entries).map(({ family, value }) => ({ family, purchased: value }));
+}
+
+// Compra sugerida ($) por familia, desde los totales de Intelipar (Costo Pedido).
+function buildFamilySuggested(inteliparRows) {
+  const entries = inteliparRows
+    .filter((row) => isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => ({
+      category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
+      value: parseNumber(row["Costo Pedido"]),
+    }));
+  return aggregateByFamily(entries).map(({ family, value }) => ({ family, suggested: value }));
+}
+
+// Top 10 productos por uso ($) para la tabla "Desempeño de los 10 productos
+// con mayor uso" del PDF.
+function buildTopUsageProducts(varianceRows) {
+  return varianceRows
+    .filter((row) => !isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
+    .map((row) => ({
+      name: row["Nombre Artículo"] || row["Nombre ArtÃ­culo"] || "",
+      usedCost: parseNumber(row["Usado (Costo)"]),
+      varianceAmount: parseNumber(row["Diferencia (Costo)"]),
+      variancePercent: parseNumber(row["% Diferencia"]),
+      realCostPercent: parseNumber(row["Porcentaje de Costo"]),
+    }))
+    .filter((row) => row.name && row.usedCost)
+    .sort((left, right) => right.usedCost - left.usedCost)
+    .slice(0, 10);
+}
+
 function buildCategoryVariances(varianceRows) {
   return varianceRows
     .filter((row) => isTotalRow(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]))
@@ -972,12 +1056,19 @@ function buildSummary(varianceRows) {
   const usedCost = productRows.reduce((total, row) => total + parseNumber(row["Usado (Costo)"]), 0);
   const soldCost = productRows.reduce((total, row) => total + parseNumber(row["Vendido (Costo)"]), 0);
   const varianceAmount = productRows.reduce((total, row) => total + parseNumber(row["Diferencia (Costo)"]), 0);
+  const wasteCost = productRows.reduce((total, row) => total + parseNumber(row["Desperdicio (Costo)"]), 0);
+  const inventoryCost = productRows.reduce((total, row) => total + parseNumber(row["Existencia (Costo)"]), 0);
+  const purchasedCost = productRows.reduce((total, row) => total + parseNumber(row["Compras (Costo)"]), 0);
 
   return {
     revenue,
     usedCost,
     soldCost,
+    wasteCost,
+    inventoryCost,
+    purchasedCost,
     costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
+    idealCostPercent: revenue ? Number(((soldCost / revenue) * 100).toFixed(1)) : 0,
     variancePercent: soldCost ? Number(((varianceAmount / soldCost) * 100).toFixed(1)) : 0,
     varianceAmount,
   };
@@ -1452,7 +1543,11 @@ async function buildStoreFromSamples() {
         summary: buildSummary(varianceRows),
         categoryVariances: buildCategoryVariances(varianceRows),
         topProducts: buildTopProducts(varianceRows),
+        familyVariances: buildFamilyVariances(varianceRows),
+        familyPurchases: buildFamilyPurchases(varianceRows),
+        topUsageProducts: buildTopUsageProducts(varianceRows),
         purchaseSuggestions: buildPurchaseSuggestions(inteliparRows),
+        familySuggested: buildFamilySuggested(inteliparRows),
         analysis: null,
         comments: "",
         emailDraft:
@@ -1463,6 +1558,7 @@ async function buildStoreFromSamples() {
           intelipar: "Datos cargados",
         },
       };
+      report.summary.suggestedCost = report.familySuggested.reduce((total, item) => total + (item.suggested || 0), 0);
       report.comments = commentsForReport(sample.client.name, report);
       reports.push(report);
     } catch (error) {
@@ -1500,7 +1596,12 @@ function extractReportMetrics(parsedTable) {
   let usedCost = 0;
   let soldCost = 0;
   let varianceTotal = 0;
+  let wasteCost = 0;
+  let inventoryCost = 0;
+  let purchasedCost = 0;
   let grandSummary = null;
+  const categoryPurchases = new Map();
+  const usageProducts = [];
 
   rows.forEach((row) => {
     const values = row.values || [];
@@ -1531,6 +1632,9 @@ function extractReportMetrics(parsedTable) {
     const rowUsedCost = parseNumber(pickRecordValue(row.record, ["usedCost", "usadoCosto", "costoUsado", "usageCost"]));
     const rowSoldCost = parseNumber(pickRecordValue(row.record, ["soldCost", "vendidoCosto", "costoVendido", "salesCost"]));
     const rowCostPercent = parseNumber(pickRecordValue(row.record, ["costPercent", "porcentajeDeCosto", "porcentajeCosto"]));
+    const rowWasteCost = parseNumber(pickRecordValue(row.record, ["wasteCost", "desperdicioCosto", "mermaCosto"]));
+    const rowInventoryCost = parseNumber(pickRecordValue(row.record, ["inventoryCost", "existenciaCosto", "stockCosto"]));
+    const rowPurchasedCost = parseNumber(pickRecordValue(row.record, ["purchasedCost", "comprasCosto", "compraCosto"]));
 
     if (isGrandTotal) {
       grandSummary = {
@@ -1550,6 +1654,9 @@ function extractReportMetrics(parsedTable) {
       usedCost += rowUsedCost;
       soldCost += rowSoldCost;
       varianceTotal += amount;
+      wasteCost += rowWasteCost;
+      inventoryCost += rowInventoryCost;
+      purchasedCost += rowPurchasedCost;
     }
 
     if (itemName && !isTotal) {
@@ -1559,11 +1666,21 @@ function extractReportMetrics(parsedTable) {
         varianceAmount: amount,
         variancePercent: parseNumber(percentValue),
       });
+      if (rowUsedCost) {
+        usageProducts.push({
+          name: itemName,
+          usedCost: rowUsedCost,
+          varianceAmount: amount,
+          variancePercent: parseNumber(percentValue),
+          realCostPercent: rowCostPercent,
+        });
+      }
     }
 
     if (isCategoryTotal) {
       categoryMap.set(category, amount);
       categoryPercentMap.set(category, parseNumber(percentValue));
+      categoryPurchases.set(category, rowPurchasedCost);
     } else {
       categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
     }
@@ -1575,15 +1692,33 @@ function extractReportMetrics(parsedTable) {
     percent: categoryPercentMap.get(category) || 0,
   }));
 
+  const extras = {
+    usedCost,
+    soldCost,
+    wasteCost,
+    inventoryCost,
+    purchasedCost,
+    idealCostPercent: revenue ? Number(((soldCost / revenue) * 100).toFixed(1)) : 0,
+  };
+
   return {
-    summary: grandSummary || {
-      revenue,
-      costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
-      idealCostPercent: 0,
-      variancePercent: soldCost ? Number(((varianceTotal / soldCost) * 100).toFixed(1)) : 0,
-      varianceAmount: varianceTotal,
-    },
+    summary: grandSummary
+      ? { ...extras, ...grandSummary, idealCostPercent: grandSummary.idealCostPercent || extras.idealCostPercent }
+      : {
+          revenue,
+          ...extras,
+          costPercent: revenue ? Number(((usedCost / revenue) * 100).toFixed(1)) : 0,
+          variancePercent: soldCost ? Number(((varianceTotal / soldCost) * 100).toFixed(1)) : 0,
+          varianceAmount: varianceTotal,
+        },
     categoryVariances: categoryVariances.slice(0, 8),
+    familyVariances: aggregateByFamily(
+      categoryVariances.map((item) => ({ category: item.category, value: item.amount })),
+    ).map(({ family, value }) => ({ family, amount: value })),
+    familyPurchases: aggregateByFamily(
+      [...categoryPurchases.entries()].map(([category, value]) => ({ category, value })),
+    ).map(({ family, value }) => ({ family, purchased: value })),
+    topUsageProducts: usageProducts.sort((left, right) => right.usedCost - left.usedCost).slice(0, 10),
     topProducts: products
       .filter((item) => item.varianceAmount || item.variancePercent)
       .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
@@ -1718,13 +1853,19 @@ function ensurePeriod(store, periodInput) {
 
 function applyCsvToReport(report, sourceType, rows) {
   if (sourceType === "varianceDetailed" || sourceType === "varianceSummary") {
-    report.summary = buildSummary(rows);
+    report.summary = { ...(report.summary || {}), ...buildSummary(rows) };
     report.categoryVariances = buildCategoryVariances(rows);
     report.topProducts = buildTopProducts(rows);
+    report.familyVariances = buildFamilyVariances(rows);
+    report.familyPurchases = buildFamilyPurchases(rows);
+    report.topUsageProducts = buildTopUsageProducts(rows);
   }
 
   if (sourceType === "intelipar") {
     report.purchaseSuggestions = buildPurchaseSuggestions(rows);
+    report.familySuggested = buildFamilySuggested(rows);
+    report.summary = report.summary || {};
+    report.summary.suggestedCost = report.familySuggested.reduce((total, item) => total + (item.suggested || 0), 0);
   }
 
   report.sourceStatus[sourceType] = "Datos cargados";
@@ -2304,6 +2445,9 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         }
         if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
         if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
+        if (metrics.familyVariances?.some((item) => item.amount)) report.familyVariances = metrics.familyVariances;
+        if (metrics.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = metrics.familyPurchases;
+        if (metrics.topUsageProducts?.length) report.topUsageProducts = metrics.topUsageProducts;
         if (type === "varianceDetailed") {
           const purchaseActuals = extractPurchaseActuals(data);
           if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
@@ -2319,6 +2463,22 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           note: pickRecordValue(row.record, ["note", "nota", "excesoDeInventario", "díasRestantes"], "Revisar contra proveedor actualizado"),
         })).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
         if (suggestions.length) report.purchaseSuggestions = suggestions;
+
+        const suggestedEntries = data.rows
+          .filter((row) => {
+            const name = pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "");
+            return isTotalRow(name) || /:\s*$/.test(name);
+          })
+          .map((row) => ({
+            category: cleanTotalName(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "")),
+            value: parseNumber(pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"])),
+          }));
+        const familySuggested = aggregateByFamily(suggestedEntries).map(({ family, value }) => ({ family, suggested: value }));
+        if (familySuggested.some((item) => item.suggested)) {
+          report.familySuggested = familySuggested;
+          report.summary = report.summary || {};
+          report.summary.suggestedCost = familySuggested.reduce((total, item) => total + (item.suggested || 0), 0);
+        }
       }
     } catch (error) {
       syncResults[type] = {
@@ -3218,188 +3378,455 @@ function formatPercentDelta(value) {
 
 function renderTwoPageReportHtml(store, report) {
   const payload = buildReportPayload(store, report);
-  const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
-  const generatedAt = new Intl.DateTimeFormat("es-CL", { dateStyle: "medium" }).format(new Date());
   const analysis = payload.analysis || generateReportAnalysis(payload);
-  const chronologicalHistory = [...(payload.history || [])].reverse();
-  const currentIndex = chronologicalHistory.findIndex((item) => item.periodId === report.periodId);
-  const previousPoint = currentIndex > 0 ? chronologicalHistory[currentIndex - 1] : chronologicalHistory[chronologicalHistory.length - 2];
-  const costDelta = previousPoint ? (payload.summary.costPercent || 0) - (previousPoint.costPercent || 0) : 0;
-  const idealCost = payload.summary.idealCostPercent || 0;
-  const idealGap = idealCost ? (payload.summary.costPercent || 0) - idealCost : 0;
-  const varianceClassName = (payload.summary.varianceAmount || 0) < 0 ? "bad" : "ok";
-  const topCategory = [...payload.categoryVariances].sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount))[0];
-  const costSvg = renderCostSvg(payload.history, money);
-  const varianceSvg = renderVarianceSvg(payload.categoryVariances.slice(0, 7), money);
-  const productSvg = renderVarianceSvg(payload.topProducts.slice(0, 6), money);
-  const deviations = purchaseDeviationsForReport(store, report);
-  const executiveNotes = [
-    `El periodo cierra con ${money.format(payload.summary.revenue)} en ingresos y ${payload.summary.costPercent || 0}% de costo real.`,
-    idealCost ? `La brecha contra costo ideal es ${formatPercentDelta(idealGap)} y ${money.format(payload.summary.varianceAmount || 0)}.` : `La diferencia acumulada es ${money.format(payload.summary.varianceAmount || 0)}.`,
-    previousPoint ? `Versus la semana anterior, el costo real cambia ${formatPercentDelta(costDelta)}.` : "No hay semana anterior suficiente para comparar tendencia.",
-    topCategory ? `Mayor impacto por categoria: ${topCategory.category} (${money.format(topCategory.amount)}, ${topCategory.percent || 0}%).` : "Sin categoria dominante para este periodo.",
-  ];
-  const categoryRows = payload.categoryVariances.slice(0, 7).map((item) => `<tr><td>${escapeHtml(item.category)}</td><td class="num ${item.amount < 0 ? "bad" : "ok"}">${money.format(item.amount)}</td><td class="num">${item.percent || 0}%</td></tr>`).join("");
-  const productRows = payload.topProducts.slice(0, 6).map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.category)}</span></td><td class="num ${item.varianceAmount < 0 ? "bad" : "ok"}">${money.format(item.varianceAmount)}</td><td class="num">${item.variancePercent || 0}%</td></tr>`).join("");
-  const purchaseRows = payload.purchaseSuggestions.slice(0, 6).map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${escapeHtml(item.stock)}</td><td class="num">${escapeHtml(item.suggested)}</td><td>${escapeHtml(item.note)}</td></tr>`).join("");
-  const deviationRows = deviations.length
-    ? deviations.map((item) => `<tr><td><strong>${escapeHtml(item.item)}</strong><span>${escapeHtml(item.provider)}</span></td><td class="num">${item.suggested}</td><td class="num">${item.purchased}</td><td class="num ${item.deviation < 0 ? "bad" : "ok"}">${item.deviation > 0 ? "+" : ""}${item.deviation}</td></tr>`).join("")
-    : `<tr><td colspan="4">Se mostrara cuando exista sugerencia de la semana anterior y compra real de la semana actual para el mismo item.</td></tr>`;
-  const analysisRows = [
-    ...(analysis.bestOfWeek || []).slice(0, 1),
-    ...(analysis.weeklyChallenges || []).slice(0, 2),
-    ...(analysis.stockEfficiency || []).slice(0, 1),
-  ].map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+
+  // ---- Paleta del reporte Bevinco (identica al modelo Excel) ----
+  const NAVY = "#16365d";
+  const GREEN = "#90bf4f";
+  const TEAL = "#8bc6c1";
+  const GRAY_TXT = "#595959";
+  const FAMILY_COLORS = {
+    "Destilados": "#10243e",
+    "Vinos": "#2e75b6",
+    "Espumantes": "#90bf4f",
+    "Cervezas y Sidra": "#8bc6c1",
+    "Barriles": "#8c5f42",
+    "Sin Alcohol": "#a6a6a6",
+    "Otros": "#c9b26a",
+  };
+
+  // ---- Formatos ----
+  const usInt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const fmtMoney = (value) => usInt.format(Math.round(value || 0));
+  const fmtK = (value) => {
+    const v = value || 0;
+    if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+    return `${Math.round(v)}`;
+  };
+  const fmtPct = (value) => `${(value || 0).toFixed(1)}%`;
+  const ddmm = (iso) => {
+    const match = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}-${match[2]}` : "";
+  };
+  const ddmmyyyy = (iso) => {
+    const match = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}-${match[2]}-${match[1]}` : "";
+  };
+  const niceCeil = (value, step) => Math.max(step, Math.ceil((value || 0) / step) * step);
+
+  // ---- Datos ----
+  const history = [...(payload.history || [])].sort((a, b) => String(a.endsAt || a.label).localeCompare(String(b.endsAt || b.label)));
+  const familyVariances = (payload.familyVariances && payload.familyVariances.length
+    ? payload.familyVariances
+    : REPORT_FAMILIES.map((family) => ({ family, amount: 0 })));
+  const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
+  const suggestedMap = new Map((payload.familySuggested || []).map((item) => [item.family, item.suggested || 0]));
+  const familyPurchaseRows = REPORT_FAMILIES.map((family) => ({
+    family,
+    purchased: purchasesMap.get(family) || 0,
+    suggested: suggestedMap.get(family) || 0,
+  }));
+  const savings = familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
+  const shortages = familyVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
+  const waste = Math.abs(payload.summary?.wasteCost || 0);
+  const tableProducts = (payload.topUsageProducts && payload.topUsageProducts.length
+    ? payload.topUsageProducts
+    : (payload.topProducts || []).map((item) => ({
+        name: item.name,
+        usedCost: 0,
+        varianceAmount: item.varianceAmount,
+        variancePercent: item.variancePercent,
+        realCostPercent: 0,
+      }))).slice(0, 10);
+  const clientTitle = payload.client?.accountName || payload.client?.name || report.clientId;
+
+  // ---- Grafico 1: Costo real vs Costo Ideal (barras + 2 lineas) ----
+  function costComboSvg() {
+    const W = 700; const H = 252;
+    const L = 56; const R = 644; const T = 30; const B = 186;
+    const plotW = R - L; const plotH = B - T;
+    const n = Math.max(history.length, 1);
+    const revMax = niceCeil(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15, 1e7);
+    const pctMax = niceCeil(Math.max(...history.map((p) => Math.max(p.costPercent || 0, p.idealCostPercent || 0)), 1) * 1.1, 5);
+    const xAt = (i) => L + ((i + 0.5) * plotW) / n;
+    const yPct = (v) => B - ((v || 0) / pctMax) * plotH;
+    const yRev = (v) => B - ((v || 0) / revMax) * plotH;
+    const ticks = [];
+    for (let v = 0; v <= pctMax; v += 5) ticks.push(v);
+    const grid = ticks.map((v) =>
+      `<line x1="${L}" y1="${yPct(v)}" x2="${R}" y2="${yPct(v)}" stroke="#e3e3e3" stroke-width="1"/>` +
+      `<text x="${L - 6}" y="${yPct(v) + 3}" text-anchor="end" class="ax">${v.toFixed(1)}%</text>`).join("");
+    const rightTicks = [];
+    for (let v = 0; v <= revMax; v += 1e7) rightTicks.push(v);
+    const rightAxis = rightTicks.map((v) =>
+      `<text x="${R + 8}" y="${yRev(v) + 3}" class="ax">${v ? fmtK(v) : "K"}</text>`).join("");
+    const bars = history.map((p, i) => {
+      const x = xAt(i) - 21;
+      const y = yRev(p.revenue);
+      return `<rect x="${x}" y="${y}" width="42" height="${Math.max(2, B - y)}" fill="${TEAL}"/>` +
+        `<text x="${xAt(i)}" y="${Math.min(y + 14, B - 4)}" text-anchor="middle" class="barlab">${fmtK(p.revenue)}</text>`;
+    }).join("");
+    const linePath = (key, color) => {
+      const pts = history.map((p, i) => `${xAt(i)},${yPct(p[key])}`).join(" ");
+      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.4"/>` +
+        history.map((p, i) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
+    };
+    const chips = history.map((p, i) => {
+      const x = xAt(i);
+      const yr = yPct(p.costPercent); const yi = yPct(p.idealCostPercent);
+      const realAbove = yr <= yi;
+      const chip = (cy, color, text) =>
+        `<g><rect x="${x - 23}" y="${cy - 8}" width="46" height="15" rx="2" fill="${color}"/>` +
+        `<text x="${x}" y="${cy + 3.5}" text-anchor="middle" class="chip">${text}</text></g>`;
+      return chip(realAbove ? yr - 14 : yr + 16, NAVY, fmtPct(p.costPercent)) +
+        chip(realAbove ? yi + 16 : yi - 14, GREEN, fmtPct(p.idealCostPercent));
+    }).join("");
+    const xLabels = history.map((p, i) =>
+      `<text x="${xAt(i)}" y="${B + 16}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+    const legendY = H - 8;
+    return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
+      <style>.ax{font:9px Calibri,Arial;fill:#808080}.barlab{font:700 11px Calibri,Arial;fill:#fff}.chip{font:700 9.5px Calibri,Arial;fill:#fff}.leg{font:9.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      ${grid}${rightAxis}${bars}
+      ${linePath("costPercent", NAVY)}${linePath("idealCostPercent", GREEN)}
+      ${chips}${xLabels}
+      <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
+      <g>
+        <rect x="${W / 2 - 150}" y="${legendY - 8}" width="10" height="10" fill="${TEAL}"/><text x="${W / 2 - 136}" y="${legendY + 1}" class="leg">Suma de Ingresos</text>
+        <line x1="${W / 2 - 40}" y1="${legendY - 3}" x2="${W / 2 - 20}" y2="${legendY - 3}" stroke="${NAVY}" stroke-width="2.4"/><text x="${W / 2 - 16}" y="${legendY + 1}" class="leg">% Costo Real</text>
+        <line x1="${W / 2 + 62}" y1="${legendY - 3}" x2="${W / 2 + 82}" y2="${legendY - 3}" stroke="${GREEN}" stroke-width="2.4"/><text x="${W / 2 + 86}" y="${legendY + 1}" class="leg">% Costo Ideal</text>
+      </g>
+    </svg>`;
+  }
+
+  // ---- Grafico 2: Ahorro/faltantes inventario por familia (barras divergentes) ----
+  function familyVarianceSvg() {
+    const W = 470; const H = 240;
+    const L = 150; const R = 452; const T = 22; const B = 200;
+    const plotW = R - L; const plotH = B - T;
+    const rows = familyVariances.filter((item) => REPORT_FAMILIES.includes(item.family) || item.amount);
+    const maxAbs = niceCeil(Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.25, 5e4);
+    const xAt = (v) => L + ((v + maxAbs) / (2 * maxAbs)) * plotW;
+    const ticks = [];
+    for (let v = -maxAbs; v <= maxAbs; v += maxAbs / 3) ticks.push(v);
+    const grid = ticks.map((v) =>
+      `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e6e6e6"/>` +
+      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v === 0 ? "K" : fmtK(v)}</text>`).join("");
+    const rowH = plotH / Math.max(rows.length, 1);
+    const bars = rows.map((item, i) => {
+      const color = FAMILY_COLORS[item.family] || "#999";
+      const yc = T + (i + 0.5) * rowH;
+      const x0 = xAt(0); const x1 = xAt(item.amount);
+      const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
+      const chipX = item.amount >= 0 ? x1 + 2 : x1 - 50;
+      return `<rect x="${bx}" y="${yc - 9}" width="${bw}" height="18" fill="${color}"/>` +
+        `<rect x="${chipX}" y="${yc - 8}" width="48" height="15" rx="2" fill="${color}"/>` +
+        `<text x="${chipX + 24}" y="${yc + 3.5}" text-anchor="middle" class="chip">${fmtK(item.amount)}</text>`;
+    }).join("");
+    const legend = rows.map((item, i) =>
+      `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${FAMILY_COLORS[item.family] || "#999"}"/>` +
+      `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
+    return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
+      <style>.ax{font:9px Calibri,Arial;fill:#808080}.chip{font:700 9px Calibri,Arial;fill:#fff}.leg{font:700 9.5px Calibri,Arial;fill:#404040}</style>
+      ${grid}
+      <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#9a9a9a"/>
+      ${bars}${legend}
+    </svg>`;
+  }
+
+  // ---- Pagina 2: Compra realizada vs sugerida (areas) ----
+  function purchaseAreaSvg() {
+    const W = 340; const H = 230;
+    const L = 46; const R = 326; const T = 26; const B = 172;
+    const plotW = R - L; const plotH = B - T;
+    const n = Math.max(history.length, 1);
+    const maxV = niceCeil(Math.max(...history.map((p) => Math.max(p.purchasedCost || 0, p.suggestedCost || 0)), 1) * 1.15, 2e6);
+    const xAt = (i) => L + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+    const yAt = (v) => B - ((v || 0) / maxV) * plotH;
+    const ticks = [];
+    for (let v = 0; v <= maxV; v += 2e6) ticks.push(v);
+    const grid = ticks.map((v) =>
+      `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
+      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+    const area = (key, color, opacity) => {
+      const pts = history.map((p, i) => `${xAt(i)},${yAt(p[key])}`).join(" ");
+      return `<polygon points="${xAt(0)},${B} ${pts} ${xAt(n - 1)},${B}" fill="${color}" opacity="${opacity}"/>` +
+        `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
+    };
+    const xLabels = history.map((p, i) =>
+      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+    const legendY = H - 8;
+    return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
+      <style>.ax{font:7.5px Calibri,Arial;fill:#808080}.leg{font:8.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      ${grid}
+      ${area("suggestedCost", GREEN, 0.5)}
+      ${area("purchasedCost", NAVY, 0.42)}
+      ${xLabels}
+      <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
+      <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
+      <rect x="${W / 2 + 4}" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="${W / 2 + 16}" y="${legendY}" class="leg">Compra Realizada</text>
+    </svg>`;
+  }
+
+  // ---- Pagina 2: Cobertura de inventario (barras + linea de dias) ----
+  function coverageSvg() {
+    const W = 340; const H = 252;
+    const L = 48; const R = 296; const T = 26; const B = 188;
+    const plotW = R - L; const plotH = B - T;
+    const n = Math.max(history.length, 1);
+    const maxV = niceCeil(Math.max(...history.map((p) => Math.max(p.inventoryCost || 0, p.usedCost || 0)), 1) * 1.15, 1e7);
+    const coverage = history.map((p) => (p.usedCost ? (p.inventoryCost / (p.usedCost / 7)) : 0));
+    const maxDays = niceCeil(Math.max(...coverage, 1) * 1.2, 5);
+    const xAt = (i) => L + ((i + 0.5) * plotW) / n;
+    const yAt = (v) => B - ((v || 0) / maxV) * plotH;
+    const yDays = (v) => B - ((v || 0) / maxDays) * plotH;
+    const ticksLeft = [];
+    for (let v = 0; v <= maxV; v += 1e7) ticksLeft.push(v);
+    const grid = ticksLeft.map((v) =>
+      `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
+      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+    const ticksRight = [];
+    for (let v = 0; v <= maxDays; v += 5) ticksRight.push(v);
+    const rightAxis = ticksRight.map((v) =>
+      `<text x="${R + 6}" y="${yDays(v) + 3}" class="ax">${v.toFixed(1)}</text>`).join("");
+    const bars = history.map((p, i) => {
+      const x = xAt(i);
+      const yu = yAt(p.usedCost); const yi = yAt(p.inventoryCost);
+      const rot = (bx, by, text) =>
+        `<text x="${bx}" y="${by}" class="rotlab" transform="rotate(-90 ${bx} ${by})">${text}</text>`;
+      return `<rect x="${x - 18}" y="${yu}" width="15" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` +
+        `<rect x="${x + 2}" y="${yi}" width="15" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` +
+        (B - yu > 34 ? rot(x - 7, B - 6, fmtK(p.usedCost)) : "") +
+        (B - yi > 34 ? rot(x + 13, B - 6, fmtK(p.inventoryCost)) : "");
+    }).join("");
+    const linePts = history.map((p, i) => `${xAt(i)},${yDays(coverage[i])}`).join(" ");
+    const chips = history.map((p, i) => {
+      const x = xAt(i); const y = yDays(coverage[i]) - 16;
+      return `<rect x="${x - 24}" y="${y - 8}" width="48" height="14" rx="2" fill="${TEAL}"/>` +
+        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${coverage[i].toFixed(1)} días</text>`;
+    }).join("");
+    const xLabels = history.map((p, i) =>
+      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+    const legendY = H - 8;
+    return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
+      <style>.ax{font:7.5px Calibri,Arial;fill:#808080}.rotlab{font:700 8px Calibri,Arial;fill:#fff}.chipteal{font:700 8px Calibri,Arial;fill:#fff}.leg{font:8px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      ${grid}${rightAxis}${bars}
+      <polyline points="${linePts}" fill="none" stroke="${TEAL}" stroke-width="2.2"/>
+      ${chips}${xLabels}
+      <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
+      <rect x="14" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="26" y="${legendY}" class="leg">Consumo $</text>
+      <rect x="88" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="100" y="${legendY}" class="leg">Inventario $</text>
+      <line x1="164" y1="${legendY - 4}" x2="180" y2="${legendY - 4}" stroke="${TEAL}" stroke-width="2.2"/><text x="184" y="${legendY}" class="leg">Cobertura de Inv en días de ventas</text>
+    </svg>`;
+  }
+
+  // ---- Pagina 2: Compra realizada vs sugerida por familia ----
+  function familyPurchaseSvg() {
+    const W = 340; const H = 500;
+    const L = 92; const R = 318; const T = 24; const B = 452;
+    const plotW = R - L; const plotH = B - T;
+    const rows = familyPurchaseRows;
+    const maxV = niceCeil(Math.max(...rows.map((r) => Math.max(r.purchased, r.suggested)), 1) * 1.25, 5e5);
+    const xAt = (v) => L + ((v || 0) / maxV) * plotW;
+    const ticks = [];
+    for (let v = 0; v <= maxV; v += maxV / 7) ticks.push(v);
+    const grid = ticks.map((v) =>
+      `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e9e9e9"/>` +
+      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+    const groupH = plotH / rows.length;
+    const bars = rows.map((row, i) => {
+      const yc = T + (i + 0.5) * groupH;
+      const bar = (v, y, color) => {
+        const bw = Math.max(3, xAt(v) - L);
+        const chipX = Math.max(L + 2, xAt(v) - 46);
+        return `<rect x="${L}" y="${y}" width="${bw}" height="15" fill="${color}"/>` +
+          `<rect x="${chipX}" y="${y + 0.5}" width="44" height="14" rx="2" fill="${color}" stroke="#fff" stroke-width="0.8"/>` +
+          `<text x="${chipX + 22}" y="${y + 10.5}" text-anchor="middle" class="chip">${fmtK(v)}</text>`;
+      };
+      return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(row.family)}</text>` +
+        bar(row.purchased, yc - 18, NAVY) +
+        bar(row.suggested, yc + 3, GREEN);
+    }).join("");
+    const legendY = H - 10;
+    return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
+      <style>.ax{font:7.5px Calibri,Arial;fill:#808080}.fam{font:700 9px Calibri,Arial;fill:${GRAY_TXT}}.chip{font:700 8px Calibri,Arial;fill:#fff}.leg{font:8.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      ${grid}${bars}
+      <rect x="${W / 2 - 112}" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="${W / 2 - 100}" y="${legendY}" class="leg">Compra Realizada</text>
+      <rect x="${W / 2 + 8}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 + 20}" y="${legendY}" class="leg">Compra Sugerida</text>
+    </svg>`;
+  }
+
+  // ---- Piezas comunes ----
+  const brandMark = `<svg viewBox="0 0 104 78" width="92" height="69" aria-hidden="true">
+    <rect x="26" y="2" width="28" height="28" rx="8" fill="none" stroke="${NAVY}" stroke-width="4"/>
+    <rect x="2" y="24" width="30" height="30" rx="8" fill="${GREEN}"/>
+    <rect x="40" y="44" width="28" height="28" rx="8" fill="${TEAL}"/>
+    <rect x="74" y="44" width="26" height="26" rx="8" fill="#d6d6d6"/>
+  </svg>`;
+  const footerLogo = `<svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
+    <path d="M30 2 A28 28 0 0 1 58 30 L33 30 L33 2 Z" fill="${NAVY}"/>
+    <path d="M2 30 A28 28 0 0 1 27 2 L27 30 Z" fill="#d6d6d6"/>
+    <path d="M27 58 A28 28 0 0 1 2 33 L27 33 Z" fill="${GREEN}"/>
+    <path d="M58 33 A28 28 0 0 1 33 58 L33 33 Z" fill="${TEAL}"/>
+  </svg>`;
+  const pageHeader = `
+    <header class="bv-head">
+      <div class="bv-mark">${brandMark}</div>
+      <div class="bv-title"><h1>${escapeHtml(clientTitle)}</h1><div class="bv-underline"></div></div>
+      <div class="bv-period">
+        <div class="bv-period-title">Periodo</div>
+        <div class="bv-period-row"><span>del:</span><b>${ddmm(payload.period?.startsAt)}</b></div>
+        <div class="bv-period-row"><span>al:</span><b>${ddmm(payload.period?.endsAt)}</b></div>
+      </div>
+    </header>`;
+  const pageFooter = `<footer class="bv-foot">${footerLogo}</footer>`;
+  const commentBlock = (title, items) => {
+    const list = (items || []).length ? items : ["Sin hallazgos relevantes para este periodo."];
+    return `<h3 class="bv-ctitle">${escapeHtml(title)}</h3>` +
+      list.map((item) => `<div class="bv-citem"><span>&minus;</span><p>${escapeHtml(item)}</p></div>`).join("");
+  };
+  const kpiBox = (title, value) => `
+    <div class="bv-kpi">
+      <div class="bv-kpi-head">${escapeHtml(title)}</div>
+      <div class="bv-kpi-value">${value}</div>
+    </div>`;
+  const kpiArrow = `<svg viewBox="0 0 60 70" width="44" height="52" class="bv-arrow" aria-hidden="true">
+    <path d="M8 6 C48 10 52 34 34 52" fill="none" stroke="${NAVY}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M46 40 L30 60 L20 40 Z" fill="${NAVY}"/>
+  </svg>`;
+
+  const productRows = tableProducts.map((item, index) => {
+    const neg = (item.varianceAmount || 0) < 0;
+    return `<tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">${escapeHtml(item.name)}</td>
+      <td class="tmoney"><span>$</span><span>${item.usedCost ? fmtMoney(item.usedCost) : "-"}</span></td>
+      <td class="tmoney ${neg ? "neg" : ""}"><span>$</span><span>${fmtMoney(item.varianceAmount)}</span></td>
+      <td class="tpct">${fmtPct(item.variancePercent)}</td>
+      <td class="tpct">${item.realCostPercent ? fmtPct(item.realCostPercent) : "-"}</td>
+    </tr>`;
+  }).join("");
 
   return `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Reporte ${escapeHtml(payload.client?.name || report.clientId)}</title>
+  <title>Reporte ${escapeHtml(clientTitle)}</title>
   <style>
-    @import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
-    @page { margin: 6mm; size: A4 landscape; }
+    @page { margin: 7mm; size: A4 portrait; }
     * { box-sizing: border-box; }
-    body { background: #e8efed; color: #393939; font-family: "Ubuntu", Arial, sans-serif; margin: 0; padding: 8px; }
-    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 8px; max-width: 1240px; }
-    .toolbar button { background: #054372; border: 0; border-radius: 6px; color: #fff; font-weight: 700; padding: 10px 16px; }
-    .pdf-page { background: #fff; border: 1px solid #dce4e2; display: grid; gap: 12px; margin: 0 auto 12px; max-width: 1240px; min-height: 775px; padding: 20px 26px; page-break-after: always; }
-    .pdf-page:last-child { page-break-after: auto; }
-    .topbar { align-items: center; display: grid; gap: 16px; grid-template-columns: 86px 1fr 170px; }
-    .mark { display: grid; gap: 5px; grid-template-columns: repeat(2, 34px); }
-    .mark span { border-radius: 50%; height: 34px; }
-    .mark span:nth-child(1) { background: #90bf4f; }
-    .mark span:nth-child(2) { background: #054372; }
-    .mark span:nth-child(3) { background: #8bc6c1; }
-    .mark span:nth-child(4) { background: #d6d6d6; }
-    h1 { color: #393939; font-size: 40px; line-height: 1; margin: 0; text-align: center; }
-    h2 { color: #054372; font-size: 20px; margin: 0 0 5px; }
-    h3 { color: #054372; font-size: 14px; margin: 0 0 6px; text-transform: uppercase; }
-    .rule { background: #90bf4f; height: 4px; margin: 8px auto 0; max-width: 420px; }
-    .period { border: 2px solid #90bf4f; color: #526862; font-size: 12px; padding: 8px; text-align: right; }
-    .period strong { color: #393939; display: block; font-size: 13px; margin-bottom: 3px; text-align: center; }
-    .subline { color: #6d7a77; font-size: 12px; margin: 6px 0 0; text-align: center; }
-    .metrics { display: grid; gap: 8px; grid-template-columns: 1.45fr repeat(4, 1fr); }
-    .metric, .panel { border: 1px solid #dce4e2; border-radius: 6px; padding: 12px; }
-    .metric span { color: #526862; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-    .metric strong { display: block; font-size: 26px; margin-top: 4px; }
-    .grid-main { display: grid; gap: 10px; grid-template-columns: 1.4fr 0.85fr; }
-    .grid-even { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
-    .chart-card { border: 1px solid #e1e8e6; padding: 6px; }
-    .report-svg { display: block; width: 100%; height: auto; max-height: 320px; }
-    .small-chart .report-svg { max-height: 230px; }
-    .notes { display: grid; gap: 6px; margin: 0; padding-left: 16px; }
-    .notes li { color: #4f5d59; font-size: 14px; line-height: 1.36; }
-    table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    th, td { border-bottom: 1px solid #e7edeb; font-size: 13px; padding: 7px 8px; vertical-align: middle; overflow-wrap: anywhere; }
-    th { background: #f6f8f7; color: #054372; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-    td span { color: #6d7a77; display: block; font-size: 11px; margin-top: 2px; }
-    .num { text-align: right; white-space: nowrap; }
-    .ok { color: #477626; }
-    .bad { color: #9f674f; }
-    .footer { border-top: 1px solid #dce4e2; color: #77827f; font-size: 10px; padding-top: 7px; text-align: center; }
-    @media print { body { background: #fff; padding: 0; } .toolbar { display: none; } .pdf-page { border: 0; margin: 0; max-width: none; min-height: auto; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+    body { background: #e9edef; color: #333; font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 0; padding: 16px; }
+    .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 12px; max-width: 800px; }
+    .toolbar button { background: ${NAVY}; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 16px; }
+    .bv-page { background: #fff; margin: 0 auto 16px; max-width: 800px; padding: 16px 22px 12px; }
+    .bv-head { align-items: start; display: grid; grid-template-columns: 100px 1fr 150px; margin-bottom: 10px; }
+    .bv-title h1 { color: #262626; font-size: 32px; margin: 8px 0 0; text-align: center; }
+    .bv-underline { background: ${TEAL}; height: 4px; margin: 6px auto 0; width: 300px; }
+    .bv-period { border: 1px solid ${TEAL}; box-shadow: 0 0 0 2px #fff, 0 0 0 3px ${TEAL}; font-size: 11px; margin-top: 4px; }
+    .bv-period-title { border-bottom: 1px solid ${TEAL}; color: #333; padding: 2px 8px; text-align: center; }
+    .bv-period-row { display: flex; justify-content: space-between; padding: 1px 8px; }
+    .bv-period-row b { font-weight: 700; }
+    .bv-panel { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 10px; }
+    .bv-panel h2 { color: #8c8c8c; font-size: 15px; font-weight: 700; margin: 2px 0 6px; text-align: center; }
+    .bv-svg { display: block; height: auto; width: 100%; }
+    .bv-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 218px; margin-bottom: 10px; }
+    .bv-kpis { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; position: relative; }
+    .bv-kpi { border: 2px solid ${NAVY}; }
+    .bv-kpi-head { background: ${NAVY}; color: #fff; font-size: 12.5px; font-weight: 700; padding: 4px 6px; text-align: center; }
+    .bv-kpi-value { color: #1a1a1a; font-size: 21px; font-weight: 700; padding: 7px 6px; text-align: center; }
+    .bv-arrow { position: absolute; right: -4px; bottom: 74px; }
+    .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
+    .bv-ctitle { color: #76a73e; font-size: 12.5px; margin: 6px 0 4px; }
+    .bv-citem { display: flex; gap: 10px; margin: 0 0 5px; }
+    .bv-citem span { color: #333; }
+    .bv-citem p { color: #333; font-size: 10.5px; line-height: 1.45; margin: 0; text-align: justify; }
+    .bv-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+    .bv-table-title { background: ${TEAL}; color: #fff; font-size: 13px; font-weight: 700; padding: 5px; text-align: center; }
+    .bv-table th { background: #404040; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 6px; }
+    .bv-table th:first-child { text-align: left; }
+    .bv-table th:not(:first-child) { text-align: right; }
+    .bv-table td { border: 1px solid #7f7f7f; font-size: 10px; padding: 2.5px 6px; }
+    .bv-table tr.alt td { background: #dcecea; }
+    .bv-table .tname { width: 32%; }
+    .tmoney { text-align: right; white-space: nowrap; width: 18%; }
+    .tmoney span:first-child { float: left; }
+    .tmoney.neg span:last-child { color: #e00000; }
+    .tpct { text-align: right; width: 16%; }
+    .bv-foot { display: flex; justify-content: center; margin-top: 10px; }
+    .bv-grid2 { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+    .bv-col { display: flex; flex-direction: column; gap: 10px; }
+    .bv-col .bv-panel { margin-bottom: 0; }
+    .page-break { break-before: page; page-break-before: always; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .toolbar { display: none; }
+      .bv-page { margin: 0; max-width: none; padding: 0; }
+      .bv-panel, .bv-comments { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
   <div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>
-  <section class="pdf-page">
-    <header class="topbar">
-      <div class="mark"><span></span><span></span><span></span><span></span></div>
-      <div><h1>${escapeHtml(payload.client?.name || report.clientId)}</h1><div class="rule"></div><p class="subline">Reporte semanal Bevinco / Sculpture · ${escapeHtml(payload.client?.area || "")} · ${escapeHtml(generatedAt)}</p></div>
-      <div class="period"><strong>Periodo</strong>${escapeHtml(payload.period?.label || report.periodId)}</div>
-    </header>
-    <section class="metrics">
-      <div class="metric"><span>Ingresos</span><strong>${money.format(payload.summary.revenue || 0)}</strong></div>
-      <div class="metric"><span>% costo real</span><strong>${payload.summary.costPercent || 0}%</strong></div>
-      <div class="metric"><span>% costo ideal</span><strong>${idealCost || 0}%</strong></div>
-      <div class="metric"><span>Diferencia % costo</span><strong class="${idealGap > 0 ? "bad" : "ok"}">${formatPercentDelta(idealGap)}</strong></div>
-      <div class="metric"><span>Diferencia $$</span><strong class="${varianceClassName}">${money.format(payload.summary.varianceAmount || 0)}</strong></div>
+
+  <main class="bv-page">
+    ${pageHeader}
+    <section class="bv-panel">
+      <h2>Costo real vs Costo Ideal</h2>
+      ${costComboSvg()}
     </section>
-    <section class="grid-main">
-      <div class="panel"><h2>Ingresos, costo real y costo ideal</h2><div class="chart-card">${costSvg}</div></div>
-      <div class="panel"><h2>Lectura ejecutiva</h2><ul class="notes">${executiveNotes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+    <section class="bv-row">
+      <div class="bv-panel">
+        <h2>Ahorro/faltantes inventario ($)</h2>
+        ${familyVarianceSvg()}
+      </div>
+      <aside class="bv-kpis">
+        ${kpiBox("Suma de ahorros", `$${fmtMoney(savings)}`)}
+        ${kpiBox("Suma de faltantes", `$${fmtMoney(shortages)}`)}
+        ${kpiBox("Merma reportada al $", waste ? `-$${fmtMoney(waste)}` : "$0")}
+        ${kpiArrow}
+      </aside>
     </section>
-    <section class="grid-even">
-      <div class="panel small-chart"><h2>Ahorro/faltantes por categoria</h2>${varianceSvg}</div>
-      <div class="panel"><h2>Detalle por categoria</h2><table><thead><tr><th>Categoria</th><th class="num">Monto</th><th class="num">%</th></tr></thead><tbody>${categoryRows}</tbody></table></div>
+    <section class="bv-comments">
+      ${commentBlock("Lo mejor de la semana:", analysis.bestOfWeek)}
+      ${commentBlock("Los desafíos de la semana:", analysis.weeklyChallenges)}
     </section>
-    <div class="footer">Sculpture Hospitality / Bevinco CMS · Pagina 1 de 2</div>
-  </section>
-  <section class="pdf-page">
-    <header class="topbar">
-      <div class="mark"><span></span><span></span><span></span><span></span></div>
-      <div><h1>${escapeHtml(payload.client?.name || report.clientId)}</h1><div class="rule"></div><p class="subline">Analisis operativo y compras · ${escapeHtml(payload.period?.label || report.periodId)}</p></div>
-      <div class="period"><strong>Estado</strong>${escapeHtml(payload.status || "Borrador")}</div>
-    </header>
-    <section class="grid-even">
-      <div class="panel small-chart"><h2>Top productos con mayor variacion</h2>${productSvg}</div>
-      <div class="panel"><h2>Productos a revisar</h2><table><thead><tr><th>Producto</th><th class="num">Monto</th><th class="num">%</th></tr></thead><tbody>${productRows}</tbody></table></div>
+    <table class="bv-table">
+      <thead>
+        <tr><th colspan="5" class="bv-table-title">Desempeño de los 10 productos con mayor uso ($)</th></tr>
+        <tr>
+          <th>Productos</th><th>Usado (Costo)</th><th>Ahorro / Faltante al costo</th><th>% de Ahorro / Faltante</th><th>Costo Real</th>
+        </tr>
+      </thead>
+      <tbody>${productRows}</tbody>
+    </table>
+    ${pageFooter}
+  </main>
+
+  <main class="bv-page page-break">
+    ${pageHeader}
+    <section class="bv-grid2">
+      <div class="bv-col">
+        <div class="bv-panel">
+          <h2>Compra Realizada vs Sugerida</h2>
+          ${purchaseAreaSvg()}
+        </div>
+        <div class="bv-panel">
+          <h2>Cobertura de inventario</h2>
+          ${coverageSvg()}
+        </div>
+      </div>
+      <div class="bv-panel">
+        <h2>Compra Realizada vs Sugerida por familia</h2>
+        ${familyPurchaseSvg()}
+      </div>
     </section>
-    <section class="grid-even">
-      <div class="panel"><h2>Compra real vs sugerencia anterior</h2><table><thead><tr><th>Item</th><th class="num">Sugerido ant.</th><th class="num">Compra real</th><th class="num">Desv.</th></tr></thead><tbody>${deviationRows}</tbody></table></div>
-      <div class="panel"><h2>Comentarios generados</h2><ul class="notes">${analysisRows || "<li>Genera el resumen del reporte para completar esta lectura.</li>"}</ul></div>
+    <section class="bv-comments">
+      ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
-    <section class="panel"><h2>Sugerencia de compra Intelipar</h2><table><thead><tr><th>Item / proveedor</th><th class="num">Stock</th><th class="num">Sugerido</th><th>Nota</th></tr></thead><tbody>${purchaseRows}</tbody></table></section>
-    <div class="footer">Comparacion de compra: sugerencia de la semana anterior versus compra real de la semana actual cuando ambos datos existen · Pagina 2 de 2</div>
-  </section>
+    ${pageFooter}
+  </main>
 </body>
 </html>`;
-}
-
-async function fetchRequisition({ cid, pid }) {
-  const cookie = process.env.SCULPTURE_SESSION_COOKIE;
-
-  if (!cookie) {
-    const error = new Error("SCULPTURE_SESSION_COOKIE is not configured.");
-    error.status = 503;
-    throw error;
-  }
-
-  const body = new URLSearchParams({
-    cmd: "overview",
-    cid,
-    pid,
-  });
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
-
-  try {
-    const response = await fetch(`${sculptureBaseUrl}/requisition/overview/`, {
-      method: "POST",
-      headers: {
-        accept: "text/html, */*; q=0.01",
-        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-        cookie,
-        origin: sculptureBaseUrl,
-        referer: `${sculptureBaseUrl}/requisition/`,
-        "x-requested-with": "XMLHttpRequest",
-      },
-      body,
-      signal: controller.signal,
-    });
-
-    const html = await response.text();
-
-    if (!response.ok) {
-      const error = new Error(`Sculpture returned ${response.status}.`);
-      error.status = response.status;
-      error.details = html.slice(0, 500);
-      throw error;
-    }
-
-    return {
-      source: "sculpture",
-      endpoint: "/requisition/overview/",
-      cid,
-      pid,
-      ...parseSculptureTable(html),
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 app.get("/api/health", (_request, response) => {
