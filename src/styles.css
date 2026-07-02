@@ -28,14 +28,14 @@
 }
 
 :root[data-theme="dark"] {
-  --surface: #10231f;
-  --surface-soft: #162d28;
-  --surface-muted: #203b35;
-  --line: #2f4c45;
-  --line-soft: #28443d;
-  --text: #f3faf7;
-  --text-muted: #b7c7c2;
-  background: #071613;
+  --surface: #16221f;
+  --surface-soft: #1d2c28;
+  --surface-muted: #253832;
+  --line: #33473f;
+  --line-soft: #2b3e37;
+  --text: #f2f8f5;
+  --text-muted: #a9beb7;
+  background: #0e1815;
 }
 
 * {
@@ -56,7 +56,7 @@ body {
 }
 
 :root[data-theme="dark"] body {
-  background: #071613;
+  background: #0e1815;
   color: var(--text);
 }
 
@@ -2824,7 +2824,7 @@ button:disabled {
 :root[data-theme="dark"] .workspace,
 :root[data-theme="dark"] .login-shell,
 :root[data-theme="dark"] .loading-shell {
-  background: #071613;
+  background: #0e1815;
 }
 
 :root[data-theme="dark"] .managed-clients li {
@@ -3409,3 +3409,115 @@ button:disabled {
 :root[data-theme="dark"] .kpi-icon-teal { background: #12332f; color: #7cc4bb; }
 :root[data-theme="dark"] .kpi-label { color: var(--text-muted); }
 :root[data-theme="dark"] .kpi-sub { color: var(--text-muted); }
+
+/* ===== Modo oscuro: pasada integral de contraste ===== */
+:root[data-theme="dark"] .eyebrow {
+  color: #7cc4b4;
+}
+
+:root[data-theme="dark"] .metrics strong,
+:root[data-theme="dark"] .kpi-body strong,
+:root[data-theme="dark"] .accumulated-metrics strong,
+:root[data-theme="dark"] .reports-toolbar h2,
+:root[data-theme="dark"] .report-row-main strong,
+:root[data-theme="dark"] .collapsible-panel summary h2 {
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .metrics span,
+:root[data-theme="dark"] .metrics small,
+:root[data-theme="dark"] .reports-toolbar small,
+:root[data-theme="dark"] .report-row-main small,
+:root[data-theme="dark"] .managed-help,
+:root[data-theme="dark"] .managed-subtitle,
+:root[data-theme="dark"] .summary-help small,
+:root[data-theme="dark"] .muted-copy {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .unit-form-grid label,
+:root[data-theme="dark"] .pending-form label,
+:root[data-theme="dark"] .login-form label,
+:root[data-theme="dark"] .upload-box label,
+:root[data-theme="dark"] .user-modal label {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .metrics article,
+:root[data-theme="dark"] .dashboard-kpis .kpi-card,
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .reservation-card {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme="dark"] .dashboard-kpis .kpi-card:hover {
+  border-color: var(--sculpture-green);
+}
+
+:root[data-theme="dark"] .unit-summary article,
+:root[data-theme="dark"] .agent-analysis-grid article,
+:root[data-theme="dark"] .source-grid article,
+:root[data-theme="dark"] .attention-list article,
+:root[data-theme="dark"] .criteria-doc-list article {
+  background: var(--surface-soft);
+  border-color: var(--line-soft);
+}
+
+:root[data-theme="dark"] .unit-summary span,
+:root[data-theme="dark"] .agent-analysis-grid li,
+:root[data-theme="dark"] .agent-analysis-grid strong {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .agent-analysis-grid strong {
+  color: var(--text);
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+  color: #7e948e;
+}
+
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .action-row button,
+:root[data-theme="dark"] .button-link {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .secondary-button:hover:not(:disabled),
+:root[data-theme="dark"] .button-link:hover {
+  background: #2e463e;
+}
+
+:root[data-theme="dark"] .query-note,
+:root[data-theme="dark"] .summary-help {
+  background: var(--surface-soft);
+  border-color: var(--line-soft);
+}
+
+:root[data-theme="dark"] .empty-state {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .pill.neutral { background: var(--surface-muted); color: var(--text-muted); }
+
+:root[data-theme="dark"] .user-card {
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .user-card:hover { border-color: var(--sculpture-green); }
