@@ -512,6 +512,7 @@ button:disabled {
 }
 
 .metrics article {
+  align-content: start;
   display: grid;
   gap: 10px;
   padding: 16px;
@@ -1234,6 +1235,7 @@ button:disabled {
 }
 
 .agent-analysis-grid article {
+  align-content: start;
   border: 1px solid #edf1f0;
   border-radius: 8px;
   display: grid;
@@ -3247,4 +3249,13 @@ button:disabled {
 
 :root[data-theme="dark"] .link-danger:hover {
   background: #2a1210;
+}
+
+/* Las tarjetas dentro de grillas no reparten el alto sobrante entre sus filas */
+.panel article,
+.dashboard-focus .panel,
+.criteria-doc-list article,
+.source-grid article,
+.clickup-grid article {
+  align-content: start;
 }

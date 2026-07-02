@@ -1188,8 +1188,8 @@ function buildPurchaseSuggestions(inteliparRows) {
       return {
         item: row["Nombre Artículo"] || row["Nombre ArtÃ­culo"] || "",
         provider,
-        stock: row["Existencia"] || "",
-        suggested: order,
+        stock: cleanCellValue(row["Existencia"]),
+        suggested: cleanCellValue(order),
         note: excess
           ? `Exceso ${excess}${daysRemaining ? `, ${daysRemaining} dias restantes` : ""}`
           : "Validar proveedor y sugerencia antes del envio",
@@ -1228,6 +1228,11 @@ function commentsForReport(clientName, report) {
   const biggestCategory = report.categoryVariances[0]?.category || "las categorias principales";
 
   return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. Revisar los productos con mayor variacion y validar la sugerencia de compra antes del envio al cliente, especialmente proveedores marcados como por validar.`;
+}
+
+// Limpia restos de comillas u otros artefactos de celdas CSV/HTML.
+function cleanCellValue(value) {
+  return String(value || "").replace(/["“”]/g, "").trim();
 }
 
 function moneyPlain(value) {
@@ -1356,7 +1361,7 @@ function generateReportAnalysis(payload) {
     ].slice(0, 5),
     stockEfficiency: purchaseItems.map(
       (item) =>
-        `${item.item}: stock ${item.stock || "s/i"}, compra sugerida ${item.suggested || "por revisar"}, proveedor ${item.provider || "por validar"}. ${item.note || ""}`.trim(),
+        `${item.item}: stock ${cleanCellValue(item.stock) || "s/i"}, compra sugerida ${cleanCellValue(item.suggested) || "por revisar"}, proveedor ${item.provider || "por validar"}. ${cleanCellValue(item.note) || ""}`.trim(),
     ),
     criteriaApplied,
     agentNotes: (payload.comments || "")
@@ -2641,8 +2646,8 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           return {
             item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
             provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
-            stock: pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || ""),
-            suggested: pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || ""),
+            stock: cleanCellValue(pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || "")),
+            suggested: cleanCellValue(pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || "")),
             note,
           };
         }).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
