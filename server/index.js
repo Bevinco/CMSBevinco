@@ -3690,9 +3690,9 @@ function renderTwoPageReportHtml(store, report) {
       <div class="bv-kpi-head">${escapeHtml(title)}</div>
       <div class="bv-kpi-value">${value}</div>
     </div>`;
-  const kpiArrow = `<svg viewBox="0 0 60 70" width="44" height="52" class="bv-arrow" aria-hidden="true">
-    <path d="M8 6 C48 10 52 34 34 52" fill="none" stroke="${NAVY}" stroke-width="9" stroke-linecap="round"/>
-    <path d="M46 40 L30 60 L20 40 Z" fill="${NAVY}"/>
+  const kpiArrow = `<svg viewBox="0 0 70 84" width="46" height="55" class="bv-arrow" aria-hidden="true">
+    <path d="M8 12 C46 14 56 36 44 58" fill="none" stroke="${NAVY}" stroke-width="10" stroke-linecap="round"/>
+    <polygon points="58,50 38,78 26,48" fill="${NAVY}"/>
   </svg>`;
 
   const productRows = tableProducts.map((item, index) => {
@@ -3734,7 +3734,7 @@ function renderTwoPageReportHtml(store, report) {
     .bv-kpi { border: 2px solid ${NAVY}; }
     .bv-kpi-head { background: ${NAVY}; color: #fff; font-size: 12.5px; font-weight: 700; padding: 4px 6px; text-align: center; }
     .bv-kpi-value { color: #1a1a1a; font-size: 21px; font-weight: 700; padding: 7px 6px; text-align: center; }
-    .bv-arrow { position: absolute; right: -4px; bottom: 74px; }
+    .bv-arrow { position: absolute; right: -12px; top: 132px; }
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
     .bv-ctitle { color: #76a73e; font-size: 12.5px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 5px; }
