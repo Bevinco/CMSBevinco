@@ -233,6 +233,13 @@ const userPermissionOptions = [
 
 const roleOptions = ["Usuario", "Operaciones", "Administrador", "Superadmin"];
 
+const presenceOptions = [
+  { id: "disponible", label: "Disponible" },
+  { id: "ausente", label: "Ausente" },
+  { id: "ocupado", label: "Ocupado" },
+  { id: "no-molestar", label: "No molestar" },
+];
+
 function emptyUserForm() {
   return {
     id: "",
@@ -412,6 +419,10 @@ function App() {
   const [currentUser, setCurrentUser] = useState("");
   const [currentUserInfo, setCurrentUserInfo] = useState<CmsUser | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => (localStorage.getItem("bevinco-theme") === "dark" ? "dark" : "light"));
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [presence, setPresence] = useState(() => localStorage.getItem("bevinco-presence") || "disponible");
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportStatusFilter, setReportStatusFilter] = useState("Todos");
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -1356,7 +1367,15 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSculptureUnitId, selectedClientId, sculptureUnits.length, sculptureDirectoryLoaded]);
 
-  const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
+  const reportRows = useMemo(() => {
+    const query = reportSearch.trim().toLowerCase();
+    return reports.filter((report) => {
+      if (reportStatusFilter !== "Todos" && report.status !== reportStatusFilter) return false;
+      if (!query) return true;
+      const haystack = `${report.client?.name || report.clientId} ${report.period?.label || report.periodId}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [reports, reportSearch, reportStatusFilter]);
   const clickupTasksByStatus = useMemo(() => {
     const groups = new Map<string, ClickupTask[]>();
     clickupTasks.forEach((task) => {
@@ -1484,6 +1503,49 @@ function App() {
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
           {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
+        <div className="sidebar-user">
+          {userMenuOpen ? (
+            <div className="user-menu" role="menu">
+              <p className="user-menu-title">Estado de sesion</p>
+              {presenceOptions.map((option) => (
+                <button
+                  key={option.id}
+                  className="user-menu-item"
+                  onClick={() => {
+                    setPresence(option.id);
+                    localStorage.setItem("bevinco-presence", option.id);
+                    setUserMenuOpen(false);
+                  }}
+                >
+                  <span className={`presence-dot presence-${option.id}`} />
+                  {option.label}
+                  {presence === option.id ? <span className="user-menu-check">✓</span> : null}
+                </button>
+              ))}
+              <div className="user-menu-divider" />
+              <button
+                className="user-menu-item"
+                onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+              >
+                {themeMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+                {themeMode === "dark" ? "Modo claro" : "Modo oscuro"}
+              </button>
+              <button className="user-menu-item" onClick={logout}>
+                <LogOut size={15} /> Cerrar sesion
+              </button>
+            </div>
+          ) : null}
+          <button className="sidebar-user-button" onClick={() => setUserMenuOpen((open) => !open)}>
+            <span className="sidebar-user-avatar">
+              {(currentUserInfo?.name || currentUser || "U").slice(0, 1).toUpperCase()}
+              <span className={`presence-dot presence-badge presence-${presence}`} />
+            </span>
+            <span className="sidebar-user-info">
+              <strong>{currentUserInfo?.name || currentUser}</strong>
+              <small>{presenceOptions.find((option) => option.id === presence)?.label || "Disponible"}</small>
+            </span>
+          </button>
+        </div>
       </aside>
 
       <section className={`workspace workspace-${activeView}`}>
@@ -1491,17 +1553,6 @@ function App() {
           <div>
             <p className="eyebrow">{viewMeta[0]}</p>
             <h1>{viewMeta[1]}</h1>
-          </div>
-          <div className="topbar-actions">
-            <span>{currentUser}</span>
-            <button
-              aria-label={themeMode === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
-              className="icon-button"
-              onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
-            >
-              {themeMode === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            <button className="secondary-button" onClick={logout}><LogOut size={17} /> Salir</button>
           </div>
         </header>
 
@@ -2159,51 +2210,35 @@ function App() {
 
         {activeView === "tasks" ? (
           <section className="tasks-module">
-            {error ? <p className="connector-error">{error}</p> : null}
+            {error ? (
+              <p className="connector-error">
+                {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
+                  ? "ClickUp no esta disponible en este momento. Avisa al administrador."
+                  : error}
+              </p>
+            ) : null}
 
             <section className="panel clickup-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">ClickUp</p>
                   <h2>Pendientes de auditoria y reportes</h2>
+                  <small className="clickup-list-note">
+                    Lista: {clickupMeta.list?.name || "Auditorias Chile"} · {clickupTasks.length} tarea(s)
+                  </small>
                 </div>
                 <div className="action-row wrap-actions">
-                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={loadClickupStatus}>
-                    <RefreshCw size={17} /> Verificar
-                  </button>
                   <button className="secondary-button" disabled={workStatus === "loading"} onClick={() => loadClickupTasks(clickupPage, clickupStatusFilter)}>
-                    <ListChecks size={17} /> Actualizar tareas
+                    <RefreshCw size={17} /> Actualizar
+                  </button>
+                  <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
+                    <Plus size={17} /> Crear tarea del reporte
                   </button>
                 </div>
               </div>
-              <div className="clickup-grid">
-                <article>
-                  <span>Conexion</span>
-                  <strong>{clickupStatus?.connected ? "Conectado" : "Por configurar"}</strong>
-                  <small>
-                    {clickupStatus?.connected
-                      ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"}${isAdminUser(currentUserInfo) ? ` - ${clickupStatus.authSource}` : ""}`
-                      : isAdminUser(currentUserInfo)
-                        ? clickupStatus?.error || "Configura token/lista o conecta OAuth."
-                        : "Aun no esta conectado. Avisa al administrador para activarlo."}
-                  </small>
-                </article>
-                <article>
-                  <span>Lista operativa</span>
-                  <strong>{clickupMeta.list?.name || (clickupStatus?.listIdConfigured ? "Auditorias Chile" : isAdminUser(currentUserInfo) ? "Falta CLICKUP_LIST_ID" : "Por configurar")}</strong>
-                  <small>Los pendientes se leen y crean en esta lista de ClickUp.</small>
-                </article>
-                <article>
-                  <span>Tareas en pagina</span>
-                  <strong>{clickupTasks.length}</strong>
-                  <small>Pagina {clickupPage + 1}. {clickupHasMore ? "Hay mas tareas." : "Ultima pagina o filtro acotado."}</small>
-                </article>
-              </div>
-              <div className="clickup-actions">
-                <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
-                  <Plus size={17} /> Crear tarea del reporte seleccionado
-                </button>
-              </div>
+              {!clickupStatus?.connected ? (
+                <p className="query-note">ClickUp aun no esta conectado. Avisa al administrador para activarlo.</p>
+              ) : null}
             </section>
 
             <section className="panel">
@@ -2360,35 +2395,60 @@ function App() {
         ) : null}
 
         {activeView === "reports" ? (
-        <section className="panel">
-          <div className="panel-header">
+        <section className="panel reports-tray">
+          <div className="reports-toolbar">
             <div>
-              <p className="eyebrow">Guardados</p>
               <h2>Reportes guardados</h2>
+              <small>{reportRows.length} de {reports.length} reportes</small>
             </div>
-            <ClipboardList size={22} />
+            <div className="reports-controls">
+              <input
+                placeholder="Buscar por restaurante o periodo..."
+                value={reportSearch}
+                onChange={(event) => setReportSearch(event.target.value)}
+              />
+              <select value={reportStatusFilter} onChange={(event) => setReportStatusFilter(event.target.value)}>
+                <option value="Todos">Todos los estados</option>
+                <option value="Borrador">Borrador</option>
+                <option value="Listo para revisar">Listo para revisar</option>
+                <option value="Enviado">Enviado</option>
+              </select>
+            </div>
           </div>
-          <p className="muted-copy">Cada reporte generado o editado queda guardado por cliente y periodo. Desde esta bandeja puedes abrirlo, revisarlo y exportarlo como PDF.</p>
-          <div className="report-list">
+          <div className="report-table">
             {reportRows.map((report) => (
-              <button
-                key={report.id}
-                onClick={() => {
-                  setSelectedClientId(report.clientId);
-                  setSelectedPeriodId(report.periodId);
-                  setSelectedReport(report);
-                  setCommentsDraft(report.comments || "");
-                  setEmailDraft(report.emailDraft || "");
-                  setActiveView("module1");
-                }}
-              >
-                <span>
+              <div className="report-row" key={report.id}>
+                <div className="report-row-main">
                   <strong>{report.client?.name || report.clientId}</strong>
                   <small>{report.period?.label || report.periodId}</small>
-                </span>
+                </div>
                 <span className={statusClass(report.status)}>{report.status}</span>
-              </button>
+                <div className="report-row-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setSelectedClientId(report.clientId);
+                      setSelectedPeriodId(report.periodId);
+                      setSelectedReport(report);
+                      setCommentsDraft(report.comments || "");
+                      setEmailDraft(report.emailDraft || "");
+                      setActiveView("module1");
+                    }}
+                  >
+                    Abrir
+                  </button>
+                  <a className="button-link" href={`/api/module1/reports/${report.id}/export`} target="_blank" rel="noreferrer">
+                    <Printer size={15} /> PDF
+                  </a>
+                </div>
+              </div>
             ))}
+            {!reportRows.length ? (
+              <div className="empty-state">
+                <strong>No hay reportes que coincidan</strong>
+                <small>Genera un reporte desde Modulo 1 o ajusta la busqueda.</small>
+              </div>
+            ) : null}
           </div>
         </section>
         ) : null}

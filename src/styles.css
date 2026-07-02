@@ -274,7 +274,139 @@ button:disabled {
   color: #ffffff;
 }
 
+.sidebar-user {
+  margin-top: auto;
+  position: relative;
+}
+
+.sidebar-user-button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  color: #f5faf7;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-user-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-user-avatar {
+  align-items: center;
+  background: var(--sculpture-green);
+  border-radius: 50%;
+  color: #10231f;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  font-weight: 800;
+  height: 36px;
+  justify-content: center;
+  position: relative;
+  width: 36px;
+}
+
+.sidebar-user-info {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sidebar-user-info strong {
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-info small {
+  color: #a8bab4;
+  font-size: 0.72rem;
+}
+
+.presence-dot {
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 9px;
+  width: 9px;
+}
+
+.presence-badge {
+  border: 2px solid var(--sculpture-navy);
+  bottom: -1px;
+  height: 11px;
+  position: absolute;
+  right: -1px;
+  width: 11px;
+}
+
+.presence-disponible { background: #4caf50; }
+.presence-ausente { background: #f0b429; }
+.presence-ocupado { background: #e5484d; }
+.presence-no-molestar { background: #9aa5a1; }
+
+.user-menu {
+  background: #122b26;
+  border: 1px solid #23453d;
+  border-radius: 12px;
+  bottom: calc(100% + 8px);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  z-index: 40;
+}
+
+.user-menu-title {
+  color: #7e948e;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin: 4px 8px 6px;
+  text-transform: uppercase;
+}
+
+.user-menu-item {
+  align-items: center;
+  background: transparent;
+  border-radius: 8px;
+  color: #e7f2ee;
+  display: flex;
+  font-size: 0.84rem;
+  font-weight: 600;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 36px;
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.user-menu-item:hover {
+  background: #1c3a33;
+}
+
+.user-menu-check {
+  color: var(--sculpture-green);
+  margin-left: auto;
+}
+
+.user-menu-divider {
+  background: #23453d;
+  height: 1px;
+  margin: 6px 4px;
+}
+
 .workspace {
+  align-content: start;
   display: grid;
   gap: 22px;
   padding: 28px;
@@ -1438,6 +1570,9 @@ button:disabled {
 .users-view {
   display: grid;
   gap: 14px;
+  margin: 0 auto;
+  max-width: 1080px;
+  width: 100%;
 }
 
 .workspace-users {
@@ -2225,6 +2360,104 @@ button:disabled {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
 
+.reports-tray {
+  display: grid;
+  gap: 14px;
+}
+
+.reports-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.reports-toolbar h2 {
+  margin: 0;
+}
+
+.reports-toolbar small {
+  color: #6f7d79;
+}
+
+.reports-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reports-controls input {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  min-height: 40px;
+  min-width: 260px;
+  padding: 0 12px;
+}
+
+.reports-controls select {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.report-table {
+  display: grid;
+}
+
+.report-row {
+  align-items: center;
+  border-top: 1px solid #edf1f0;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 10px 4px;
+}
+
+.report-row:first-child {
+  border-top: 0;
+}
+
+.report-row:hover {
+  background: #f7faf9;
+}
+
+.report-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.report-row-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-row-main small {
+  color: #6f7d79;
+}
+
+.report-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.report-row-actions .secondary-button,
+.report-row-actions .button-link {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.84rem;
+}
+
+.clickup-list-note {
+  color: #6f7d79;
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
 .actions-bar {
   align-items: center;
   display: flex;
@@ -2827,4 +3060,27 @@ button:disabled {
   .wide-field {
     grid-column: auto;
   }
+}
+
+.user-modal {
+  max-height: 92vh;
+  overflow-y: auto;
+  width: min(560px, 94vw);
+}
+
+.user-modal .permission-editor {
+  display: grid;
+  gap: 6px 18px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.user-modal .permission-editor strong {
+  grid-column: 1 / -1;
+}
+
+.user-modal .toggle-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
 }
