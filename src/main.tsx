@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   BarChart3,
@@ -444,6 +444,7 @@ function App() {
   const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
   const [clientPeriods, setClientPeriods] = useState<SculpturePeriod[]>([]);
   const [clientPeriodsLoading, setClientPeriodsLoading] = useState(false);
+  const periodsRequestRef = useRef(0);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
@@ -954,9 +955,12 @@ function App() {
   }
 
   async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
+    const requestId = ++periodsRequestRef.current;
+    const isCurrent = () => requestId === periodsRequestRef.current;
     const cid = unit?.sculptureCid || unit?.cid || "";
-    if (!cid || !/^d+$/.test(String(cid))) {
-      setClientPeriods([]);
+
+    if (!cid || !/^\d+$/.test(String(cid))) {
+      if (isCurrent()) setClientPeriods([]);
       return;
     }
 
@@ -967,6 +971,7 @@ function App() {
       const payload = await readJson<{ periods: SculpturePeriod[] }>(
         await fetch(`/api/module1/sculpture-units/periods?${params.toString()}`),
       );
+      if (!isCurrent()) return;
       const periods = payload.periods || [];
       setClientPeriods(periods);
       setSelectedPeriodId("");
@@ -979,6 +984,7 @@ function App() {
         setError("Este restaurante no tiene periodos de auditoria disponibles en Sculpture.");
       }
     } catch (periodsError) {
+      if (!isCurrent()) return;
       setClientPeriods([]);
       setError(
         periodsError instanceof Error && isAdminUser(currentUserInfo)
@@ -986,7 +992,7 @@ function App() {
           : "No se pudieron traer los periodos de este restaurante. Intenta de nuevo en unos segundos.",
       );
     } finally {
-      setClientPeriodsLoading(false);
+      if (isCurrent()) setClientPeriodsLoading(false);
     }
   }
 
@@ -1343,11 +1349,12 @@ function App() {
   useEffect(() => {
     const unit =
       sculptureUnits.find((item) => item.id === selectedSculptureUnitId) ||
-      clients.find((client) => client.id === selectedClientId) ||
+      (sculptureDirectoryLoaded ? clients.find((client) => client.id === selectedClientId) : null) ||
       null;
+    if (!unit && !sculptureDirectoryLoaded) return;
     loadClientPeriods(unit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSculptureUnitId, selectedClientId, sculptureUnits.length]);
+  }, [selectedSculptureUnitId, selectedClientId, sculptureUnits.length, sculptureDirectoryLoaded]);
 
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const clickupTasksByStatus = useMemo(() => {
