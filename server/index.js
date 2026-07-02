@@ -29,6 +29,12 @@ function loadLocalEnvFile() {
 
 loadLocalEnvFile();
 
+// Timeout global para todas las llamadas salientes (Sculpture puede quedarse
+// colgado sin responder y sin esto la peticion del CMS nunca termina).
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = (input, init = {}) =>
+  nativeFetch(input, { signal: init.signal || AbortSignal.timeout(45000), ...init });
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -1029,7 +1035,7 @@ function aggregateByFamily(entries) {
 // duplicaria el monto de la familia.
 function dropParentTotals(entries) {
   const kept = [...entries];
-  const tolerance = (value) => Math.max(3, Math.abs(value) * 0.01);
+  const tolerance = (value) => Math.max(2, Math.abs(value) * 0.002);
   let changed = true;
   while (changed) {
     changed = false;
@@ -1733,7 +1739,8 @@ function extractReportMetrics(parsedTable) {
   const categoryMap = new Map();
   const categoryPercentMap = new Map();
   const products = [];
-  let currentCategory = "Sin categoria";
+  const pendingProducts = [];
+  let currentCategory = "";
   let revenue = 0;
   let usedCost = 0;
   let soldCost = 0;
@@ -1742,28 +1749,22 @@ function extractReportMetrics(parsedTable) {
   let inventoryCost = 0;
   let purchasedCost = 0;
   let grandSummary = null;
-  const categoryPurchases = new Map();
-  const usageProducts = [];
 
   rows.forEach((row) => {
     const values = row.values || [];
     const itemName = pickRecordValue(row.record, ["itemName", "item", "product", "productName", "producto", "nombreArticulo", "nombreArtículo", "nombreArtCulo"], values[0] || "");
     const isGrandTotal = /grand\s+total/i.test(itemName);
-    const isCategoryTotal = isTotalRow(itemName) || /^total\s+/i.test(itemName) || /:\s*$/.test(itemName);
-    const isTotal = isGrandTotal || isCategoryTotal;
-    const category = isTotal
-      ? cleanTotalName(itemName)
-      : row.group || pickRecordValue(row.record, ["category", "categoria", "categorA"], currentCategory);
-    const varianceValue =
-      pickRecordValue(row.record, [
-        "variance",
-        "varianceAmount",
-        "difference",
-        "extendedDifference",
-        "diferenciaCosto",
-        "ahorroFaltanteCosto",
-        "faltanteCosto",
-      ]) || "0";
+    const isCategoryRow = isTotalRow(itemName) || /^total\s+/i.test(itemName) || /:\s*$/.test(itemName);
+    const category = isCategoryRow ? cleanTotalName(itemName) : "";
+    const varianceValue = pickRecordValue(row.record, [
+      "variance",
+      "varianceAmount",
+      "difference",
+      "extendedDifference",
+      "diferenciaCosto",
+      "ahorroFaltanteCosto",
+      "faltanteCosto",
+    ]) || "0";
     const amount = parseNumber(varianceValue);
     const percentValue =
       pickRecordValue(row.record, ["variancePercent", "differencePercent", "diferencia", "diferenciaPct", "porcentajeDiferencia"]) ||
@@ -1775,6 +1776,7 @@ function extractReportMetrics(parsedTable) {
     const rowWasteCost = parseNumber(pickRecordValue(row.record, ["wasteCost", "desperdicioCosto", "mermaCosto"]));
     const rowInventoryCost = parseNumber(pickRecordValue(row.record, ["inventoryCost", "existenciaCosto", "stockCosto"]));
     const rowPurchasedCost = parseNumber(pickRecordValue(row.record, ["purchasedCost", "comprasCosto", "compraCosto"]));
+    const rowHasNumbers = Boolean(rowRevenue || rowUsedCost || rowSoldCost || amount || rowInventoryCost || rowPurchasedCost);
 
     if (isGrandTotal) {
       grandSummary = {
@@ -1787,42 +1789,46 @@ function extractReportMetrics(parsedTable) {
       return;
     }
 
-    if (isCategoryTotal) currentCategory = category || currentCategory;
-
-    if (!isTotal) {
-      revenue += rowRevenue;
-      usedCost += rowUsedCost;
-      soldCost += rowSoldCost;
-      varianceTotal += amount;
-      wasteCost += rowWasteCost;
-      inventoryCost += rowInventoryCost;
-      purchasedCost += rowPurchasedCost;
+    if (isCategoryRow) {
+      if (!rowHasNumbers) {
+        // Encabezado de subcategoria (ej. cocina: "Pollo:" antes de sus
+        // productos): define la categoria de las filas que siguen.
+        currentCategory = category;
+      } else {
+        // Total de cierre (ej. "Total Pollo:"): asigna la categoria a los
+        // productos que quedaron pendientes (bebidas: productos primero,
+        // total despues) y registra el total para la lista de categorias.
+        pendingProducts.forEach((product) => {
+          if (!product.category) product.category = category;
+        });
+        pendingProducts.length = 0;
+        categoryMap.set(category, amount);
+        categoryPercentMap.set(category, parseNumber(percentValue));
+        currentCategory = "";
+      }
+      return;
     }
 
-    if (itemName && !isTotal) {
-      products.push({
+    revenue += rowRevenue;
+    usedCost += rowUsedCost;
+    soldCost += rowSoldCost;
+    varianceTotal += amount;
+    wasteCost += rowWasteCost;
+    inventoryCost += rowInventoryCost;
+    purchasedCost += rowPurchasedCost;
+
+    if (itemName) {
+      const product = {
         name: itemName,
-        category,
+        category: currentCategory || "",
         varianceAmount: amount,
         variancePercent: parseNumber(percentValue),
-      });
-      if (rowUsedCost) {
-        usageProducts.push({
-          name: itemName,
-          usedCost: rowUsedCost,
-          varianceAmount: amount,
-          variancePercent: parseNumber(percentValue),
-          realCostPercent: rowCostPercent,
-        });
-      }
-    }
-
-    if (isCategoryTotal) {
-      categoryMap.set(category, amount);
-      categoryPercentMap.set(category, parseNumber(percentValue));
-      categoryPurchases.set(category, rowPurchasedCost);
-    } else {
-      categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
+        usedCost: rowUsedCost,
+        realCostPercent: rowCostPercent,
+        purchasedCost: rowPurchasedCost,
+      };
+      products.push(product);
+      if (!product.category) pendingProducts.push(product);
     }
   });
 
@@ -1831,6 +1837,16 @@ function extractReportMetrics(parsedTable) {
     amount,
     percent: categoryPercentMap.get(category) || 0,
   }));
+
+  // Familias agregadas desde los PRODUCTOS (no desde los totales): los
+  // totales incluyen filas "padre" anidadas que duplicaban montos, y desde
+  // productos la suma cuadra exacta con el variance total.
+  const productEntries = products
+    .filter((product) => product.varianceAmount)
+    .map((product) => ({ category: product.category || "Sin categoria", value: product.varianceAmount }));
+  const purchaseEntries = products
+    .filter((product) => product.purchasedCost)
+    .map((product) => ({ category: product.category || "Sin categoria", value: product.purchasedCost }));
 
   const extras = {
     usedCost,
@@ -1852,13 +1868,12 @@ function extractReportMetrics(parsedTable) {
           varianceAmount: varianceTotal,
         },
     categoryVariances: categoryVariances.slice(0, 8),
-    familyVariances: aggregateReportGroups(
-      categoryVariances.map((item) => ({ category: item.category, value: item.amount })),
-    ).map(({ family, value }) => ({ family, amount: value })),
-    familyPurchases: aggregateReportGroups(
-      [...categoryPurchases.entries()].map(([category, value]) => ({ category, value })),
-    ).map(({ family, value }) => ({ family, purchased: value })),
-    topUsageProducts: usageProducts.sort((left, right) => right.usedCost - left.usedCost).slice(0, 10),
+    familyVariances: aggregateReportGroups(productEntries).map(({ family, value }) => ({ family, amount: value })),
+    familyPurchases: aggregateReportGroups(purchaseEntries).map(({ family, value }) => ({ family, purchased: value })),
+    topUsageProducts: products
+      .filter((product) => product.usedCost > 0)
+      .sort((left, right) => right.usedCost - left.usedCost)
+      .slice(0, 10),
     topProducts: products
       .filter((item) => item.varianceAmount || item.variancePercent)
       .sort((left, right) => Math.abs(right.varianceAmount) - Math.abs(left.varianceAmount))
@@ -2591,19 +2606,27 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           report.summary = merged;
         }
         // Solo el variance DETAILED define categorias, familias y productos:
-        // el summary tiene otra estructura de filas y duplicaba los montos.
-        if (type === "varianceDetailed" || !report.categoryVariances?.length) {
+        // el summary tiene otra estructura de filas y duplicaba o vaciaba montos.
+        if (type === "varianceDetailed") {
           if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
           if (metrics.familyVariances?.some((item) => item.amount)) report.familyVariances = metrics.familyVariances;
           if (metrics.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = metrics.familyPurchases;
-        }
-        if (type === "varianceDetailed" || !report.topProducts?.length) {
           if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
           if (metrics.topUsageProducts?.length) report.topUsageProducts = metrics.topUsageProducts;
         }
         if (type === "varianceDetailed") {
           const purchaseActuals = extractPurchaseActuals(data);
           if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
+          if (!data.rows?.length) {
+            // Sin filas para este periodo: limpiar restos de sincronizaciones
+            // anteriores para no mostrar datos que no corresponden.
+            report.topProducts = [];
+            report.topUsageProducts = [];
+            report.categoryVariances = [];
+            report.familyVariances = [];
+            report.familyPurchases = [];
+            report.summary = { revenue: 0, costPercent: 0, idealCostPercent: 0, variancePercent: 0, varianceAmount: 0, usedCost: 0, soldCost: 0, wasteCost: 0, inventoryCost: 0, purchasedCost: 0 };
+          }
         }
       }
 
@@ -2652,6 +2675,15 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       };
       report.sourceStatus[type] = "Por revisar";
     }
+  }
+
+  if (!(report.summary?.revenue > 0)) {
+    // Periodo sin ventas: no dejar listas residuales de sincronizaciones viejas.
+    report.topProducts = [];
+    report.topUsageProducts = [];
+    report.categoryVariances = [];
+    report.familyVariances = [];
+    report.familyPurchases = [];
   }
 
   report.updatedAt = new Date().toISOString();
@@ -4520,6 +4552,51 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     });
     syncResultsByPeriod[period.id] = syncResults;
     queriedReports.push(buildReportPayload(store, report));
+  }
+
+  // Si se uso el periodo por defecto (el mas reciente) y vino sin ventas, es
+  // el periodo ABIERTO de la semana en curso: se cae automaticamente al
+  // periodo cerrado anterior (hasta 3 intentos).
+  const usedDefaultPeriod = !requestedPeriodIds.length && !fromMonth && !toMonth && !periodId;
+  if (usedDefaultPeriod && queriedReports.length === 1 && !(queriedReports[0].summary?.revenue > 0) && sculptureClientPeriods.length) {
+    const orderedAll = [...sculptureClientPeriods].sort((left, right) =>
+      String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)),
+    );
+    const startIndex = orderedAll.findIndex((period) => period.id === selectedPeriods[0].id);
+    for (const candidate of orderedAll.slice(startIndex + 1, startIndex + 4)) {
+      const period = ensurePeriod(store, candidate);
+      if (!period) continue;
+      const stored = store.reports.find(
+        (item) => item.clientId === client.id && item.periodId === period.id,
+      );
+      const storedComplete = stored?.summary?.revenue > 0 && stored?.summary?.usedCost > 0 && (stored?.topUsageProducts || []).length;
+      if (storedComplete) {
+        selectedPeriods.length = 0;
+        selectedPeriods.push(period);
+        queriedReports.length = 0;
+        queriedReports.push(buildReportPayload(store, stored));
+        break;
+      }
+      const report = reportForClientPeriod(store, client.id, period.id);
+      let syncResults;
+      try {
+        syncResults = await syncSculptureSources(store, report, {
+          cid: sculptureCid,
+          pid: period.sculpturePid || period.pid,
+          area: client.area,
+        });
+      } catch {
+        continue;
+      }
+      if (report.summary?.revenue > 0) {
+        selectedPeriods.length = 0;
+        selectedPeriods.push(period);
+        queriedReports.length = 0;
+        queriedReports.push(buildReportPayload(store, report));
+        syncResultsByPeriod[period.id] = syncResults;
+        break;
+      }
+    }
   }
 
   // El grafico historico compara las ultimas 4 semanas con datos REALES: si
