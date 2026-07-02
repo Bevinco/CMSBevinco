@@ -464,8 +464,10 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl) {
 }
 
 async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodBaseUrl } = {}) {
-  if (!forceLogin && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
+  // La cache guarda cookies de logins recientes; tiene prioridad sobre la
+  // cookie fija del entorno, que puede haber vencido.
   if (!forceLogin && sculptureSessionCookieCache.get(baseUrl)) return sculptureSessionCookieCache.get(baseUrl);
+  if (!forceLogin && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
 
   const cookie = await fetchSculptureLoginCookie(baseUrl);
   if (cookie) return cookie;
@@ -686,6 +688,20 @@ async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
 }
 
 async function activateSculptureContext({ baseUrl, cid, pid = "", cookie }) {
+  try {
+    return await activateSculptureContextOnce({ baseUrl, cid, pid, cookie });
+  } catch (error) {
+    // La cookie de sesion (env o cache) puede estar vencida: reintentar una
+    // vez con login fresco, igual que hace fetchSculpturePage.
+    if (!cookie && sculptureUsername && sculpturePassword) {
+      const freshCookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+      return activateSculptureContextOnce({ baseUrl, cid, pid, cookie: freshCookie });
+    }
+    throw error;
+  }
+}
+
+async function activateSculptureContextOnce({ baseUrl, cid, pid = "", cookie }) {
   let sessionCookie = cookie || (await getSculptureCookie({ baseUrl }));
   let referer = `${baseUrl}/`;
 

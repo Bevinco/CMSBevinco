@@ -975,8 +975,16 @@ function App() {
         setFromMonth(latestMonth);
         setToMonth(latestMonth);
       }
-    } catch {
+      if (!periods.length) {
+        setError("Este restaurante no tiene periodos de auditoria disponibles en Sculpture.");
+      }
+    } catch (periodsError) {
       setClientPeriods([]);
+      setError(
+        periodsError instanceof Error && isAdminUser(currentUserInfo)
+          ? `No se pudieron traer los periodos: ${periodsError.message}`
+          : "No se pudieron traer los periodos de este restaurante. Intenta de nuevo en unos segundos.",
+      );
     } finally {
       setClientPeriodsLoading(false);
     }
@@ -1425,6 +1433,7 @@ function App() {
   const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
   const maxProductVariance = Math.max(...(selectedReport?.topProducts.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const selectedClient = clients.find((client) => client.id === selectedClientId) || selectedReport?.client || null;
+  const selectedUnitInfo = sculptureUnits.find((item) => item.id === selectedSculptureUnitId) || null;
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
@@ -1657,26 +1666,26 @@ function App() {
             <div className="unit-summary">
               <article>
                 <span>Cliente</span>
-                <strong>{clientAccountLabel(selectedClient)}</strong>
+                <strong>{selectedUnitInfo?.accountName || clientAccountLabel(selectedClient)}</strong>
               </article>
               <article>
                 <span>Unidad / modulo</span>
-                <strong>{clientUnitLabel(selectedClient)}</strong>
+                <strong>{selectedUnitInfo?.moduleName || clientUnitLabel(selectedClient)}</strong>
               </article>
               {isAdminUser(currentUserInfo) ? (
                 <article>
                   <span>Sculpture CID</span>
-                  <strong>{selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
+                  <strong>{selectedUnitInfo?.sculptureCid || selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
                 </article>
               ) : null}
               <article>
                 <span>Area</span>
-                <strong>{selectedClient?.area || "Food"}</strong>
+                <strong>{selectedUnitInfo?.area || selectedClient?.area || "Food"}</strong>
               </article>
               {isAdminUser(currentUserInfo) ? (
                 <article>
                   <span>Origen</span>
-                  <strong>{selectedClient?.sculptureBaseUrl?.includes("beverage") ? "Beverage" : "Food"}</strong>
+                  <strong>{(selectedUnitInfo?.baseUrl || selectedClient?.sculptureBaseUrl || "").includes("beverage") ? "Beverage" : "Food"}</strong>
                 </article>
               ) : null}
             </div>
