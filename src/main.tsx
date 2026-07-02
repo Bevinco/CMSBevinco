@@ -1598,24 +1598,36 @@ function App() {
 
             <section className="dashboard-kpis" aria-label="Resumen operativo">
               <button className="kpi-card" onClick={() => { setReportStatusFilter("Todos"); navigateTo("reports"); }}>
-                <span><FileText size={17} /> Reportes</span>
-                <strong>{reports.length}</strong>
-                <small>{dashboardSummary.sentReports.length} enviados</small>
+                <span className="kpi-icon"><FileText size={18} /></span>
+                <span className="kpi-body">
+                  <small className="kpi-label">Reportes</small>
+                  <strong>{reports.length}</strong>
+                  <small className="kpi-sub">{dashboardSummary.sentReports.length} enviados</small>
+                </span>
               </button>
               <button className="kpi-card" onClick={() => navigateTo("module1")}>
-                <span><Cloud size={17} /> Datos por revisar</span>
-                <strong>{dashboardSummary.blockedReports.length}</strong>
-                <small>Faltan datos de la auditoria</small>
+                <span className="kpi-icon kpi-icon-warn"><Cloud size={18} /></span>
+                <span className="kpi-body">
+                  <small className="kpi-label">Datos por revisar</small>
+                  <strong>{dashboardSummary.blockedReports.length}</strong>
+                  <small className="kpi-sub">Faltan datos de la auditoria</small>
+                </span>
               </button>
               <button className="kpi-card" onClick={() => { setReportStatusFilter("Listo para revisar"); navigateTo("reports"); }}>
-                <span><PencilLine size={17} /> En revision</span>
-                <strong>{dashboardSummary.readyReports.length}</strong>
-                <small>{dashboardSummary.draftReports.length} borradores</small>
+                <span className="kpi-icon kpi-icon-info"><PencilLine size={18} /></span>
+                <span className="kpi-body">
+                  <small className="kpi-label">En revision</small>
+                  <strong>{dashboardSummary.readyReports.length}</strong>
+                  <small className="kpi-sub">{dashboardSummary.draftReports.length} borradores</small>
+                </span>
               </button>
               <button className="kpi-card" onClick={() => navigateTo("tasks")}>
-                <span><ListChecks size={17} /> ClickUp</span>
-                <strong>{clickupTasks.length}</strong>
-                <small>{clickupStatus?.connected ? "Conectado" : "Sin conexion visible"}</small>
+                <span className="kpi-icon kpi-icon-teal"><ListChecks size={18} /></span>
+                <span className="kpi-body">
+                  <small className="kpi-label">ClickUp</small>
+                  <strong>{clickupTasks.length}</strong>
+                  <small className="kpi-sub">{clickupStatus?.connected ? "Conectado" : "Sin conexion"}</small>
+                </span>
               </button>
             </section>
 

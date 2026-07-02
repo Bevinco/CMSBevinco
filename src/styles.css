@@ -1383,7 +1383,7 @@ button:disabled {
   padding: 14px;
 }
 
-.dashboard-kpis span {
+.dashboard-kpis article span {
   align-items: center;
   color: #46605a;
   display: flex;
@@ -1393,13 +1393,13 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.dashboard-kpis strong {
+.dashboard-kpis article strong {
   color: #172026;
   font-size: 2rem;
   line-height: 1;
 }
 
-.dashboard-kpis small {
+.dashboard-kpis article small {
   color: #6f7d79;
   font-size: 0.8rem;
 }
@@ -3088,42 +3088,67 @@ button:disabled {
 
 /* ===== KPIs clicables ===== */
 .dashboard-kpis .kpi-card {
+  align-items: center;
   background: #ffffff;
   border: 1px solid #dce4e2;
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: 0 10px 26px rgba(16, 32, 29, 0.045);
   cursor: pointer;
-  display: grid;
-  gap: 10px;
-  justify-items: start;
-  padding: 16px;
+  display: flex;
+  gap: 14px;
+  justify-content: flex-start;
+  padding: 14px 16px;
   text-align: left;
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.kpi-icon {
+  align-items: center;
+  background: #eaf3df;
+  border-radius: 10px;
+  color: #54803a;
+  display: flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.kpi-icon-warn { background: #fdf1dc; color: #a8752a; }
+.kpi-icon-info { background: #e3edf6; color: #2e5d8c; }
+.kpi-icon-teal { background: #e4f2f0; color: #3d7d76; }
+
+.kpi-body {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.kpi-label {
+  color: #46605a;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.kpi-body strong {
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
+.kpi-sub {
+  color: #6f7d79;
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-kpis .kpi-card:hover {
   border-color: var(--sculpture-green);
   box-shadow: 0 14px 30px rgba(16, 32, 29, 0.1);
   transform: translateY(-2px);
-}
-
-.dashboard-kpis .kpi-card span {
-  align-items: center;
-  color: #46605a;
-  display: flex;
-  font-size: 0.78rem;
-  font-weight: 700;
-  gap: 8px;
-}
-
-.dashboard-kpis .kpi-card strong {
-  font-size: 1.55rem;
-  line-height: 1.1;
-}
-
-.dashboard-kpis .kpi-card small {
-  color: #6f7d79;
-  font-size: 0.8rem;
 }
 
 /* ===== Toasts ===== */
@@ -3377,3 +3402,10 @@ button:disabled {
   background-size: 200% 100%;
 }
 :root[data-theme="dark"] .collapsible-panel summary::after { color: var(--text-muted); }
+
+:root[data-theme="dark"] .kpi-icon { background: #1d3a26; color: #a4ce7c; }
+:root[data-theme="dark"] .kpi-icon-warn { background: #3a2f14; color: #e3b869; }
+:root[data-theme="dark"] .kpi-icon-info { background: #14293c; color: #86b4dd; }
+:root[data-theme="dark"] .kpi-icon-teal { background: #12332f; color: #7cc4bb; }
+:root[data-theme="dark"] .kpi-label { color: var(--text-muted); }
+:root[data-theme="dark"] .kpi-sub { color: var(--text-muted); }

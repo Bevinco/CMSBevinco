@@ -856,7 +856,17 @@ async function ensureStore() {
 async function readStore() {
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
-  const store = JSON.parse(raw);
+  let store;
+  try {
+    store = JSON.parse(raw);
+  } catch {
+    // Archivo corrupto (corte a mitad de escritura): respaldar y reconstruir
+    // con las muestras en lugar de tumbar todas las peticiones.
+    await fs.rename(moduleStorePath, `${moduleStorePath}.corrupt-${Date.now()}`).catch(() => {});
+    const rebuilt = await buildStoreFromSamples();
+    await fs.writeFile(moduleStorePath, JSON.stringify(rebuilt, null, 2));
+    store = rebuilt;
+  }
   store.clients ||= [];
   store.periods ||= [];
   store.reports ||= [];
@@ -869,7 +879,11 @@ async function readStore() {
 
 async function writeStore(store) {
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(moduleStorePath, JSON.stringify(store, null, 2));
+  // Escritura atomica: evita que una lectura concurrente (o un reinicio a
+  // mitad de escritura) vea el JSON truncado.
+  const tempPath = `${moduleStorePath}.tmp`;
+  await fs.writeFile(tempPath, JSON.stringify(store, null, 2));
+  await fs.rename(tempPath, moduleStorePath);
 }
 
 function findReport(store, reportId) {
