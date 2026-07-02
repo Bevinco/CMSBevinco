@@ -3687,3 +3687,225 @@ button:disabled {
 :root[data-theme="dark"] .tone-brand header { background: #14293c; }
 :root[data-theme="dark"] .fig-pos { color: #9fd07c; }
 :root[data-theme="dark"] .fig-neg { color: #f0938a; }
+
+/* ============================================================
+   PASADA PREMIUM GLOBAL
+   ============================================================ */
+
+/* Radios mas suaves en todas las superficies */
+.panel,
+.metrics article,
+.reservation-card,
+.dashboard-hero,
+.dashboard-kpis .kpi-card {
+  border-radius: 14px;
+}
+
+/* Iconos de cabecera de panel: capsula tintada de marca */
+.panel-header > svg {
+  background: #e9f3f1;
+  border-radius: 10px;
+  box-sizing: content-box;
+  color: #3d7d76;
+  flex: 0 0 auto;
+  padding: 8px;
+}
+
+/* Boton primario con gradiente y elevacion */
+.primary-button {
+  background: linear-gradient(135deg, #0a5a8f 0%, #054372 100%);
+  box-shadow: 0 6px 16px rgba(5, 67, 114, 0.28);
+  transition: box-shadow 150ms ease, transform 150ms ease, filter 150ms ease;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0a5a8f 0%, #054372 100%);
+  box-shadow: 0 10px 22px rgba(5, 67, 114, 0.36);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.primary-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Seleccion de texto y scrollbars de marca */
+::selection {
+  background: rgba(144, 191, 79, 0.35);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #b9c9c4 transparent;
+}
+
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #b9c9c4;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #96aca6;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Sidebar: item activo con barra de acento */
+.nav-list button.active {
+  box-shadow: inset 3px 0 0 var(--sculpture-green);
+}
+
+/* Hero del dashboard con firma de marca */
+.dashboard-hero {
+  overflow: hidden;
+  position: relative;
+}
+
+.dashboard-hero::before {
+  background: linear-gradient(90deg, #054372 0%, #90bf4f 55%, #8bc6c1 100%);
+  content: "";
+  height: 4px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.dashboard-hero::after {
+  background: radial-gradient(circle, rgba(139, 198, 193, 0.18) 0%, transparent 70%);
+  border-radius: 50%;
+  content: "";
+  height: 340px;
+  pointer-events: none;
+  position: absolute;
+  right: -80px;
+  top: -140px;
+  width: 340px;
+}
+
+/* Lista de atencion: tarjetas con acento de estado */
+.attention-list article,
+.attention-list button {
+  background: #ffffff;
+  border: 1px solid #e4eae8;
+  border-left: 3px solid #e8b64c;
+  border-radius: 10px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.attention-list article:hover,
+.attention-list button:hover {
+  box-shadow: 0 10px 22px rgba(16, 32, 29, 0.09);
+  transform: translateX(2px);
+}
+
+/* Metricas del modulo: icono en capsula */
+.metrics span svg {
+  background: #e4f2f0;
+  border-radius: 9px;
+  box-sizing: content-box;
+  color: #3d7d76;
+  padding: 6px;
+}
+
+/* Resumen de unidad: acento lateral */
+.unit-summary article {
+  border-left: 3px solid #8bc6c1;
+}
+
+/* Filas de variacion: hover sutil */
+.variance-chart article {
+  border-radius: 10px;
+  padding: 8px 10px;
+  transition: background 130ms ease;
+}
+
+.variance-chart article:hover {
+  background: #f6faf9;
+}
+
+/* Sugerencias de compra: tarjetas con hover */
+.purchase-grid article {
+  border-radius: 12px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.purchase-grid article:hover {
+  border-color: #b9d9d5;
+  box-shadow: 0 10px 22px rgba(16, 32, 29, 0.07);
+}
+
+/* Login: firma de marca */
+.login-panel {
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+}
+
+.login-panel::before {
+  background: linear-gradient(90deg, #054372 0%, #90bf4f 55%, #8bc6c1 100%);
+  content: "";
+  height: 4px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+/* Textareas del resumen ejecutivo */
+.draft-panel textarea,
+.panel textarea {
+  border-radius: 10px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.panel textarea:focus {
+  border-color: var(--sculpture-green);
+  box-shadow: 0 0 0 3px rgba(144, 191, 79, 0.2);
+  outline: none;
+}
+
+/* Modo oscuro para la pasada premium */
+:root[data-theme="dark"] .panel-header > svg {
+  background: #14302c;
+  color: #7cc4bb;
+}
+
+:root[data-theme="dark"] .metrics span svg {
+  background: #14302c;
+  color: #7cc4bb;
+}
+
+:root[data-theme="dark"] .attention-list article,
+:root[data-theme="dark"] .attention-list button {
+  background: var(--surface-soft);
+  border-color: var(--line-soft);
+  border-left-color: #c99b35;
+}
+
+:root[data-theme="dark"] .dashboard-hero {
+  background: linear-gradient(135deg, var(--surface) 0%, #182b26 100%);
+}
+
+:root[data-theme="dark"] .variance-chart article:hover {
+  background: var(--surface-soft);
+}
+
+:root[data-theme="dark"] * {
+  scrollbar-color: #33473f transparent;
+}
+
+:root[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background: #33473f;
+}
+
+:root[data-theme="dark"] .unit-summary article {
+  border-left-color: #3d7d76;
+}
