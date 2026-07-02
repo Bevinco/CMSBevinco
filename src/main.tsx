@@ -26,7 +26,6 @@ import {
   Upload,
   Users,
   ShoppingCart,
-  Workflow,
   X,
 } from "lucide-react";
 import "./styles.css";
@@ -222,100 +221,6 @@ type CmsUser = {
   updatedAt?: string;
 };
 
-const reportWorkflow = [
-  {
-    icon: Database,
-    title: "Sincronizar datos",
-    detail: "Traer datos semanales desde Sculpture por cliente, periodo y tipo de reporte.",
-  },
-  {
-    icon: BarChart3,
-    title: "Variance Report",
-    detail: "Leer food cost / pour cost, variaciones por producto y resumen por categoria.",
-  },
-  {
-    icon: ShoppingCart,
-    title: "Intelipar",
-    detail: "Obtener sugerencia de compra y revisar proveedores o datos desactualizados.",
-  },
-  {
-    icon: Bot,
-    title: "Dashboard semanal",
-    detail: "Mantener graficos consistentes con comparacion de los ultimos cuatro periodos.",
-  },
-  {
-    icon: Send,
-    title: "Revision y envio",
-    detail: "Editar comentarios, preparar correo, PDF adjunto y registro de estado.",
-  },
-];
-
-const moduleOneProcess = [
-  {
-    title: "1. Auditoria semanal",
-    detail: "El cliente o equipo Bevinco toma inventario en Sculpture y se cierra el periodo semanal.",
-    status: "Origen",
-  },
-  {
-    title: "2. Variance Report",
-    detail: "Se obtiene el detalle y resumen de diferencias, ingresos, costo real e ideal.",
-    status: "Datos cargados",
-  },
-  {
-    title: "3. Intelipar",
-    detail: "Se revisa sugerencia de compra, stock, par, orden, proveedor y excesos.",
-    status: "Datos cargados",
-  },
-  {
-    title: "4. Reporte Bevinco",
-    detail: "Se arma el resumen semanal con historico de 4 periodos, categorias y top productos.",
-    status: "En CMS",
-  },
-  {
-    title: "5. Revision humana",
-    detail: "Se editan comentarios, se validan proveedores y se marca como listo para revisar.",
-    status: "En CMS",
-  },
-  {
-    title: "6. Envio al cliente",
-    detail: "Se exporta PDF y se prepara email con registro de estado enviado.",
-    status: "Preparado",
-  },
-];
-
-const moduleOneChecklist = [
-  {
-    title: "Datos semanales cargados",
-    detail: "Variance e Intelipar ya alimentan el reporte seleccionado.",
-    status: "Listo",
-  },
-  {
-    title: "Cliente y periodo seleccionados",
-    detail: "El equipo puede cambiar entre clientes, barra/cocina y semana auditada.",
-    status: "Listo",
-  },
-  {
-    title: "Comentarios revisables",
-    detail: "El comentario ejecutivo queda editable antes del envio.",
-    status: "Listo",
-  },
-  {
-    title: "PDF preparado",
-    detail: "El reporte se puede abrir e imprimir como PDF con formato ejecutivo.",
-    status: "Listo",
-  },
-  {
-    title: "Envio al cliente",
-    detail: "El equipo prepara el email y registra el estado del reporte.",
-    status: "Preparado",
-  },
-  {
-    title: "Validacion de proveedores",
-    detail: "Las sugerencias de compra quedan visibles para revisar proveedor, stock y orden antes del envio.",
-    status: "Por revisar",
-  },
-];
-
 const userPermissionOptions = [
   { id: "dashboard", label: "Inicio" },
   { id: "module1", label: "Modulo 1" },
@@ -348,11 +253,11 @@ function isSystemUser(user: CmsUser) {
   return user.id === "env-superadmin" || user.source === "env";
 }
 
-function taskStatusClass(status: string) {
-  if (status === "Por revisar") return "task-status pending";
-  if (status === "En curso") return "task-status working";
-  if (status === "Preparado") return "task-status prepared";
-  return "task-status done";
+// Los detalles tecnicos (CSV manual, OAuth, CID, diagnosticos de conexion)
+// solo se muestran a roles administradores; el resto ve la vista de negocio.
+function isAdminUser(user: CmsUser | null) {
+  if (!user) return true;
+  return user.role === "Superadmin" || user.role === "Administrador";
 }
 
 const sourceLabels: Record<string, string> = {
@@ -392,8 +297,8 @@ function syncStatusMessage(syncResults: SyncResults = {}) {
     .map(([source]) => sourceLabels[source] || source);
 
   return failed.length
-    ? `Sculpture respondio ${synced} fuente(s). Por revisar: ${failed.join(", ")}.`
-    : "Datos traidos desde Sculpture correctamente.";
+    ? `Se actualizaron ${synced} de ${entries.length} datos. Por revisar: ${failed.join(", ")}.`
+    : "Datos de la auditoria actualizados correctamente.";
 }
 
 function money(value: number) {
@@ -937,7 +842,7 @@ function App() {
       setSelectedClientId(payload.client.id);
       setNewUnit({ accountName, moduleName: "", area: "Food", sculptureCid: "", recipients: "" });
       await loadSelectedReport(payload.client.id, selectedPeriodId);
-      setError(`Unidad creada: ${clientDisplayName(payload.client)}. Ahora puedes cargar CSV o sincronizar Sculpture.`);
+      setError(`Unidad creada: ${clientDisplayName(payload.client)}. Ya puedes generar su reporte.`);
       setWorkStatus("ready");
     } catch (unitError) {
       setError(unitError instanceof Error ? unitError.message : "Error desconocido.");
@@ -996,7 +901,9 @@ function App() {
         setError(
           units.length
             ? `Lista actualizada: ${units.length} restaurante(s) y ${periodsFromSculpture.length} periodo(s) disponibles.`
-            : "No se detectaron restaurantes en Sculpture. Revisa credenciales, cookie o permisos de la cuenta.",
+            : isAdminUser(currentUserInfo)
+              ? "No se detectaron restaurantes en Sculpture. Revisa credenciales, cookie o permisos de la cuenta."
+              : "No pudimos traer la lista de restaurantes. Avisa al administrador.",
         );
       }
       setWorkStatus(units.length ? "ready" : "error");
@@ -1041,7 +948,7 @@ function App() {
       setSelectedPeriodId(payload.selectedReport.periodId);
       setCommentsDraft(payload.selectedReport.comments || "");
       setEmailDraft(payload.selectedReport.emailDraft || "");
-      setError(`Unidad agregada: ${clientDisplayName(payload.client)}. Ahora sincroniza las fuentes del periodo.`);
+      setError(`Unidad agregada: ${clientDisplayName(payload.client)}. Ya puedes generar su reporte.`);
       setWorkStatus("ready");
     } catch (unitError) {
       setError(unitError instanceof Error ? unitError.message : "No se pudo agregar la unidad de Sculpture.");
@@ -1073,7 +980,7 @@ function App() {
     }
 
     setWorkStatus("loading");
-    setError("Consultando reportes directamente en Sculpture...");
+    setError("Trayendo los datos de la auditoria...");
 
     try {
       const payload = await readJson<SculptureQueryPayload>(
@@ -1097,19 +1004,27 @@ function App() {
       const syncSummary = summarizeSculptureSync(payload.syncResultsByPeriod);
 
       if (count && syncSummary.rowsCount) {
-        setError(`Consulta lista: ${count} reporte(s) actualizados desde Sculpture con ${syncSummary.rowsCount} fila(s) leidas.`);
+        setError(`Listo: ${count} reporte(s) actualizados con los datos de la auditoria.`);
         setWorkStatus("ready");
         return;
       }
 
-      const endpointNote = syncSummary.endpoints.length ? ` Endpoints probados: ${syncSummary.endpoints.join(", ")}.` : "";
-      const errorNote = syncSummary.errors.length
-        ? ` ${syncSummary.errors.length} fuente(s) fallaron; revisa sesion, credenciales o permisos en Render.`
-        : ` Sculpture respondio, pero no devolvio filas para las fuentes del periodo.`;
-      setError(`${errorNote}${endpointNote}`);
+      if (isAdminUser(currentUserInfo)) {
+        const endpointNote = syncSummary.endpoints.length ? ` Endpoints probados: ${syncSummary.endpoints.join(", ")}.` : "";
+        const errorNote = syncSummary.errors.length
+          ? ` ${syncSummary.errors.length} fuente(s) fallaron; revisa sesion, credenciales o permisos en Render.`
+          : ` Sculpture respondio, pero no devolvio filas para las fuentes del periodo.`;
+        setError(`${errorNote}${endpointNote}`);
+      } else {
+        setError("No pudimos traer los datos de esa semana. Intenta de nuevo en unos minutos o avisa al administrador.");
+      }
       setWorkStatus("error");
     } catch (queryError) {
-      setError(queryError instanceof Error ? queryError.message : "No se pudo consultar Sculpture.");
+      setError(
+        isAdminUser(currentUserInfo) && queryError instanceof Error
+          ? queryError.message
+          : "No pudimos traer los datos. Intenta de nuevo o avisa al administrador.",
+      );
       setWorkStatus("error");
     }
   }
@@ -1304,7 +1219,7 @@ function App() {
   async function generateSummary() {
     if (!selectedReport) return;
     setWorkStatus("loading");
-    setError("Intentando sincronizar Sculpture antes de generar el reporte...");
+    setError("Actualizando los datos de la semana antes de generar el reporte...");
 
     try {
       const updated = await readJson<Report>(
@@ -1575,7 +1490,7 @@ function App() {
               <article>
                 <span><Cloud size={17} /> Datos por revisar</span>
                 <strong>{dashboardSummary.blockedReports.length}</strong>
-                <small>Fuentes Sculpture incompletas</small>
+                <small>Faltan datos de la auditoria</small>
               </article>
               <article>
                 <span><PencilLine size={17} /> En revision</span>
@@ -1611,7 +1526,7 @@ function App() {
                   )) : (
                     <div className="empty-state">
                       <strong>Sin bloqueos visibles</strong>
-                      <small>Los reportes cargados no tienen fuentes pendientes ni revisiones urgentes.</small>
+                      <small>Los reportes estan al dia, sin revisiones urgentes.</small>
                     </div>
                   )}
                 </div>
@@ -1727,18 +1642,22 @@ function App() {
                 <span>Unidad / modulo</span>
                 <strong>{clientUnitLabel(selectedClient)}</strong>
               </article>
-              <article>
-                <span>Sculpture CID</span>
-                <strong>{selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
-              </article>
+              {isAdminUser(currentUserInfo) ? (
+                <article>
+                  <span>Sculpture CID</span>
+                  <strong>{selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
+                </article>
+              ) : null}
               <article>
                 <span>Area</span>
                 <strong>{selectedClient?.area || "Food"}</strong>
               </article>
-              <article>
-                <span>Origen</span>
-                <strong>{selectedClient?.sculptureBaseUrl?.includes("beverage") ? "Beverage" : "Food"}</strong>
-              </article>
+              {isAdminUser(currentUserInfo) ? (
+                <article>
+                  <span>Origen</span>
+                  <strong>{selectedClient?.sculptureBaseUrl?.includes("beverage") ? "Beverage" : "Food"}</strong>
+                </article>
+              ) : null}
             </div>
 
             <div className="unit-form">
@@ -1843,7 +1762,7 @@ function App() {
                 <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
                   <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
                     <strong>{clientDisplayName(client)}</strong>
-                    <span>{client.area || "Food"} · CID {client.sculptureCid || client.cid || "s/i"}</span>
+                    <span>{client.area || "Food"}{isAdminUser(currentUserInfo) ? ` · CID ${client.sculptureCid || client.cid || "s/i"}` : ""}</span>
                   </button>
                   <button
                     className="managed-client-delete"
@@ -1927,30 +1846,6 @@ function App() {
           </section>
         ) : null}
 
-        <section className="panel module-one" id="module-reports">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Flujo completo</p>
-              <h2>Reportes Bevinco/Sculpture</h2>
-            </div>
-            <span className={statusClass(selectedReport?.status || "Borrador")}>{selectedReport?.status || "Borrador"}</span>
-          </div>
-          <div className="workflow-list">
-            {reportWorkflow.map((step) => {
-              const Icon = step.icon;
-              return (
-                <article key={step.title}>
-                  <Icon size={20} />
-                  <div>
-                    <strong>{step.title}</strong>
-                    <small>{step.detail}</small>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
         {selectedReport?.analysis ? (
           <section className="panel">
             <div className="panel-header">
@@ -1986,54 +1881,13 @@ function App() {
           </section>
         ) : null}
 
-        <section className="module-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Lo que debe reflejar</p>
-                <h2>Proceso semanal real</h2>
-              </div>
-              <Workflow size={22} />
-            </div>
-            <div className="process-list">
-              {moduleOneProcess.map((step) => (
-                <article key={step.title}>
-                  <div>
-                    <strong>{step.title}</strong>
-                    <small>{step.detail}</small>
-                  </div>
-                  <span className={taskStatusClass(step.status)}>{step.status}</span>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Checklist</p>
-                <h2>Preparacion del reporte</h2>
-              </div>
-              <ListChecks size={22} />
-            </div>
-            <div className="pending-list">
-              {moduleOneChecklist.map((item) => (
-                <article key={item.title}>
-                  <span className={taskStatusClass(item.status)}>{item.status}</span>
-                  <strong>{item.title}</strong>
-                  <small>{item.detail}</small>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
+        {isAdminUser(currentUserInfo) ? (
         <section className="module-grid" id="sources">
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Fuentes Sculpture</p>
-                <h2>Conectores del modulo 1</h2>
+                <p className="eyebrow">Diagnostico (solo admin)</p>
+                <h2>Estado de los datos de la auditoria</h2>
               </div>
               <Cloud size={22} />
             </div>
@@ -2052,8 +1906,8 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Importar datos</p>
-                <h2>Reportes descargados</h2>
+                <p className="eyebrow">Carga manual (solo admin)</p>
+                <h2>Importar CSV descargados</h2>
               </div>
               <FileSpreadsheet size={22} />
             </div>
@@ -2103,6 +1957,7 @@ function App() {
             </div>
           </div>
         </section>
+        ) : null}
 
         <section className="panel">
           <div className="panel-header">
@@ -2151,7 +2006,7 @@ function App() {
             </div>
             <div className="summary-help">
               <strong>Generador de reporte</strong>
-              <small>Usa los CSV cargados para armar el resumen, el email y dejar el reporte guardado en la bandeja de Reportes.</small>
+              <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja de Reportes.</small>
             </div>
             <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
             <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
@@ -2266,14 +2121,16 @@ function App() {
                   <strong>{clickupStatus?.connected ? "Conectado" : "Por configurar"}</strong>
                   <small>
                     {clickupStatus?.connected
-                      ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"} - ${clickupStatus.authSource}`
-                      : clickupStatus?.error || "Configura token/lista o conecta OAuth."}
+                      ? `${clickupStatus.user?.username || clickupStatus.user?.email || "Usuario ClickUp"}${isAdminUser(currentUserInfo) ? ` - ${clickupStatus.authSource}` : ""}`
+                      : isAdminUser(currentUserInfo)
+                        ? clickupStatus?.error || "Configura token/lista o conecta OAuth."
+                        : "Aun no esta conectado. Avisa al administrador para activarlo."}
                   </small>
                 </article>
                 <article>
                   <span>Lista operativa</span>
-                  <strong>{clickupMeta.list?.name || (clickupStatus?.listIdConfigured ? "Auditorias Chile" : "Falta CLICKUP_LIST_ID")}</strong>
-                  <small>El CMS lee y crea tareas en la lista configurada en Render.</small>
+                  <strong>{clickupMeta.list?.name || (clickupStatus?.listIdConfigured ? "Auditorias Chile" : isAdminUser(currentUserInfo) ? "Falta CLICKUP_LIST_ID" : "Por configurar")}</strong>
+                  <small>Los pendientes se leen y crean en esta lista de ClickUp.</small>
                 </article>
                 <article>
                   <span>Tareas en pagina</span>
@@ -2285,17 +2142,21 @@ function App() {
                 <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
                   <Plus size={17} /> Crear tarea del reporte seleccionado
                 </button>
-                <label>
-                  Codigo OAuth
-                  <input
-                    placeholder="Pega aqui el code de redirect si usan OAuth"
-                    value={clickupCode}
-                    onChange={(event) => setClickupCode(event.target.value)}
-                  />
-                </label>
-                <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
-                  Conectar OAuth
-                </button>
+                {isAdminUser(currentUserInfo) ? (
+                  <>
+                    <label>
+                      Codigo OAuth
+                      <input
+                        placeholder="Pega aqui el code de redirect si usan OAuth"
+                        value={clickupCode}
+                        onChange={(event) => setClickupCode(event.target.value)}
+                      />
+                    </label>
+                    <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
+                      Conectar OAuth
+                    </button>
+                  </>
+                ) : null}
               </div>
             </section>
 
@@ -2685,7 +2546,7 @@ function App() {
                         <strong>{document.name}</strong>
                         {document.source ? (
                           <span className={`criteria-source ${document.source.startsWith("chatgpt") ? "chatgpt" : ""}`}>
-                            {document.source === "chatgpt-api" ? "ChatGPT API" : document.source === "chatgpt" ? "ChatGPT" : "Manual"}
+                            {document.source === "chatgpt-api" ? "Importado con IA" : document.source === "chatgpt" ? "ChatGPT" : "Manual"}
                           </span>
                         ) : null}
                       </div>
