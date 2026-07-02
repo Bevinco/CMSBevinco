@@ -3084,3 +3084,109 @@ button:disabled {
   gap: 10px;
   justify-content: space-between;
 }
+
+/* ===== KPIs clicables ===== */
+.dashboard-kpis .kpi-card {
+  background: #ffffff;
+  border: 1px solid #dce4e2;
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(16, 32, 29, 0.045);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 16px;
+  text-align: left;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.dashboard-kpis .kpi-card:hover {
+  border-color: var(--sculpture-green);
+  box-shadow: 0 14px 30px rgba(16, 32, 29, 0.1);
+  transform: translateY(-2px);
+}
+
+.dashboard-kpis .kpi-card span {
+  align-items: center;
+  color: #46605a;
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.dashboard-kpis .kpi-card strong {
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.dashboard-kpis .kpi-card small {
+  color: #6f7d79;
+  font-size: 0.8rem;
+}
+
+/* ===== Toasts ===== */
+.toast {
+  align-items: center;
+  animation: toast-in 180ms ease;
+  border-radius: 10px;
+  bottom: 22px;
+  box-shadow: 0 18px 44px rgba(9, 28, 24, 0.28);
+  color: #ffffff;
+  display: flex;
+  font-size: 0.88rem;
+  font-weight: 600;
+  gap: 14px;
+  max-width: min(520px, calc(100vw - 40px));
+  padding: 12px 14px;
+  position: fixed;
+  right: 22px;
+  z-index: 60;
+}
+
+.toast span { line-height: 1.4; }
+
+.toast button {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: #ffffff;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0;
+}
+
+.toast-success { background: #2f7d4f; }
+.toast-error { background: #b3261e; }
+.toast-info { background: #054372; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Presencia en tarjetas de usuario ===== */
+.user-presence {
+  align-items: center;
+  color: #526862;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 600;
+  gap: 6px;
+}
+
+/* ===== Empty state con CTA ===== */
+.empty-state .primary-button {
+  margin-top: 12px;
+}
+
+:root[data-theme="dark"] .dashboard-kpis .kpi-card {
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .dashboard-kpis .kpi-card small,
+:root[data-theme="dark"] .user-presence {
+  color: var(--text-muted);
+}

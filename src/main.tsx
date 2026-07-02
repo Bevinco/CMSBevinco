@@ -216,6 +216,7 @@ type CmsUser = {
   name: string;
   email: string;
   role: "Superadmin" | "Administrador" | "Operaciones" | "Usuario" | string;
+  presence?: string;
   permissions: string[];
   source?: "env" | string;
   createdAt?: string;
@@ -224,7 +225,7 @@ type CmsUser = {
 
 const userPermissionOptions = [
   { id: "dashboard", label: "Inicio" },
-  { id: "module1", label: "Modulo 1" },
+  { id: "module1", label: "Reportes semanales" },
   { id: "tasks", label: "Pendientes" },
   { id: "reports", label: "Reportes" },
   { id: "criteria", label: "Criterios" },
@@ -1330,6 +1331,21 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
+    if (!error || workStatus === "loading") return;
+    const timer = setTimeout(() => setError(""), workStatus === "error" ? 9000 : 5500);
+    return () => clearTimeout(timer);
+  }, [error, workStatus]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    fetch("/api/presence", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ presence }),
+    }).catch(() => {});
+  }, [authStatus, presence]);
+
+  useEffect(() => {
     if (authStatus === "authenticated") {
       loadModule();
       loadClickupStatus();
@@ -1462,7 +1478,7 @@ function App() {
   const selectedUnitInfo = sculptureUnits.find((item) => item.id === selectedSculptureUnitId) || null;
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
-    module1: ["Modulo operativo", "Modulo 1: reportes automatizados Bevinco"],
+    module1: ["Operacion semanal", "Reportes semanales"],
     tasks: ["Gestion operativa", "Pendientes ClickUp"],
     reports: ["Bandeja", "Reportes guardados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
@@ -1497,7 +1513,7 @@ function App() {
         </div>
         <nav className="nav-list" aria-label="Modulos">
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
-          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Modulo 1</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Reportes</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -1556,6 +1572,17 @@ function App() {
           </div>
         </header>
 
+        {error ? (
+          <div className={`toast ${workStatus === "error" ? "toast-error" : workStatus === "loading" ? "toast-info" : "toast-success"}`} role="status">
+            <span>
+              {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
+                ? "ClickUp no esta disponible en este momento. Avisa al administrador."
+                : error}
+            </span>
+            <button aria-label="Cerrar aviso" onClick={() => setError("")}>×</button>
+          </div>
+        ) : null}
+
         {activeView === "dashboard" ? (
           <section className="dashboard-view">
             <section className="dashboard-hero">
@@ -1570,26 +1597,26 @@ function App() {
             </section>
 
             <section className="dashboard-kpis" aria-label="Resumen operativo">
-              <article>
+              <button className="kpi-card" onClick={() => { setReportStatusFilter("Todos"); navigateTo("reports"); }}>
                 <span><FileText size={17} /> Reportes</span>
                 <strong>{reports.length}</strong>
                 <small>{dashboardSummary.sentReports.length} enviados</small>
-              </article>
-              <article>
+              </button>
+              <button className="kpi-card" onClick={() => navigateTo("module1")}>
                 <span><Cloud size={17} /> Datos por revisar</span>
                 <strong>{dashboardSummary.blockedReports.length}</strong>
                 <small>Faltan datos de la auditoria</small>
-              </article>
-              <article>
+              </button>
+              <button className="kpi-card" onClick={() => { setReportStatusFilter("Listo para revisar"); navigateTo("reports"); }}>
                 <span><PencilLine size={17} /> En revision</span>
                 <strong>{dashboardSummary.readyReports.length}</strong>
                 <small>{dashboardSummary.draftReports.length} borradores</small>
-              </article>
-              <article>
+              </button>
+              <button className="kpi-card" onClick={() => navigateTo("tasks")}>
                 <span><ListChecks size={17} /> ClickUp</span>
                 <strong>{clickupTasks.length}</strong>
                 <small>{clickupStatus?.connected ? "Conectado" : "Sin conexion visible"}</small>
-              </article>
+              </button>
             </section>
 
             <section className="dashboard-focus">
@@ -1710,8 +1737,6 @@ function App() {
 
         {activeView === "module1" ? (
           <>
-        {error ? <p className="connector-error">{error}</p> : null}
-
         <section className="panel unit-panel">
           <div className="panel-header">
             <div>
@@ -2210,13 +2235,6 @@ function App() {
 
         {activeView === "tasks" ? (
           <section className="tasks-module">
-            {error ? (
-              <p className="connector-error">
-                {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
-                  ? "ClickUp no esta disponible en este momento. Avisa al administrador."
-                  : error}
-              </p>
-            ) : null}
 
             <section className="panel clickup-panel">
               <div className="panel-header">
@@ -2445,8 +2463,17 @@ function App() {
             ))}
             {!reportRows.length ? (
               <div className="empty-state">
-                <strong>No hay reportes que coincidan</strong>
-                <small>Genera un reporte desde Modulo 1 o ajusta la busqueda.</small>
+                <strong>{reports.length ? "No hay reportes que coincidan" : "Aun no hay reportes generados"}</strong>
+                <small>
+                  {reports.length
+                    ? "Ajusta la busqueda o el filtro de estado."
+                    : "Elige un restaurante y un periodo para generar el primero."}
+                </small>
+                {!reports.length ? (
+                  <button className="primary-button" onClick={() => navigateTo("module1")}>
+                    <Database size={16} /> Generar tu primer reporte
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -2470,6 +2497,10 @@ function App() {
                     <div className="user-title-row">
                       <strong>{user.name || user.email}</strong>
                       <span>{user.role || "Usuario"}</span>
+                      <span className="user-presence">
+                        <span className={`presence-dot presence-${user.presence || "disponible"}`} />
+                        {presenceOptions.find((option) => option.id === (user.presence || "disponible"))?.label || "Disponible"}
+                      </span>
                     </div>
                     <small>{user.email || "Sin email"}</small>
                     <div className="permission-chips">
@@ -2505,7 +2536,6 @@ function App() {
 
         {activeView === "criteria" ? (
           <section className="page-grid">
-            {error ? <p className="connector-error">{error}</p> : null}
             <div className="panel chatgpt-import-panel">
               <div className="panel-header">
                 <div>

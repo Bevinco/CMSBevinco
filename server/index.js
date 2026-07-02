@@ -863,6 +863,7 @@ async function readStore() {
   store.criteriaDocuments ||= [];
   store.users ||= [];
   store.hiddenSculptureUnits ||= [];
+  store.presence ||= {};
   return store;
 }
 
@@ -4116,6 +4117,23 @@ app.post("/api/auth/logout", (_request, response) => {
   response.json({ authenticated: false });
 });
 
+const validPresence = ["disponible", "ausente", "ocupado", "no-molestar"];
+
+app.post("/api/presence", requireAuth, async (request, response) => {
+  const presence = String(request.body?.presence || "");
+  if (!validPresence.includes(presence)) {
+    response.status(400).json({ error: "Estado invalido." });
+    return;
+  }
+  const key = String(request.session.email || request.session.username || "").toLowerCase();
+  if (key) {
+    const store = await readStore();
+    store.presence[key] = presence;
+    await writeStore(store);
+  }
+  response.json({ presence });
+});
+
 app.get("/api/users", requireAuth, requirePermission("users"), async (_request, response) => {
   const store = await readStore();
   response.json({
@@ -4127,8 +4145,12 @@ app.get("/api/users", requireAuth, requirePermission("users"), async (_request, 
         role: "Superadmin",
         permissions: ["dashboard", "module1", "tasks", "reports", "criteria", "users"],
         source: "env",
+        presence: store.presence[cmsSuperadminEmail] || "disponible",
       },
-      ...(store.users || []).map(publicUser),
+      ...(store.users || []).map((user) => ({
+        ...publicUser(user),
+        presence: store.presence[String(user.email || "").toLowerCase()] || "disponible",
+      })),
     ],
   });
 });
