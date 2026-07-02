@@ -69,6 +69,18 @@ const moduleStorePath = path.join(dataDir, "module1.json");
 const publicDir = path.resolve(__dirname, "public");
 const sculptureSessionCookieCache = new Map();
 let clickupAccessTokenCache = "";
+let cachedLogoDataUri = "";
+
+function logoDataUri() {
+  if (cachedLogoDataUri) return cachedLogoDataUri;
+  try {
+    const buffer = fsSync.readFileSync(path.join(publicDir, "logo.png"));
+    cachedLogoDataUri = `data:image/png;base64,${buffer.toString("base64")}`;
+  } catch {
+    cachedLogoDataUri = "";
+  }
+  return cachedLogoDataUri;
+}
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -3656,19 +3668,10 @@ function renderTwoPageReportHtml(store, report) {
     </svg>`;
   }
 
-  // ---- Piezas comunes ----
-  const brandMark = `<svg viewBox="0 0 104 78" width="92" height="69" aria-hidden="true">
-    <rect x="26" y="2" width="28" height="28" rx="8" fill="none" stroke="${NAVY}" stroke-width="4"/>
-    <rect x="2" y="24" width="30" height="30" rx="8" fill="${GREEN}"/>
-    <rect x="40" y="44" width="28" height="28" rx="8" fill="${TEAL}"/>
-    <rect x="74" y="44" width="26" height="26" rx="8" fill="#d6d6d6"/>
-  </svg>`;
-  const footerLogo = `<svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
-    <path d="M30 2 A28 28 0 0 1 58 30 L33 30 L33 2 Z" fill="${NAVY}"/>
-    <path d="M2 30 A28 28 0 0 1 27 2 L27 30 Z" fill="#d6d6d6"/>
-    <path d="M27 58 A28 28 0 0 1 2 33 L27 33 Z" fill="${GREEN}"/>
-    <path d="M58 33 A28 28 0 0 1 33 58 L33 33 Z" fill="${TEAL}"/>
-  </svg>`;
+  // ---- Piezas comunes (logo real de la marca) ----
+  const logoSrc = logoDataUri();
+  const brandMark = logoSrc ? `<img src="${logoSrc}" width="64" height="64" alt="Sculpture Hospitality"/>` : "";
+  const footerLogo = logoSrc ? `<img src="${logoSrc}" width="52" height="52" alt=""/>` : "";
   const pageHeader = `
     <header class="bv-head">
       <div class="bv-mark">${brandMark}</div>

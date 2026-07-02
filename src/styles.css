@@ -188,6 +188,15 @@ button:disabled {
   min-height: 46px;
 }
 
+.brand-logo {
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 8px 22px rgba(0, 30, 67, 0.16);
+  flex: 0 0 auto;
+  height: 42px;
+  width: 42px;
+}
+
 .brand-mark {
   align-items: center;
   background: #ffffff;
@@ -570,59 +579,6 @@ button:disabled {
 .managed-client-delete:disabled {
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-.period-picker {
-  background: #f5f8f7;
-  border: 1px solid #e7eceb;
-  border-radius: 10px;
-  margin-top: 12px;
-  padding: 12px;
-}
-
-.period-picker-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-
-.period-picker-header strong {
-  color: #14302b;
-  font-size: 0.85rem;
-}
-
-.period-picker-header span {
-  color: #66706d;
-  font-size: 0.74rem;
-}
-
-.period-picker-list {
-  display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.period-picker-list label {
-  align-items: center;
-  cursor: pointer;
-  display: flex;
-  font-size: 0.8rem;
-  gap: 6px;
-}
-
-.period-picker-clear {
-  background: none;
-  border: none;
-  color: #054372;
-  cursor: pointer;
-  font-size: 0.76rem;
-  font-weight: 600;
-  margin-top: 8px;
-  padding: 0;
 }
 
 .accumulated-note {
@@ -1490,6 +1446,7 @@ button:disabled {
 .users-list {
   display: grid;
   gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
 }
 
 .user-card {
@@ -1501,8 +1458,7 @@ button:disabled {
   display: grid;
   gap: 12px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 96px;
-  padding: 16px 18px;
+  padding: 12px 14px;
 }
 
 .user-avatar {
@@ -2230,6 +2186,27 @@ button:disabled {
   margin: 0;
 }
 
+.report-list {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.actions-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 14px 20px;
+}
+
+.actions-bar h2 {
+  margin: 0;
+}
+
+.actions-bar .eyebrow {
+  margin-bottom: 2px;
+}
+
 .report-list button {
   align-items: center;
   background: #ffffff;
@@ -2594,19 +2571,6 @@ button:disabled {
   background: #2a1210;
   border-color: #5a2420;
   color: #f2a9a2;
-}
-
-:root[data-theme="dark"] .period-picker {
-  background: #0c221d;
-  border-color: #1c3a33;
-}
-
-:root[data-theme="dark"] .period-picker-header strong {
-  color: var(--text);
-}
-
-:root[data-theme="dark"] .period-picker-header span {
-  color: var(--text-muted);
 }
 
 :root[data-theme="dark"] .accumulated-chip {

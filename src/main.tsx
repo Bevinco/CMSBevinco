@@ -343,14 +343,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 function SculptureMark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-    </span>
-  );
+  return <img className="brand-logo" src="/logo.png" alt="Sculpture Hospitality" />;
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -447,7 +440,6 @@ function App() {
   const [sculptureDirectoryLoaded, setSculptureDirectoryLoaded] = useState(false);
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
-  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
   const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
@@ -456,7 +448,6 @@ function App() {
   const [clickupHasMore, setClickupHasMore] = useState(false);
   const [clickupColumnPages, setClickupColumnPages] = useState<Record<string, number>>({});
   const [clickupStatusFilter, setClickupStatusFilter] = useState("important");
-  const [clickupCode, setClickupCode] = useState("");
   const [cmsUsers, setCmsUsers] = useState<CmsUser[]>([]);
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState("");
@@ -709,29 +700,6 @@ function App() {
     }
   }
 
-  async function exchangeClickupCode() {
-    if (!clickupCode.trim()) return;
-    setWorkStatus("loading");
-    setError("Conectando ClickUp con el codigo OAuth...");
-
-    try {
-      await readJson(
-        await fetch("/api/clickup/oauth/token", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ code: clickupCode.trim() }),
-        }),
-      );
-      setClickupCode("");
-      await loadClickupStatus();
-      setError("ClickUp conectado. Ya puedes crear tareas desde los reportes.");
-      setWorkStatus("ready");
-    } catch (clickupError) {
-      setError(clickupError instanceof Error ? clickupError.message : "Error desconocido.");
-      setWorkStatus("error");
-    }
-  }
-
   async function importSamples() {
     setWorkStatus("loading");
     setError("");
@@ -956,12 +924,6 @@ function App() {
     }
   }
 
-  function togglePeriodSelection(periodId: string) {
-    setSelectedPeriodIds((current) =>
-      current.includes(periodId) ? current.filter((id) => id !== periodId) : [...current, periodId],
-    );
-  }
-
   const periodsInMonthRange = sculpturePeriods.filter((period) => {
     const month = monthFromPeriod(period);
     if (!month) return true;
@@ -993,7 +955,7 @@ function App() {
             periodId: selectedPeriodId,
             fromMonth,
             toMonth,
-            periodIds: selectedPeriodIds,
+            periodIds: selectedPeriodId ? [selectedPeriodId] : [],
             periods: sculpturePeriods,
           }),
         }),
@@ -1309,10 +1271,10 @@ function App() {
   }, [authStatus, activeView]);
 
   useEffect(() => {
-    if (authStatus === "authenticated" && activeView === "module1" && !sculptureDirectoryLoaded) {
+    if (authStatus === "authenticated" && !sculptureDirectoryLoaded) {
       loadSculptureUnits({ quiet: true });
     }
-  }, [authStatus, activeView, sculptureDirectoryLoaded]);
+  }, [authStatus, sculptureDirectoryLoaded]);
 
   useEffect(() => {
     if (authStatus === "authenticated" && activeView === "users") {
@@ -1669,8 +1631,16 @@ function App() {
                 <label>
                   Restaurante/local
                   <select
-                    value={selectedSculptureUnitId}
-                    onChange={(event) => setSelectedSculptureUnitId(event.target.value)}
+                    value={selectedSculptureUnitId || (selectedClientId ? `cms:${selectedClientId}` : "")}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value.startsWith("cms:")) {
+                        setSelectedClientId(value.slice(4));
+                        setSelectedSculptureUnitId("");
+                      } else {
+                        setSelectedSculptureUnitId(value);
+                      }
+                    }}
                     onFocus={ensureSculptureDirectory}
                     onMouseDown={ensureSculptureDirectory}
                   >
@@ -1680,11 +1650,28 @@ function App() {
                           {unit.name} - {unit.area}
                         </option>
                       ))
+                    ) : clients.length ? (
+                      clients.map((client) => (
+                        <option key={client.id} value={`cms:${client.id}`}>
+                          {clientDisplayName(client)} - {client.area || "Food"}
+                        </option>
+                      ))
                     ) : workStatus === "loading" && !sculptureDirectoryLoaded ? (
-                      <option value="">Cargando restaurantes desde Sculpture...</option>
+                      <option value="">Cargando restaurantes...</option>
                     ) : (
-                      <option value="">No hay restaurantes cargados desde Sculpture</option>
+                      <option value="">No hay restaurantes disponibles</option>
                     )}
+                  </select>
+                </label>
+                <label>
+                  Periodo
+                  <select value={selectedPeriodId} onChange={(event) => setSelectedPeriodId(event.target.value)}>
+                    <option value="">Todos los del rango de meses</option>
+                    {periodsInMonthRange.map((period) => (
+                      <option key={period.id} value={period.id}>
+                        {period.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label>
@@ -1703,37 +1690,7 @@ function App() {
                     onChange={(event) => setToMonth(event.target.value)}
                   />
                 </label>
-                <div className="query-note">
-                  <span>{sculpturePeriods.length ? `${sculpturePeriods.length} periodos detectados en Sculpture` : "Al abrir el selector, el CMS intenta traer restaurantes y periodos desde Sculpture."}</span>
-                </div>
               </div>
-              {periodsInMonthRange.length ? (
-                <div className="period-picker">
-                  <div className="period-picker-header">
-                    <strong>Periodos semanales de la auditoria</strong>
-                    <span>{selectedPeriodIds.length ? `${selectedPeriodIds.length} seleccionado(s) para acumular` : "Sin seleccion: se consulta todo el rango de meses"}</span>
-                  </div>
-                  <ul className="period-picker-list">
-                    {periodsInMonthRange.map((period) => (
-                      <li key={period.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selectedPeriodIds.includes(period.id)}
-                            onChange={() => togglePeriodSelection(period.id)}
-                          />
-                          <span>{period.label}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                  {selectedPeriodIds.length ? (
-                    <button className="period-picker-clear" type="button" onClick={() => setSelectedPeriodIds([])}>
-                      Limpiar seleccion
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
               <div className="query-actions">
                 <button className="primary-button" disabled={workStatus === "loading" || (!selectedSculptureUnitId && !selectedClientId)} onClick={querySculptureReports} type="button">
                   <Database size={17} /> Generar reporte
@@ -1959,13 +1916,10 @@ function App() {
         </section>
         ) : null}
 
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Acciones</p>
-              <h2>Revision y envio</h2>
-            </div>
-            <Mail size={22} />
+        <section className="panel actions-bar">
+          <div>
+            <p className="eyebrow">Acciones</p>
+            <h2>Revision y envio</h2>
           </div>
           <div className="action-row wrap-actions">
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
@@ -2142,21 +2096,6 @@ function App() {
                 <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
                   <Plus size={17} /> Crear tarea del reporte seleccionado
                 </button>
-                {isAdminUser(currentUserInfo) ? (
-                  <>
-                    <label>
-                      Codigo OAuth
-                      <input
-                        placeholder="Pega aqui el code de redirect si usan OAuth"
-                        value={clickupCode}
-                        onChange={(event) => setClickupCode(event.target.value)}
-                      />
-                    </label>
-                    <button className="secondary-button" disabled={!clickupCode.trim() || workStatus === "loading"} onClick={exchangeClickupCode}>
-                      Conectar OAuth
-                    </button>
-                  </>
-                ) : null}
               </div>
             </section>
 
