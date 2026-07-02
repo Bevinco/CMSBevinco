@@ -1165,7 +1165,7 @@ function aggregateReportGroups(rawEntries) {
 
   const byCategory = new Map();
   for (const { category, value } of entries) {
-    const key = cleanTotalName(category || "") || "Sin categoria";
+    const key = cleanTotalName(category || "") || "Sin categoría";
     byCategory.set(key, (byCategory.get(key) || 0) + (value || 0));
   }
   return [...byCategory.entries()]
@@ -1239,7 +1239,7 @@ function buildCategoryVariances(varianceRows) {
 }
 
 function buildTopProducts(varianceRows) {
-  let category = "Sin categoria";
+  let category = "Sin categoría";
 
   return varianceRows
     .map((row) => {
@@ -1277,8 +1277,8 @@ function buildPurchaseSuggestions(inteliparRows) {
         stock: cleanCellValue(row["Existencia"]),
         suggested: cleanCellValue(order),
         note: excess
-          ? `Exceso ${excess}${daysRemaining ? `, ${daysRemaining} dias restantes` : ""}`
-          : "Validar proveedor y sugerencia antes del envio",
+          ? `Exceso ${excess}${daysRemaining ? `, ${daysRemaining} días restantes` : ""}`
+          : "Validar proveedor y sugerencia antes del envío",
       };
     })
     .filter((row) => row.item && (row.suggested || row.stock))
@@ -1311,9 +1311,9 @@ function buildSummary(varianceRows) {
 
 function commentsForReport(clientName, report) {
   const direction = report.summary.varianceAmount < 0 ? "faltantes" : "sobrantes";
-  const biggestCategory = report.categoryVariances[0]?.category || "las categorias principales";
+  const biggestCategory = report.categoryVariances[0]?.category || "las categorías principales";
 
-  return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. Revisar los productos con mayor variacion y validar la sugerencia de compra antes del envio al cliente, especialmente proveedores marcados como por validar.`;
+  return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. Revisar los productos con mayor variación y validar la sugerencia de compra antes del envío al cliente, especialmente proveedores marcados como por validar.`;
 }
 
 // Limpia restos de comillas u otros artefactos de celdas CSV/HTML.
@@ -1351,7 +1351,7 @@ function generateReportSummary(store, report) {
   const varianceTone = (summary.varianceAmount || 0) < 0 ? "faltantes" : "sobrantes";
   const categoryText = categories.length
     ? categories.map((item) => `${item.category} (${moneyPlain(item.amount)}, ${item.percent}%)`).join(", ")
-    : "sin categorias con variacion relevante";
+    : "sin categorías con variación relevante";
   const productText = products.length
     ? products.map((item) => `${item.name} en ${item.category} (${moneyPlain(item.varianceAmount)}, ${item.variancePercent}%)`).join("; ")
     : "sin productos con diferencias relevantes";
@@ -1365,9 +1365,9 @@ function generateReportSummary(store, report) {
   return [
     `Resumen ejecutivo ${clientName} - ${periodLabel}`,
     "",
-    `El periodo registra ingresos por ${moneyPlain(summary.revenue)} y un costo de ${summary.costPercent || 0}%. La diferencia acumulada es ${moneyPlain(summary.varianceAmount)} (${summary.variancePercent || 0}%), asociada principalmente a ${varianceTone} o diferencias operativas que deben revisarse antes del envio.`,
+    `El periodo registra ingresos por ${moneyPlain(summary.revenue)} y un costo de ${summary.costPercent || 0}%. La diferencia acumulada es ${moneyPlain(summary.varianceAmount)} (${summary.variancePercent || 0}%), asociada principalmente a ${varianceTone} o diferencias operativas que deben revisarse antes del envío.`,
     "",
-    `Categorias con mayor impacto: ${categoryText}.`,
+    `Categorías con mayor impacto: ${categoryText}.`,
     "",
     `Productos a revisar: ${productText}.`,
     "",
@@ -1380,7 +1380,7 @@ function generateReportSummary(store, report) {
 const criteriaCategoryLabels = {
   project_instructions: "Instrucciones del proyecto",
   report_prompt: "Prompt de reporte",
-  analysis_rules: "Reglas de analisis",
+  analysis_rules: "Reglas de análisis",
   purchase_rules: "Reglas de compra",
   comment_examples: "Ejemplos de comentarios",
   operations_questionnaire: "Cuestionario de operaciones",
@@ -1399,7 +1399,7 @@ function summarizeCriteriaForDisplay(document) {
     .slice(0, 5);
 
   if (headings.length) {
-    return `${document.name} (${label}): cubre ${headings.join(", ")}. Se aplicara al generar el reporte con IA.`;
+    return `${document.name} (${label}): cubre ${headings.join(", ")}. Se aplicará al generar el reporte con IA.`;
   }
   const excerpt = String(document.text || "").replace(/\s+/g, " ").trim().slice(0, 140);
   return `${document.name} (${label}): ${excerpt || "criterio disponible para el reporte."}`;
@@ -1438,7 +1438,7 @@ function generateReportAnalysis(payload) {
     weeklyChallenges: [
       ...challengeCategories.map(
         (item) =>
-          `En la categoria ${item.category} se concentra una diferencia negativa de ${money.format(item.amount)} (${item.percent}%), por lo que conviene revisar inventario, merma y registro de ventas.`,
+          `En la categoría ${item.category} se concentra una diferencia negativa de ${money.format(item.amount)} (${item.percent}%), por lo que conviene revisar inventario, merma y registro de ventas.`,
       ),
       ...challengeProducts.map(
         (item) =>
@@ -1558,7 +1558,7 @@ Devuelve SOLO JSON valido con esta forma:
   "analysis": {
     "bestOfWeek": ["frases de lo mejor de la semana, formato 'En [producto] (.../%/$)...'"],
     "weeklyChallenges": ["frases de desafios, enfocadas en el producto que explica la desviacion, con impacto kgs/%/$"],
-    "stockEfficiency": ["frases sobre cobertura en dias, compra vs consumo y sobrestock/quiebre"],
+    "stockEfficiency": ["frases sobre cobertura en días, compra vs consumo y sobrestock/quiebre"],
     "criteriaApplied": ["que criterio del cliente se aplico y como"],
     "agentNotes": ["DIAGNOSTICO interno: 3-5 bullets breves y tecnicos"]
   }
@@ -1791,7 +1791,7 @@ async function buildStoreFromSamples() {
         analysis: null,
         comments: "",
         emailDraft:
-          "Hola, adjuntamos el reporte semanal de auditoria. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
+          "Hola, adjuntamos el reporte semanal de auditoría. En el resumen se destacan las principales variaciones, productos a revisar y sugerencias de compra para el siguiente periodo.",
         sourceStatus: {
           varianceDetailed: "Datos cargados",
           varianceSummary: "Por revisar",
@@ -1935,10 +1935,10 @@ function extractReportMetrics(parsedTable) {
   // productos la suma cuadra exacta con el variance total.
   const productEntries = products
     .filter((product) => product.varianceAmount)
-    .map((product) => ({ category: product.category || "Sin categoria", value: product.varianceAmount }));
+    .map((product) => ({ category: product.category || "Sin categoría", value: product.varianceAmount }));
   const purchaseEntries = products
     .filter((product) => product.purchasedCost)
-    .map((product) => ({ category: product.category || "Sin categoria", value: product.purchasedCost }));
+    .map((product) => ({ category: product.category || "Sin categoría", value: product.purchasedCost }));
 
   const extras = {
     usedCost,
@@ -2727,8 +2727,8 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           const excessCost = parseNumber(pickRecordValue(row.record, ["excesoDeInventario", "excessInventory"], ""));
           const daysRemaining = parseNumber(pickRecordValue(row.record, ["dAsRestantes", "diasRestantes", "daysRemaining"], ""));
           const note = excessCost
-            ? `Exceso ${moneyPlain(excessCost)}${daysRemaining ? `, ${daysRemaining.toFixed(1)} dias restantes` : ""}`
-            : "Validar proveedor y sugerencia antes del envio";
+            ? `Exceso ${moneyPlain(excessCost)}${daysRemaining ? `, ${daysRemaining.toFixed(1)} días restantes` : ""}`
+            : "Validar proveedor y sugerencia antes del envío";
           return {
             item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
             provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
@@ -2856,7 +2856,7 @@ function accumulateReportPayloads(payloads = []) {
     varianceAmount += summary.varianceAmount || 0;
 
     for (const category of payload.categoryVariances || []) {
-      const key = category.category || "Sin categoria";
+      const key = category.category || "Sin categoría";
       const current = categoryMap.get(key) || { category: key, amount: 0 };
       current.amount += category.amount || 0;
       categoryMap.set(key, current);
@@ -3597,7 +3597,7 @@ function renderPolishedReportHtml(store, report) {
     </section>
     <section class="section"><h2>Lectura ejecutiva del periodo</h2><div class="section-body"><div class="analysis-grid">
       ${renderAnalysisList("Lo mejor de la semana", analysis.bestOfWeek || [])}
-      ${renderAnalysisList("Los desafios de la semana", analysis.weeklyChallenges || [])}
+      ${renderAnalysisList("Los desafíos de la semana", analysis.weeklyChallenges || [])}
       ${renderAnalysisList("Eficiencia de stock y compra", analysis.stockEfficiency || [])}
       ${renderAnalysisList("Criterios aplicados al reporte", analysis.criteriaApplied || [])}
     </div></div></section>
@@ -4218,7 +4218,7 @@ const validPresence = ["disponible", "ausente", "ocupado", "no-molestar"];
 app.post("/api/presence", requireAuth, async (request, response) => {
   const presence = String(request.body?.presence || "");
   if (!validPresence.includes(presence)) {
-    response.status(400).json({ error: "Estado invalido." });
+    response.status(400).json({ error: "Estado inválido." });
     return;
   }
   const key = String(request.session.email || request.session.username || "").toLowerCase();
@@ -4256,7 +4256,7 @@ app.post("/api/users", requireAuth, requirePermission("users"), async (request, 
   const { name, email, password, role = "Usuario", permissions = [] } = request.body || {};
 
   if (!name || !email || !password || String(password).length < 6) {
-    response.status(400).json({ error: "Nombre, email y contrasena de minimo 6 caracteres son requeridos." });
+    response.status(400).json({ error: "Nombre, email y contraseña de mínimo 6 caracteres son requeridos." });
     return;
   }
 
@@ -4496,7 +4496,7 @@ app.delete("/api/module1/clients/:clientId", requireAuth, async (request, respon
   const client = store.clients.find((candidate) => candidate.id === clientId);
 
   if (!client) {
-    response.status(404).json({ error: "No se encontro el restaurante/local indicado." });
+    response.status(404).json({ error: "No se encontró el restaurante/local indicado." });
     return;
   }
 
@@ -4615,7 +4615,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
 
   const sculptureCid = configuredIdentifier(resolvedUnit.sculptureCid, resolvedUnit.cid);
   if (!sculptureCid) {
-    response.status(400).json({ error: "El restaurante/local seleccionado no tiene CID numerico de Sculpture." });
+    response.status(400).json({ error: "El restaurante/local seleccionado no tiene CID numérico de Sculpture." });
     return;
   }
 
@@ -4885,7 +4885,7 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
   const report = findReport(store, request.params.reportId);
 
   if (!report) {
-    response.status(404).json({ error: "Report not found." });
+    response.status(404).json({ error: "No se encontró el reporte." });
     return;
   }
 
@@ -4906,7 +4906,7 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   const report = findReport(store, request.params.reportId);
 
   if (!report) {
-    response.status(404).json({ error: "Report not found." });
+    response.status(404).json({ error: "No se encontró el reporte." });
     return;
   }
 
@@ -4923,7 +4923,7 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   report.emailDraft = aiResult?.emailDraft || [
     `Hola,`,
     "",
-    `Compartimos el reporte semanal de auditoria de ${client?.name || report.clientId}.`,
+    `Compartimos el reporte semanal de auditoría de ${client?.name || report.clientId}.`,
     "",
     generatedSummary,
     "",
@@ -4941,7 +4941,7 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
   const report = findReport(store, request.params.reportId);
 
   if (!report) {
-    response.status(404).send("Report not found.");
+    response.status(404).send("No se encontró el reporte.");
     return;
   }
 
@@ -4954,7 +4954,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   const report = findReport(store, request.params.reportId);
 
   if (!report) {
-    response.status(404).json({ error: "Report not found." });
+    response.status(404).json({ error: "No se encontró el reporte." });
     return;
   }
 
@@ -5100,7 +5100,7 @@ app.post("/api/clickup/reports/:reportId/task", requireAuth, async (request, res
   const report = findReport(store, request.params.reportId);
 
   if (!report) {
-    response.status(404).json({ error: "Report not found." });
+    response.status(404).json({ error: "No se encontró el reporte." });
     return;
   }
 

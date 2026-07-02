@@ -308,7 +308,7 @@ function syncStatusMessage(syncResults: SyncResults = {}) {
 
   return failed.length
     ? `Se actualizaron ${synced} de ${entries.length} datos. Por revisar: ${failed.join(", ")}.`
-    : "Datos de la auditoria actualizados correctamente.";
+    : "Datos de la auditoría actualizados correctamente.";
 }
 
 function money(value: number) {
@@ -395,7 +395,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         </div>
         <div>
           <p className="eyebrow">Acceso interno</p>
-          <h1>Reportes semanales sin friccion</h1>
+          <h1>Reportes semanales sin fricción</h1>
         </div>
         <form className="login-form" onSubmit={submitLogin}>
           <label>
@@ -403,7 +403,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             <input autoComplete="username" onChange={(event) => setUsername(event.target.value)} required type="text" value={username} />
           </label>
           <label>
-            Contrasena
+            Contraseña
             <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
           </label>
           {error ? <p className="login-error">{error}</p> : null}
@@ -437,8 +437,6 @@ function App() {
   const [commentsDraft, setCommentsDraft] = useState("");
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
-  const [csvSourceType, setCsvSourceType] = useState("auto");
-  const [selectedCsvFiles, setSelectedCsvFiles] = useState<File[]>([]);
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [selectedChatGptFiles, setSelectedChatGptFiles] = useState<File[]>([]);
@@ -734,62 +732,6 @@ function App() {
     }
   }
 
-  async function importCsvFiles(files = selectedCsvFiles) {
-    if (!files.length || !selectedClientId || !selectedPeriodId) return;
-    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-
-    if (totalSize > 10 * 1024 * 1024) {
-      setError("La carga supera 10 MB. Sube solo CSV descargados desde Sculpture o divide los archivos.");
-      setWorkStatus("error");
-      return;
-    }
-
-    setWorkStatus("loading");
-    setError("Leyendo CSV y actualizando el reporte...");
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
-
-    try {
-      const encodedFiles = await Promise.all(
-        files.map(async (file) => ({
-          name: file.name,
-          csvText: await file.text(),
-        })),
-      );
-      const payload = await readJson<BootstrapPayload & { imported?: Array<{ fileName: string; sourceType: string; rows: number }> }>(
-        await fetch("/api/module1/import-csv", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            clientId: selectedClientId,
-            periodId: selectedPeriodId,
-            sourceType: csvSourceType,
-            files: encodedFiles,
-          }),
-        }),
-      );
-      applyBootstrapPayload(payload);
-      const importedText = payload.imported
-        ?.map((item) => `${item.fileName}: ${sourceLabels[item.sourceType] || item.sourceType} (${item.rows} filas)`)
-        .join(" | ");
-      setError(importedText ? `Datos importados: ${importedText}` : "");
-      setSelectedCsvFiles([]);
-      setWorkStatus("ready");
-    } catch (csvError) {
-      setError(
-        csvError instanceof DOMException && csvError.name === "AbortError"
-          ? "La carga demoró demasiado y fue cancelada. Intenta con un CSV a la vez."
-          : csvError instanceof Error
-            ? csvError.message
-            : "Error desconocido.",
-      );
-      setWorkStatus("error");
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-  }
-
   async function createReportingUnit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const accountName = newUnit.accountName.trim();
@@ -854,7 +796,7 @@ function App() {
         ),
       );
       if (willHide && selectedSculptureUnitId === unit.id) setSelectedSculptureUnitId("");
-      setError(willHide ? `"${unit.name}" quedo oculto del listado.` : `"${unit.name}" vuelve a estar disponible.`);
+      setError(willHide ? `"${unit.name}" quedó oculto del listado.` : `"${unit.name}" vuelve a estar disponible.`);
       setWorkStatus("ready");
     } catch (visibilityError) {
       setError(visibilityError instanceof Error ? visibilityError.message : "No se pudo actualizar el restaurante.");
@@ -943,7 +885,7 @@ function App() {
     }
 
     setWorkStatus("loading");
-    setError("Agregando unidad de Sculpture al modulo...");
+    setError("Agregando unidad de Sculpture al módulo...");
 
     try {
       const payload = await readJson<{ client: Client; clients: Client[]; selectedReport: Report; reports: Report[] }>(
@@ -995,7 +937,7 @@ function App() {
         setToMonth(latestMonth);
       }
       if (!periods.length) {
-        setError("Este restaurante no tiene periodos de auditoria disponibles en Sculpture.");
+        setError("Este restaurante no tiene periodos de auditoría disponibles en Sculpture.");
       }
     } catch (periodsError) {
       if (!isCurrent()) return;
@@ -1020,7 +962,7 @@ function App() {
     }
 
     setWorkStatus("loading");
-    setError("Trayendo los datos de la auditoria...");
+    setError("Trayendo los datos de la auditoría...");
 
     try {
       const payload = await readJson<SculptureQueryPayload>(
@@ -1044,7 +986,7 @@ function App() {
       const syncSummary = summarizeSculptureSync(payload.syncResultsByPeriod);
 
       if (count && syncSummary.rowsCount) {
-        setError(`Listo: ${count} reporte(s) actualizados con los datos de la auditoria.`);
+        setError(`Listo: ${count} reporte(s) actualizados con los datos de la auditoría.`);
         setWorkStatus("ready");
         return;
       }
@@ -1074,7 +1016,7 @@ function App() {
     const totalSize = files.reduce((sum, file) => sum + file.size, 0);
 
     if (totalSize > 5 * 1024 * 1024) {
-      setError("La carga de criterios supera 5 MB. Sube documentos mas pequenos o divididos por tema.");
+      setError("La carga de criterios supera 5 MB. Sube documentos más pequeños o divididos por tema.");
       setWorkStatus("error");
       return;
     }
@@ -1135,7 +1077,7 @@ function App() {
     }
 
     setWorkStatus("loading");
-    setError("Procesando contenido con OpenAI y guardandolo en la biblioteca...");
+    setError("Procesando contenido con OpenAI y guardándolo en la biblioteca...");
 
     try {
       const fileDocuments = await Promise.all(
@@ -1180,7 +1122,7 @@ function App() {
         await fetch(`/api/module1/criteria-documents/${documentId}`, { method: "DELETE" }),
       );
       applyBootstrapPayload(payload);
-      setError("Criterio eliminado. El agente recalculara el analisis con la biblioteca actual.");
+      setError("Criterio eliminado. El agente recalculará el análisis con la biblioteca actual.");
       setWorkStatus("ready");
     } catch (criteriaError) {
       setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
@@ -1269,7 +1211,7 @@ function App() {
       setReports((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setCommentsDraft(updated.comments || "");
       setEmailDraft(updated.emailDraft || "");
-      setError("Reporte generado y guardado. Puedes abrirlo desde la bandeja de Reportes.");
+      setError("Reporte generado y guardado. Puedes abrirlo desde la bandeja del Historial.");
       setWorkStatus("ready");
     } catch (summaryError) {
       setError(summaryError instanceof Error ? summaryError.message : "Error desconocido.");
@@ -1460,7 +1402,7 @@ function App() {
         id: `ready-${report.id}`,
         title: report.client?.name || report.clientId,
         meta: report.period?.label || report.periodId,
-        detail: "Reporte listo para revision final, PDF y envio al cliente.",
+        detail: "Reporte listo para revisión final, PDF y envío al cliente.",
         action: "Revisar",
         onClick: () => {
           setSelectedClientId(report.clientId);
@@ -1492,11 +1434,11 @@ function App() {
   const selectedUnitInfo = sculptureUnits.find((item) => item.id === selectedSculptureUnitId) || null;
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
-    module1: ["Operacion semanal", "Reportes semanales"],
-    tasks: ["Gestion operativa", "Pendientes ClickUp"],
+    module1: ["Operación semanal", "Reportes semanales"],
+    tasks: ["Gestión operativa", "Pendientes ClickUp"],
     reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
-    users: ["Administracion", "Usuarios y permisos"],
+    users: ["Administración", "Usuarios y permisos"],
   }[activeView];
 
   if (authStatus === "checking") {
@@ -1506,7 +1448,7 @@ function App() {
           <SculptureMark />
           <div>
             <strong>Sculpture Hospitality</strong>
-            <span>Validando sesion</span>
+            <span>Validando sesión</span>
           </div>
         </div>
       </main>
@@ -1536,7 +1478,7 @@ function App() {
         <div className="sidebar-user">
           {userMenuOpen ? (
             <div className="user-menu" role="menu">
-              <p className="user-menu-title">Estado de sesion</p>
+              <p className="user-menu-title">Estado de sesión</p>
               {presenceOptions.map((option) => (
                 <button
                   key={option.id}
@@ -1561,7 +1503,7 @@ function App() {
                 {themeMode === "dark" ? "Modo claro" : "Modo oscuro"}
               </button>
               <button className="user-menu-item" onClick={logout}>
-                <LogOut size={15} /> Cerrar sesion
+                <LogOut size={15} /> Cerrar sesión
               </button>
             </div>
           ) : null}
@@ -1590,7 +1532,7 @@ function App() {
           <div className={`toast ${workStatus === "error" ? "toast-error" : workStatus === "loading" ? "toast-info" : "toast-success"}`} role="status">
             <span>
               {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
-                ? "ClickUp no esta disponible en este momento. Avisa al administrador."
+                ? "ClickUp no está disponible en este momento. Avisa al administrador."
                 : error}
             </span>
             <button aria-label="Cerrar aviso" onClick={() => setError("")}>×</button>
@@ -1602,7 +1544,7 @@ function App() {
             <section className="dashboard-hero">
               <div>
                 <p className="eyebrow">Operacion semanal</p>
-                <h2>Prioriza reportes, datos faltantes y envios desde una sola vista.</h2>
+                <h2>Prioriza reportes, datos faltantes y envíos desde una sola vista.</h2>
               </div>
               <div className="dashboard-hero-actions">
                 <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Generar reporte</button>
@@ -1624,13 +1566,13 @@ function App() {
                 <span className="kpi-body">
                   <small className="kpi-label">Datos por revisar</small>
                   <strong>{dashboardSummary.blockedReports.length}</strong>
-                  <small className="kpi-sub">Faltan datos de la auditoria</small>
+                  <small className="kpi-sub">Faltan datos de la auditoría</small>
                 </span>
               </button>
               <button className="kpi-card" onClick={() => { setReportStatusFilter("Listo para revisar"); navigateTo("reports"); }}>
                 <span className="kpi-icon kpi-icon-info"><PencilLine size={18} /></span>
                 <span className="kpi-body">
-                  <small className="kpi-label">En revision</small>
+                  <small className="kpi-label">En revisión</small>
                   <strong>{dashboardSummary.readyReports.length}</strong>
                   <small className="kpi-sub">{dashboardSummary.draftReports.length} borradores</small>
                 </span>
@@ -1640,7 +1582,7 @@ function App() {
                 <span className="kpi-body">
                   <small className="kpi-label">ClickUp</small>
                   <strong>{clickupTasks.length}</strong>
-                  <small className="kpi-sub">{clickupStatus?.connected ? "Conectado" : "Sin conexion"}</small>
+                  <small className="kpi-sub">{clickupStatus?.connected ? "Conectado" : "Sin conexión"}</small>
                 </span>
               </button>
             </section>
@@ -1649,8 +1591,8 @@ function App() {
               <div className="panel attention-panel">
                 <div className="panel-header">
                   <div>
-                    <p className="eyebrow">Atencion hoy</p>
-                    <h2>Proximas acciones</h2>
+                    <p className="eyebrow">Atención hoy</p>
+                    <h2>Próximas acciones</h2>
                   </div>
                   <Bot size={22} />
                 </div>
@@ -1667,7 +1609,7 @@ function App() {
                   )) : (
                     <div className="empty-state">
                       <strong>Sin bloqueos visibles</strong>
-                      <small>Los reportes estan al dia, sin revisiones urgentes.</small>
+                      <small>Los reportes están al día, sin revisiones urgentes.</small>
                     </div>
                   )}
                 </div>
@@ -1702,7 +1644,7 @@ function App() {
                       </span>
                       <b className={(report.summary?.varianceAmount || 0) < 0 ? "bad-text" : "ok-text"}>{money(report.summary?.varianceAmount || 0)}</b>
                     </button>
-                  )) : <p className="muted-copy">Aun no hay variaciones relevantes en los reportes cargados.</p>}
+                  )) : <p className="muted-copy">Aún no hay variaciones relevantes en los reportes cargados.</p>}
                 </div>
               </div>
 
@@ -1723,14 +1665,14 @@ function App() {
                       </span>
                       <b>{shortDate(task.dueDate)}</b>
                     </a>
-                  )) : <p className="muted-copy">No hay tareas con fecha limite cargadas en esta vista.</p>}
+                  )) : <p className="muted-copy">No hay tareas con fecha límite cargadas en esta vista.</p>}
                 </div>
               </div>
 
               <div className="panel">
                 <div className="panel-header">
                   <div>
-                    <p className="eyebrow">Ultimos reportes</p>
+                    <p className="eyebrow">Últimos reportes</p>
                     <h2>Bandeja reciente</h2>
                   </div>
                   <FileText size={22} />
@@ -1778,7 +1720,7 @@ function App() {
                 <strong>{selectedUnitInfo?.accountName || clientAccountLabel(selectedClient)}</strong>
               </article>
               <article>
-                <span>Unidad / modulo</span>
+                <span>Unidad / módulo</span>
                 <strong>{selectedUnitInfo?.moduleName || clientUnitLabel(selectedClient)}</strong>
               </article>
               {isAdminUser(currentUserInfo) ? (
@@ -1788,7 +1730,7 @@ function App() {
                 </article>
               ) : null}
               <article>
-                <span>Area</span>
+                <span>Área</span>
                 <strong>{selectedUnitInfo?.area || selectedClient?.area || "Food"}</strong>
               </article>
               {isAdminUser(currentUserInfo) ? (
@@ -1923,7 +1865,7 @@ function App() {
               <FileSpreadsheet size={22} />
             </div>
             <p className="query-note accumulated-note">
-              Ingresos, ventas y variacion se suman entre periodos; las existencias/stock toman el ultimo periodo, como en Sculpture.
+              Ingresos, ventas y variación se suman entre periodos; las existencias/stock toman el último periodo, como en Sculpture.
             </p>
             <div className="metrics accumulated-metrics">
               <article>
@@ -1943,8 +1885,8 @@ function App() {
               </article>
               <article>
                 <span><ListChecks size={18} /> Stock</span>
-                <strong className="metric-status">Ultimo periodo</strong>
-                <small>{accumulatedReport.purchaseSuggestions.length} articulo(s)</small>
+                <strong className="metric-status">Último periodo</strong>
+                <small>{accumulatedReport.purchaseSuggestions.length} artículo(s)</small>
               </article>
             </div>
             <div className="accumulated-periods">
@@ -1959,7 +1901,7 @@ function App() {
           <section className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Analisis del agente</p>
+                <p className="eyebrow">Análisis del agente</p>
                 <h2>Lectura ejecutiva del periodo</h2>
               </div>
               <Bot size={22} />
@@ -1970,8 +1912,8 @@ function App() {
                 <ul>{(selectedReport.analysis.bestOfWeek?.length ? selectedReport.analysis.bestOfWeek : ["Sin hallazgos positivos relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
               </article>
               <article>
-                <strong>Los desafios de la semana</strong>
-                <ul>{(selectedReport.analysis.weeklyChallenges?.length ? selectedReport.analysis.weeklyChallenges : ["Sin desafios relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
+                <strong>Los desafíos de la semana</strong>
+                <ul>{(selectedReport.analysis.weeklyChallenges?.length ? selectedReport.analysis.weeklyChallenges : ["Sin desafíos relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
               </article>
               <article>
                 <strong>Eficiencia de stock y compra</strong>
@@ -1987,7 +1929,7 @@ function App() {
               ) : null}
             </div>
             {!selectedReport.analysis.criteriaApplied?.length ? (
-              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la seccion Criterios.</p>
+              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
             ) : null}
           </section>
         ) : null}
@@ -1997,8 +1939,8 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Diagnostico (solo admin)</p>
-                <h2>Estado de los datos de la auditoria</h2>
+                <p className="eyebrow">Diagnóstico (solo admin)</p>
+                <h2>Estado de los datos de la auditoría</h2>
               </div>
               <Cloud size={22} />
             </div>
@@ -2014,66 +1956,13 @@ function App() {
             </div>
           </div>
 
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Carga manual (solo admin)</p>
-                <h2>Importar CSV descargados</h2>
-              </div>
-              <FileSpreadsheet size={22} />
-            </div>
-            <div className="upload-box">
-              <label>
-                Fuente
-                <select value={csvSourceType} onChange={(event) => setCsvSourceType(event.target.value)}>
-                  <option value="auto">Detectar automaticamente</option>
-                  <option value="varianceDetailed">Variance detailed</option>
-                  <option value="varianceSummary">Variance summary</option>
-                  <option value="intelipar">Intelipar</option>
-                </select>
-              </label>
-              <label>
-                Archivo
-                <input
-                  accept=".csv,text/csv"
-                  multiple
-                  type="file"
-                  onChange={(event) => setSelectedCsvFiles(Array.from(event.target.files || []))}
-                />
-              </label>
-              {selectedCsvFiles.length ? (
-                <div className="selected-files">
-                  {selectedCsvFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
-                </div>
-              ) : (
-                <small>Selecciona uno o varios CSV descargados del sistema de auditoria.</small>
-              )}
-              <div className="upload-actions">
-                <button
-                  className="primary-button"
-                  disabled={!selectedCsvFiles.length || workStatus === "loading"}
-                  onClick={() => importCsvFiles()}
-                >
-                  <FileSpreadsheet size={17} /> {workStatus === "loading" ? "Cargando datos..." : "Cargar datos al reporte"}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={!selectedCsvFiles.length || workStatus === "loading"}
-                  onClick={() => setSelectedCsvFiles([])}
-                >
-                  Limpiar seleccion
-                </button>
-              </div>
-              <small>Al cargar, el CMS detecta la fuente, recalcula el resumen y actualiza el reporte seleccionado.</small>
-            </div>
-          </div>
         </section>
         ) : null}
 
         <section className="panel actions-bar">
           <div>
             <p className="eyebrow">Acciones</p>
-            <h2>Revision y envio</h2>
+            <h2>Revisión y envío</h2>
           </div>
           <div className="action-row wrap-actions">
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
@@ -2086,8 +1975,8 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Historico</p>
-                <h2>Ultimos 4 periodos</h2>
+                <p className="eyebrow">Histórico</p>
+                <h2>Últimos 4 periodos</h2>
               </div>
               <BarChart3 size={22} />
             </div>
@@ -2114,7 +2003,7 @@ function App() {
             </div>
             <div className="summary-help">
               <strong>Generador de reporte</strong>
-              <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja de Reportes.</small>
+              <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja del Historial.</small>
             </div>
             <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
             <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
@@ -2135,7 +2024,7 @@ function App() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Variance</p>
-                <h2>Variaciones por categoria</h2>
+                <h2>Variaciones por categoría</h2>
               </div>
             </div>
             <div className="variance-chart">
@@ -2206,7 +2095,7 @@ function App() {
         <details className="panel unit-panel collapsible-panel">
           <summary>
             <div>
-              <p className="eyebrow">Gestion de clientes</p>
+              <p className="eyebrow">Gestión de clientes</p>
               <h2>Restaurantes de la cartera</h2>
             </div>
             <Building2 size={22} />
@@ -2234,7 +2123,7 @@ function App() {
               ))}
             </ul>
           ) : (
-            <p className="query-note">Aun no se cargo la lista de restaurantes. Se actualiza automaticamente al iniciar sesion.</p>
+            <p className="query-note">Aún no se cargó la lista de restaurantes. Se actualiza automáticamente al iniciar sesión.</p>
           )}
           {clients.length ? (
             <>
@@ -2271,7 +2160,7 @@ function App() {
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">ClickUp</p>
-                  <h2>Pendientes de auditoria y reportes</h2>
+                  <h2>Pendientes de auditoría y reportes</h2>
                   <small className="clickup-list-note">
                     Lista: {clickupMeta.list?.name || "Auditorias Chile"} · {clickupTasks.length} tarea(s)
                   </small>
@@ -2286,7 +2175,7 @@ function App() {
                 </div>
               </div>
               {!clickupStatus?.connected ? (
-                <p className="query-note">ClickUp aun no esta conectado. Avisa al administrador para activarlo.</p>
+                <p className="query-note">ClickUp aún no está conectado. Avisa al administrador para activarlo.</p>
               ) : null}
             </section>
 
@@ -2308,7 +2197,7 @@ function App() {
                   />
                 </label>
                 <label className="wide-field">
-                  Descripcion
+                  Descripción
                   <textarea
                     placeholder="Detalle operativo, contexto, links o criterios para resolverlo."
                     value={newPending.description}
@@ -2331,7 +2220,7 @@ function App() {
                   </select>
                 </label>
                 <label>
-                  Fecha limite
+                  Fecha límite
                   <input type="date" value={newPending.dueDate} onChange={(event) => setNewPending((current) => ({ ...current, dueDate: event.target.value }))} />
                 </label>
                 <label>
@@ -2494,10 +2383,10 @@ function App() {
             ))}
             {!reportRows.length ? (
               <div className="empty-state">
-                <strong>{visibleReports.length ? "No hay reportes que coincidan" : "Aun no hay reportes generados"}</strong>
+                <strong>{visibleReports.length ? "No hay reportes que coincidan" : "Aún no hay reportes generados"}</strong>
                 <small>
                   {reports.length
-                    ? "Ajusta la busqueda o el filtro de estado."
+                    ? "Ajusta la búsqueda o el filtro de estado."
                     : "Elige un restaurante y un periodo para generar el primero."}
                 </small>
                 {!visibleReports.length ? (
@@ -2797,10 +2686,10 @@ function App() {
                   <input required type="email" value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} />
                 </label>
                 <label>
-                  Contrasena
+                  Contraseña
                   <input
                     minLength={editingUserId ? undefined : 6}
-                    placeholder={editingUserId ? "Dejar vacia para no cambiar" : "Minimo 6 caracteres"}
+                    placeholder={editingUserId ? "Dejar vacía para no cambiar" : "Mínimo 6 caracteres"}
                     required={!editingUserId}
                     type="password"
                     value={userForm.password}
@@ -2814,7 +2703,7 @@ function App() {
                   </select>
                 </label>
                 <div className="permission-editor">
-                  <strong>Permisos de acceso a modulos</strong>
+                  <strong>Permisos de acceso a módulos</strong>
                   {userPermissionOptions.map((permission) => {
                     const checked = userForm.permissions.includes(permission.id);
                     return (
