@@ -48,6 +48,7 @@ html {
 
 body {
   background: #eef4f3;
+  font-variant-numeric: tabular-nums;
   margin: 0;
   min-width: 320px;
   font-size: 14px;
@@ -2782,7 +2783,6 @@ button:disabled {
 }
 
 .bar-track div,
-.chart-track div,
 .positive-bar {
   background: var(--sculpture-green);
 }
@@ -3259,3 +3259,121 @@ button:disabled {
 .clickup-grid article {
   align-content: start;
 }
+
+/* ===== Spinner de botones ===== */
+.btn-spinner {
+  animation: spin 700ms linear infinite;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  display: inline-block;
+  height: 15px;
+  width: 15px;
+}
+
+.btn-spinner-dark {
+  border-color: rgba(23, 32, 38, 0.25);
+  border-top-color: #172026;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Skeletons ===== */
+.skeleton {
+  animation: shimmer 1.1s ease-in-out infinite;
+  background: linear-gradient(90deg, #e8efed 25%, #f5f8f7 50%, #e8efed 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  display: inline-block;
+  height: 1.35rem;
+  width: 90px;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ===== Sistema unificado de chips ===== */
+.pill,
+.permission-chip,
+.criteria-source,
+.user-role-chip,
+.user-presence,
+.accumulated-chip {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  padding: 3px 10px;
+}
+
+/* ===== Panel colapsable (Gestion de clientes) ===== */
+.collapsible-panel summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.collapsible-panel summary::-webkit-details-marker { display: none; }
+
+.collapsible-panel summary h2 { margin: 0; }
+
+.collapsible-panel summary::after {
+  color: #66706d;
+  content: "▸";
+  font-size: 1rem;
+  margin-left: 12px;
+  transition: transform 140ms ease;
+}
+
+.collapsible-panel[open] summary::after { transform: rotate(90deg); }
+
+.collapsible-panel[open] summary { margin-bottom: 14px; }
+
+/* ===== Nota de analisis (criterios vacios) ===== */
+.analysis-note {
+  background: #f5f8f7;
+  border: 1px dashed #d6e0dd;
+  border-radius: 8px;
+  color: #66706d;
+  font-size: 0.82rem;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+}
+
+/* ===== Transicion de vistas ===== */
+.workspace > section {
+  animation: view-in 170ms ease;
+}
+
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace > section { animation: none; }
+}
+
+/* ===== Modo oscuro: componentes nuevos ===== */
+:root[data-theme="dark"] .report-row:hover { background: #16302a; }
+:root[data-theme="dark"] .reports-controls input,
+:root[data-theme="dark"] .reports-controls select {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--text);
+}
+:root[data-theme="dark"] .analysis-note {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+:root[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, #1c3a33 25%, #24463e 50%, #1c3a33 75%);
+  background-size: 200% 100%;
+}
+:root[data-theme="dark"] .collapsible-panel summary::after { color: var(--text-muted); }

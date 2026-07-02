@@ -227,7 +227,7 @@ const userPermissionOptions = [
   { id: "dashboard", label: "Inicio" },
   { id: "module1", label: "Reportes semanales" },
   { id: "tasks", label: "Pendientes" },
-  { id: "reports", label: "Reportes" },
+  { id: "reports", label: "Historial" },
   { id: "criteria", label: "Criterios" },
   { id: "users", label: "Usuarios" },
 ];
@@ -1480,7 +1480,7 @@ function App() {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Operacion semanal", "Reportes semanales"],
     tasks: ["Gestion operativa", "Pendientes ClickUp"],
-    reports: ["Bandeja", "Reportes guardados"],
+    reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
     users: ["Administracion", "Usuarios y permisos"],
   }[activeView];
@@ -1515,7 +1515,7 @@ function App() {
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
-          {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Reportes</button> : null}
+          {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
           {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
@@ -1850,7 +1850,8 @@ function App() {
               </div>
               <div className="query-actions">
                 <button className="primary-button" disabled={workStatus === "loading" || (!selectedSculptureUnitId && !selectedClientId)} onClick={querySculptureReports} type="button">
-                  <Database size={17} /> Generar reporte
+                  {workStatus === "loading" ? <span className="btn-spinner" /> : <Database size={17} />}
+                  {workStatus === "loading" ? "Generando..." : "Generar reporte"}
                 </button>
                 {selectedReport ? (
                   <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
@@ -1862,80 +1863,22 @@ function App() {
           </div>
         </section>
 
-        <section className="panel unit-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Gestion de clientes</p>
-              <h2>Restaurantes de la cartera</h2>
-            </div>
-            <Building2 size={22} />
-          </div>
-          <p className="managed-help">
-            Oculta los restaurantes antiguos para que no aparezcan al generar reportes. Puedes restaurarlos cuando quieras.
-          </p>
-          {sculptureUnits.length ? (
-            <ul className="managed-clients">
-              {sculptureUnits.map((unit) => (
-                <li key={`${unit.sculptureCid || unit.cid}-${unit.area}`} className={unit.hidden ? "is-hidden" : ""}>
-                  <div className="managed-client-info">
-                    <strong>{unit.name}</strong>
-                    <span>{unit.area}{unit.hidden ? " · Oculto" : ""}</span>
-                  </div>
-                  <button
-                    className={unit.hidden ? "managed-client-restore" : "managed-client-delete"}
-                    type="button"
-                    disabled={workStatus === "loading"}
-                    onClick={() => toggleUnitVisibility(unit)}
-                  >
-                    {unit.hidden ? "Restaurar" : "Ocultar"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="query-note">Aun no se cargo la lista de restaurantes. Se actualiza automaticamente al iniciar sesion.</p>
-          )}
-          {clients.length ? (
-            <>
-              <p className="managed-subtitle">Guardados en el CMS (con reportes)</p>
-              <ul className="managed-clients">
-                {clients.map((client) => (
-                  <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
-                    <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
-                      <strong>{clientDisplayName(client)}</strong>
-                      <span>{client.area || "Food"}</span>
-                    </button>
-                    <button
-                      className="managed-client-delete"
-                      type="button"
-                      disabled={workStatus === "loading"}
-                      onClick={() => deleteClient(client.id)}
-                      aria-label={`Eliminar ${clientDisplayName(client)}`}
-                    >
-                      Eliminar
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </section>
 
         <section className="metrics" aria-label="Resumen">
           <article>
             <span><FileSpreadsheet size={18} /> Ingresos</span>
-            <strong>{money(selectedReport?.summary.revenue || 0)}</strong>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : money(selectedReport?.summary.revenue || 0)}</strong>
             <small>{selectedReport?.period?.label || "Sin periodo"}</small>
           </article>
           <article>
             <span><BarChart3 size={18} /> % costo</span>
-            <strong>{selectedReport?.summary.costPercent || 0}%</strong>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.costPercent || 0}%`}</strong>
             <small>Food cost / pour cost</small>
           </article>
           <article>
             <span><FileText size={18} /> Variance</span>
-            <strong>{selectedReport?.summary.variancePercent || 0}%</strong>
-            <small>{money(selectedReport?.summary.varianceAmount || 0)}</small>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.variancePercent || 0}%`}</strong>
+            <small>{workStatus === "loading" ? "Actualizando..." : money(selectedReport?.summary.varianceAmount || 0)}</small>
           </article>
           <article>
             <span><ListChecks size={18} /> Estado</span>
@@ -1998,26 +1941,28 @@ function App() {
             <div className="agent-analysis-grid">
               <article>
                 <strong>Lo mejor de la semana</strong>
-                <ul>{(selectedReport.analysis.bestOfWeek || []).map((item) => <li key={item}>{item}</li>)}</ul>
+                <ul>{(selectedReport.analysis.bestOfWeek?.length ? selectedReport.analysis.bestOfWeek : ["Sin hallazgos positivos relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
               </article>
               <article>
                 <strong>Los desafios de la semana</strong>
-                <ul>{(selectedReport.analysis.weeklyChallenges || []).map((item) => <li key={item}>{item}</li>)}</ul>
+                <ul>{(selectedReport.analysis.weeklyChallenges?.length ? selectedReport.analysis.weeklyChallenges : ["Sin desafios relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
               </article>
               <article>
                 <strong>Eficiencia de stock y compra</strong>
-                <ul>{(selectedReport.analysis.stockEfficiency || []).map((item) => <li key={item}>{item}</li>)}</ul>
+                <ul>{(selectedReport.analysis.stockEfficiency?.length ? selectedReport.analysis.stockEfficiency : ["Sin observaciones de stock y compra para este periodo."]).map((item) => <li key={item}>{item}</li>)}</ul>
               </article>
-              <article>
-                <strong>Criterios aplicados</strong>
-                <ul>
-                  {(selectedReport.analysis.criteriaApplied?.length
-                    ? selectedReport.analysis.criteriaApplied
-                    : ["Sin criterios adicionales cargados para este reporte."])
-                    .map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </article>
+              {selectedReport.analysis.criteriaApplied?.length ? (
+                <article>
+                  <strong>Criterios aplicados</strong>
+                  <ul>
+                    {selectedReport.analysis.criteriaApplied.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </article>
+              ) : null}
             </div>
+            {!selectedReport.analysis.criteriaApplied?.length ? (
+              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la seccion Criterios.</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -2149,7 +2094,8 @@ function App() {
             <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
             <div className="action-row wrap-actions">
               <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
-                <Bot size={17} /> Generar reporte
+                {workStatus === "loading" ? <span className="btn-spinner btn-spinner-dark" /> : <Bot size={17} />}
+                {workStatus === "loading" ? "Generando..." : "Generar reporte"}
               </button>
               <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
                 <PencilLine size={17} /> Guardar cambios
@@ -2230,6 +2176,65 @@ function App() {
             ))}
           </div>
         </section>
+
+        <details className="panel unit-panel collapsible-panel">
+          <summary>
+            <div>
+              <p className="eyebrow">Gestion de clientes</p>
+              <h2>Restaurantes de la cartera</h2>
+            </div>
+            <Building2 size={22} />
+          </summary>
+          <p className="managed-help">
+            Oculta los restaurantes antiguos para que no aparezcan al generar reportes. Puedes restaurarlos cuando quieras.
+          </p>
+          {sculptureUnits.length ? (
+            <ul className="managed-clients">
+              {sculptureUnits.map((unit) => (
+                <li key={`${unit.sculptureCid || unit.cid}-${unit.area}`} className={unit.hidden ? "is-hidden" : ""}>
+                  <div className="managed-client-info">
+                    <strong>{unit.name}</strong>
+                    <span>{unit.area}{unit.hidden ? " · Oculto" : ""}</span>
+                  </div>
+                  <button
+                    className={unit.hidden ? "managed-client-restore" : "managed-client-delete"}
+                    type="button"
+                    disabled={workStatus === "loading"}
+                    onClick={() => toggleUnitVisibility(unit)}
+                  >
+                    {unit.hidden ? "Restaurar" : "Ocultar"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="query-note">Aun no se cargo la lista de restaurantes. Se actualiza automaticamente al iniciar sesion.</p>
+          )}
+          {clients.length ? (
+            <>
+              <p className="managed-subtitle">Guardados en el CMS (con reportes)</p>
+              <ul className="managed-clients">
+                {clients.map((client) => (
+                  <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
+                    <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
+                      <strong>{clientDisplayName(client)}</strong>
+                      <span>{client.area || "Food"}</span>
+                    </button>
+                    <button
+                      className="managed-client-delete"
+                      type="button"
+                      disabled={workStatus === "loading"}
+                      onClick={() => deleteClient(client.id)}
+                      aria-label={`Eliminar ${clientDisplayName(client)}`}
+                    >
+                      Eliminar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </details>
           </>
         ) : null}
 
@@ -2416,7 +2421,7 @@ function App() {
         <section className="panel reports-tray">
           <div className="reports-toolbar">
             <div>
-              <h2>Reportes guardados</h2>
+              <h2>Historial de reportes</h2>
               <small>{reportRows.length} de {reports.length} reportes</small>
             </div>
             <div className="reports-controls">
