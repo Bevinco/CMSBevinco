@@ -571,17 +571,22 @@ function normalizeMonthName(month = "") {
 
 function parseSculpturePeriodDates(label = "") {
   const text = String(label || "").replace(/\s+/g, " ").trim();
-  const match = text.match(/([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\s+(\d{1,2})\s+(?:to|al|-)\s+(?:(\w+)\s+)?(\d{1,2})\s+(\d{4})/i);
+  // Soporta "Jun 4 to Jun 10 2026" y tambien "Dec 29 2025 to Jan 6 2026"
+  // (el anio puede venir en el tramo inicial cuando el periodo cruza de anio).
+  const match = text.match(
+    /([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\s+(\d{1,2})(?:\s+(\d{4}))?\s+(?:to|al|-)\s+(?:([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\s+)?(\d{1,2})\s+(\d{4})/i,
+  );
   if (!match) return { startsAt: "", endsAt: "" };
 
-  const [, startMonthName, startDay, endMonthName, endDay, year] = match;
+  const [, startMonthName, startDay, startYearRaw, endMonthName, endDay, endYear] = match;
   const startMonth = normalizeMonthName(startMonthName);
   const endMonth = normalizeMonthName(endMonthName || startMonthName);
   if (!startMonth || !endMonth) return { startsAt: "", endsAt: "" };
+  const startYear = startYearRaw || endYear;
 
   return {
-    startsAt: `${year}-${startMonth}-${String(startDay).padStart(2, "0")}`,
-    endsAt: `${year}-${endMonth}-${String(endDay).padStart(2, "0")}`,
+    startsAt: `${startYear}-${startMonth}-${String(startDay).padStart(2, "0")}`,
+    endsAt: `${endYear}-${endMonth}-${String(endDay).padStart(2, "0")}`,
   };
 }
 
@@ -677,21 +682,36 @@ async function activateSculptureContext({ baseUrl, cid, pid = "", cookie }) {
   let referer = `${baseUrl}/`;
 
   const visit = async (pagePath) => {
-    const response = await fetch(new URL(pagePath, baseUrl).toString(), {
-      headers: {
-        accept: "text/html,application/xhtml+xml",
-        cookie: sessionCookie,
-        referer,
-      },
-      redirect: "manual",
-    });
-    const html = await response.text();
-    sessionCookie = mergeCookieHeaders(sessionCookie, getSetCookieHeaders(response));
-    referer = new URL(pagePath, baseUrl).toString();
+    let url = new URL(pagePath, baseUrl).toString();
+    let response;
+    let html = "";
 
-    if (!response.ok || looksLikeSculptureLogin(html)) {
+    // El cambio de cliente/periodo responde con redirecciones 302; hay que
+    // seguirlas manualmente para conservar las cookies de sesion.
+    for (let hop = 0; hop < 6; hop += 1) {
+      response = await fetch(url, {
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          cookie: sessionCookie,
+          referer,
+        },
+        redirect: "manual",
+      });
+      sessionCookie = mergeCookieHeaders(sessionCookie, getSetCookieHeaders(response));
+      referer = url;
+
+      if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+        url = new URL(response.headers.get("location"), url).toString();
+        continue;
+      }
+
+      html = await response.text();
+      break;
+    }
+
+    if (!response?.ok || looksLikeSculptureLogin(html)) {
       const error = new Error(`Unable to activate Sculpture context ${pagePath}.`);
-      error.status = response.status || 401;
+      error.status = response?.status || 401;
       error.details = html.slice(0, 500);
       throw error;
     }
@@ -707,11 +727,34 @@ async function activateSculptureContext({ baseUrl, cid, pid = "", cookie }) {
 
 async function fetchSculpturePeriodsForClient({ baseUrl, cid }) {
   if (!configuredIdentifier(cid)) return [];
-  const { html } = await activateSculptureContext({ baseUrl, cid });
-  return parseSculpturePeriodsFromHtml(html).map((period) => ({
-    ...period,
-    id: `sculpture-${cid}-${period.pid}`,
-  }));
+  const { html, cookie, referer } = await activateSculptureContext({ baseUrl, cid });
+  const periods = new Map();
+  const collect = (pageHtml) => {
+    parseSculpturePeriodsFromHtml(pageHtml).forEach((period) => {
+      periods.set(period.pid, { ...period, id: `sculpture-${cid}-${period.pid}` });
+    });
+  };
+  collect(html);
+
+  // La portada solo muestra algunos periodos; el selector completo vive en las
+  // paginas de reportes, asi que se recorren tambien para armar la lista total.
+  for (const extraPath of ["/reports/variance/", "/reports/variance/overview/", "/finalizeperiod/"]) {
+    try {
+      const response = await fetch(new URL(extraPath, baseUrl).toString(), {
+        headers: { accept: "text/html,application/xhtml+xml", cookie, referer },
+      });
+      if (response.ok) {
+        const pageHtml = await response.text();
+        if (!looksLikeSculptureLogin(pageHtml)) collect(pageHtml);
+      }
+    } catch {
+      // Pagina opcional: se ignora si falla.
+    }
+  }
+
+  return [...periods.values()].sort((left, right) =>
+    String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)),
+  );
 }
 
 async function discoverSculptureUnits() {
@@ -786,6 +829,7 @@ async function readStore() {
   store.reports ||= [];
   store.criteriaDocuments ||= [];
   store.users ||= [];
+  store.hiddenSculptureUnits ||= [];
   return store;
 }
 
@@ -4173,16 +4217,64 @@ app.delete("/api/module1/clients/:clientId", requireAuth, async (request, respon
   });
 });
 
+function sculptureUnitKey(unit = {}) {
+  return `${unit.sculptureCid || unit.cid || ""}-${unit.area || ""}`.toLowerCase();
+}
+
 app.get("/api/module1/sculpture-units", requireAuth, async (_request, response) => {
   try {
     const payload = await discoverSculptureUnits();
-    response.json(payload);
+    const store = await readStore();
+    const hidden = new Set(store.hiddenSculptureUnits || []);
+    response.json({
+      ...payload,
+      units: (payload.units || []).map((unit) => ({ ...unit, hidden: hidden.has(sculptureUnitKey(unit)) })),
+    });
   } catch (error) {
     response.status(error.status || 500).json({
       error: error.message || "Unable to discover Sculpture units.",
       details: error.details,
     });
   }
+});
+
+app.get("/api/module1/sculpture-units/periods", requireAuth, async (request, response) => {
+  const cid = configuredIdentifier(request.query.cid);
+  if (!cid) {
+    response.status(400).json({ error: "Falta el identificador del restaurante." });
+    return;
+  }
+  const baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(String(request.query.area || ""));
+
+  try {
+    const periods = await fetchSculpturePeriodsForClient({ baseUrl, cid });
+    response.json({ periods });
+  } catch (error) {
+    console.error("[periods] activation failed:", error.status, error.message, String(error.details || "").slice(0, 300));
+    response.status(error.status || 500).json({
+      error: "No se pudieron traer los periodos de este restaurante.",
+      details: error.message,
+    });
+  }
+});
+
+app.post("/api/module1/sculpture-units/visibility", requireAuth, async (request, response) => {
+  const { sculptureCid, cid, area, hidden } = request.body || {};
+  const key = sculptureUnitKey({ sculptureCid: sculptureCid || cid, area });
+
+  if (!key || key === "-") {
+    response.status(400).json({ error: "Falta el restaurante a ocultar o restaurar." });
+    return;
+  }
+
+  const store = await readStore();
+  const current = new Set(store.hiddenSculptureUnits || []);
+  if (hidden) current.add(key);
+  else current.delete(key);
+  store.hiddenSculptureUnits = [...current];
+  await writeStore(store);
+
+  response.json({ hiddenSculptureUnits: store.hiddenSculptureUnits });
 });
 
 app.post("/api/module1/sculpture-units/import", requireAuth, async (request, response) => {

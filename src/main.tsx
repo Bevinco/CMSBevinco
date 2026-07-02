@@ -58,6 +58,7 @@ type SculptureUnit = {
   area: string;
   baseUrl?: string;
   sculptureBaseUrl?: string;
+  hidden?: boolean;
 };
 
 type SculpturePeriod = {
@@ -441,6 +442,8 @@ function App() {
   const [fromMonth, setFromMonth] = useState("");
   const [toMonth, setToMonth] = useState("");
   const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
+  const [clientPeriods, setClientPeriods] = useState<SculpturePeriod[]>([]);
+  const [clientPeriodsLoading, setClientPeriodsLoading] = useState(false);
   const [clickupStatus, setClickupStatus] = useState<ClickupStatus | null>(null);
   const [clickupTasks, setClickupTasks] = useState<ClickupTask[]>([]);
   const [clickupMeta, setClickupMeta] = useState<ClickupMeta>({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
@@ -818,6 +821,32 @@ function App() {
     }
   }
 
+  async function toggleUnitVisibility(unit: SculptureUnit) {
+    const willHide = !unit.hidden;
+    try {
+      await readJson(
+        await fetch("/api/module1/sculpture-units/visibility", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sculptureCid: unit.sculptureCid || unit.cid, area: unit.area, hidden: willHide }),
+        }),
+      );
+      setSculptureUnits((current) =>
+        current.map((item) =>
+          (item.sculptureCid || item.cid) === (unit.sculptureCid || unit.cid) && item.area === unit.area
+            ? { ...item, hidden: willHide }
+            : item,
+        ),
+      );
+      if (willHide && selectedSculptureUnitId === unit.id) setSelectedSculptureUnitId("");
+      setError(willHide ? `"${unit.name}" quedo oculto del listado.` : `"${unit.name}" vuelve a estar disponible.`);
+      setWorkStatus("ready");
+    } catch (visibilityError) {
+      setError(visibilityError instanceof Error ? visibilityError.message : "No se pudo actualizar el restaurante.");
+      setWorkStatus("error");
+    }
+  }
+
   async function deleteClient(clientId: string) {
     const target = clients.find((client) => client.id === clientId);
     if (!target) return;
@@ -924,13 +953,34 @@ function App() {
     }
   }
 
-  const periodsInMonthRange = sculpturePeriods.filter((period) => {
-    const month = monthFromPeriod(period);
-    if (!month) return true;
-    if (fromMonth && month < fromMonth) return false;
-    if (toMonth && month > toMonth) return false;
-    return true;
-  });
+  async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
+    const cid = unit?.sculptureCid || unit?.cid || "";
+    if (!cid || !/^d+$/.test(String(cid))) {
+      setClientPeriods([]);
+      return;
+    }
+
+    setClientPeriodsLoading(true);
+    try {
+      const params = new URLSearchParams({ cid: String(cid), area: unit?.area || "" });
+      if (unit?.baseUrl || unit?.sculptureBaseUrl) params.set("baseUrl", unit.baseUrl || unit.sculptureBaseUrl || "");
+      const payload = await readJson<{ periods: SculpturePeriod[] }>(
+        await fetch(`/api/module1/sculpture-units/periods?${params.toString()}`),
+      );
+      const periods = payload.periods || [];
+      setClientPeriods(periods);
+      setSelectedPeriodId("");
+      const latestMonth = monthFromPeriod(periods[0]);
+      if (latestMonth) {
+        setFromMonth(latestMonth);
+        setToMonth(latestMonth);
+      }
+    } catch {
+      setClientPeriods([]);
+    } finally {
+      setClientPeriodsLoading(false);
+    }
+  }
 
   async function querySculptureReports() {
     const selectedUnit = sculptureUnits.find((item) => item.id === selectedSculptureUnitId);
@@ -956,7 +1006,7 @@ function App() {
             fromMonth,
             toMonth,
             periodIds: selectedPeriodId ? [selectedPeriodId] : [],
-            periods: sculpturePeriods,
+            periods: clientPeriods.length ? clientPeriods : sculpturePeriods,
           }),
         }),
       );
@@ -1281,6 +1331,15 @@ function App() {
       loadUsers();
     }
   }, [authStatus, activeView]);
+
+  useEffect(() => {
+    const unit =
+      sculptureUnits.find((item) => item.id === selectedSculptureUnitId) ||
+      clients.find((client) => client.id === selectedClientId) ||
+      null;
+    loadClientPeriods(unit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSculptureUnitId, selectedClientId, sculptureUnits.length]);
 
   const reportRows = useMemo(() => reports.slice(0, 8), [reports]);
   const clickupTasksByStatus = useMemo(() => {
@@ -1644,8 +1703,8 @@ function App() {
                     onFocus={ensureSculptureDirectory}
                     onMouseDown={ensureSculptureDirectory}
                   >
-                    {sculptureUnits.length ? (
-                      sculptureUnits.map((unit) => (
+                    {sculptureUnits.filter((unit) => !unit.hidden).length ? (
+                      sculptureUnits.filter((unit) => !unit.hidden).map((unit) => (
                         <option key={unit.id} value={unit.id}>
                           {unit.name} - {unit.area}
                         </option>
@@ -1666,8 +1725,14 @@ function App() {
                 <label>
                   Periodo
                   <select value={selectedPeriodId} onChange={(event) => setSelectedPeriodId(event.target.value)}>
-                    <option value="">Todos los del rango de meses</option>
-                    {periodsInMonthRange.map((period) => (
+                    <option value="">
+                      {clientPeriodsLoading
+                        ? "Cargando periodos del restaurante..."
+                        : clientPeriods.length
+                          ? `Todos los del rango de meses (${clientPeriods.length} disponibles)`
+                          : "Selecciona un restaurante para ver sus periodos"}
+                    </option>
+                    {clientPeriods.map((period) => (
                       <option key={period.id} value={period.id}>
                         {period.label}
                       </option>
@@ -1708,34 +1773,60 @@ function App() {
         <section className="panel unit-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Restaurantes en el CMS</p>
-              <h2>Gestionar restaurantes cargados</h2>
+              <p className="eyebrow">Gestion de clientes</p>
+              <h2>Restaurantes de la cartera</h2>
             </div>
             <Building2 size={22} />
           </div>
-          {clients.length ? (
+          <p className="managed-help">
+            Oculta los restaurantes antiguos para que no aparezcan al generar reportes. Puedes restaurarlos cuando quieras.
+          </p>
+          {sculptureUnits.length ? (
             <ul className="managed-clients">
-              {clients.map((client) => (
-                <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
-                  <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
-                    <strong>{clientDisplayName(client)}</strong>
-                    <span>{client.area || "Food"}{isAdminUser(currentUserInfo) ? ` · CID ${client.sculptureCid || client.cid || "s/i"}` : ""}</span>
-                  </button>
+              {sculptureUnits.map((unit) => (
+                <li key={`${unit.sculptureCid || unit.cid}-${unit.area}`} className={unit.hidden ? "is-hidden" : ""}>
+                  <div className="managed-client-info">
+                    <strong>{unit.name}</strong>
+                    <span>{unit.area}{unit.hidden ? " · Oculto" : ""}</span>
+                  </div>
                   <button
-                    className="managed-client-delete"
+                    className={unit.hidden ? "managed-client-restore" : "managed-client-delete"}
                     type="button"
                     disabled={workStatus === "loading"}
-                    onClick={() => deleteClient(client.id)}
-                    aria-label={`Eliminar ${clientDisplayName(client)}`}
+                    onClick={() => toggleUnitVisibility(unit)}
                   >
-                    Eliminar
+                    {unit.hidden ? "Restaurar" : "Ocultar"}
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="query-note">No hay restaurantes cargados en el CMS todavia.</p>
+            <p className="query-note">Aun no se cargo la lista de restaurantes. Se actualiza automaticamente al iniciar sesion.</p>
           )}
+          {clients.length ? (
+            <>
+              <p className="managed-subtitle">Guardados en el CMS (con reportes)</p>
+              <ul className="managed-clients">
+                {clients.map((client) => (
+                  <li key={client.id} className={client.id === selectedClientId ? "is-selected" : ""}>
+                    <button className="managed-client-info" type="button" onClick={() => setSelectedClientId(client.id)}>
+                      <strong>{clientDisplayName(client)}</strong>
+                      <span>{client.area || "Food"}</span>
+                    </button>
+                    <button
+                      className="managed-client-delete"
+                      type="button"
+                      disabled={workStatus === "loading"}
+                      onClick={() => deleteClient(client.id)}
+                      aria-label={`Eliminar ${clientDisplayName(client)}`}
+                    >
+                      Eliminar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </section>
 
         <section className="metrics" aria-label="Resumen">

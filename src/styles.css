@@ -564,6 +564,41 @@ button:disabled {
   font-size: 0.76rem;
 }
 
+.managed-help {
+  color: #66706d;
+  font-size: 0.8rem;
+  margin: 0 0 10px;
+}
+
+.managed-subtitle {
+  color: #46605a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin: 14px 0 8px;
+  text-transform: uppercase;
+}
+
+.managed-clients {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.managed-clients li.is-hidden {
+  opacity: 0.55;
+}
+
+.managed-client-restore {
+  background: #eef4ea;
+  border: 1px solid #cfe3b8;
+  border-radius: 8px;
+  color: #3b5a24;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+}
+
 .managed-client-delete {
   background: #fbe9e9;
   border: 1px solid #f0c9c9;
@@ -2565,6 +2600,12 @@ button:disabled {
 
 :root[data-theme="dark"] .managed-client-info span {
   color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .managed-client-restore {
+  background: #142e12;
+  border-color: #2c4a1f;
+  color: #c7e3b1;
 }
 
 :root[data-theme="dark"] .managed-client-delete {
