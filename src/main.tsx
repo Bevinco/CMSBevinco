@@ -115,6 +115,7 @@ type Report = {
   comments: string;
   emailDraft: string;
   isAccumulated?: boolean;
+  backfill?: boolean;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
     id?: string;
@@ -424,6 +425,7 @@ function App() {
   const [presence, setPresence] = useState(() => localStorage.getItem("bevinco-presence") || "disponible");
   const [reportSearch, setReportSearch] = useState("");
   const [reportStatusFilter, setReportStatusFilter] = useState("Todos");
+  const [reportPage, setReportPage] = useState(0);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -1383,15 +1385,27 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSculptureUnitId, selectedClientId, sculptureUnits.length, sculptureDirectoryLoaded]);
 
+  const visibleReports = useMemo(() => reports.filter((report) => !report.backfill), [reports]);
   const reportRows = useMemo(() => {
     const query = reportSearch.trim().toLowerCase();
-    return reports.filter((report) => {
+    return visibleReports.filter((report) => {
       if (reportStatusFilter !== "Todos" && report.status !== reportStatusFilter) return false;
       if (!query) return true;
       const haystack = `${report.client?.name || report.clientId} ${report.period?.label || report.periodId}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [reports, reportSearch, reportStatusFilter]);
+  }, [visibleReports, reportSearch, reportStatusFilter]);
+  const REPORTS_PER_PAGE = 6;
+  const reportPageCount = Math.max(1, Math.ceil(reportRows.length / REPORTS_PER_PAGE));
+  const currentReportPage = Math.min(reportPage, reportPageCount - 1);
+  const pagedReportRows = reportRows.slice(
+    currentReportPage * REPORTS_PER_PAGE,
+    currentReportPage * REPORTS_PER_PAGE + REPORTS_PER_PAGE,
+  );
+
+  useEffect(() => {
+    setReportPage(0);
+  }, [reportSearch, reportStatusFilter]);
   const clickupTasksByStatus = useMemo(() => {
     const groups = new Map<string, ClickupTask[]>();
     clickupTasks.forEach((task) => {
@@ -2434,7 +2448,7 @@ function App() {
           <div className="reports-toolbar">
             <div>
               <h2>Historial de reportes</h2>
-              <small>{reportRows.length} de {reports.length} reportes</small>
+              <small>{reportRows.length} de {visibleReports.length} reportes</small>
             </div>
             <div className="reports-controls">
               <input
@@ -2451,7 +2465,7 @@ function App() {
             </div>
           </div>
           <div className="report-table">
-            {reportRows.map((report) => (
+            {pagedReportRows.map((report) => (
               <div className="report-row" key={report.id}>
                 <div className="report-row-main">
                   <strong>{report.client?.name || report.clientId}</strong>
@@ -2480,13 +2494,13 @@ function App() {
             ))}
             {!reportRows.length ? (
               <div className="empty-state">
-                <strong>{reports.length ? "No hay reportes que coincidan" : "Aun no hay reportes generados"}</strong>
+                <strong>{visibleReports.length ? "No hay reportes que coincidan" : "Aun no hay reportes generados"}</strong>
                 <small>
                   {reports.length
                     ? "Ajusta la busqueda o el filtro de estado."
                     : "Elige un restaurante y un periodo para generar el primero."}
                 </small>
-                {!reports.length ? (
+                {!visibleReports.length ? (
                   <button className="primary-button" onClick={() => navigateTo("module1")}>
                     <Database size={16} /> Generar tu primer reporte
                   </button>
@@ -2494,6 +2508,42 @@ function App() {
               </div>
             ) : null}
           </div>
+          {reportRows.length > REPORTS_PER_PAGE ? (
+            <div className="pager">
+              <span className="pager-info">
+                Mostrando {currentReportPage * REPORTS_PER_PAGE + 1}-{Math.min((currentReportPage + 1) * REPORTS_PER_PAGE, reportRows.length)} de {reportRows.length} reportes
+              </span>
+              <div className="pager-controls">
+                <button
+                  className="pager-nav"
+                  disabled={currentReportPage === 0}
+                  onClick={() => setReportPage(currentReportPage - 1)}
+                >
+                  Anterior
+                </button>
+                {Array.from({ length: reportPageCount }, (_, index) => index)
+                  .filter((index) => Math.abs(index - currentReportPage) <= 2 || index === 0 || index === reportPageCount - 1)
+                  .map((index, position, list) => (
+                    <React.Fragment key={index}>
+                      {position > 0 && list[position - 1] !== index - 1 ? <span className="pager-gap">…</span> : null}
+                      <button
+                        className={`pager-number ${index === currentReportPage ? "active" : ""}`}
+                        onClick={() => setReportPage(index)}
+                      >
+                        {index + 1}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                <button
+                  className="pager-nav"
+                  disabled={currentReportPage >= reportPageCount - 1}
+                  onClick={() => setReportPage(currentReportPage + 1)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
         ) : null}
 

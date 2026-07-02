@@ -4668,6 +4668,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
       pid: period.sculpturePid || period.pid,
       area: client.area,
     });
+    report.backfill = false;
     syncResultsByPeriod[period.id] = syncResults;
     queriedReports.push(buildReportPayload(store, report));
   }
@@ -4689,6 +4690,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
       );
       const storedComplete = stored?.summary?.revenue > 0 && stored?.summary?.usedCost > 0 && (stored?.topUsageProducts || []).length;
       if (storedComplete) {
+        stored.backfill = false;
         selectedPeriods.length = 0;
         selectedPeriods.push(period);
         queriedReports.length = 0;
@@ -4707,6 +4709,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
         continue;
       }
       if (report.summary?.revenue > 0) {
+        report.backfill = false;
         selectedPeriods.length = 0;
         selectedPeriods.push(period);
         queriedReports.length = 0;
@@ -4745,6 +4748,9 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
           pid: period.sculpturePid || period.pid,
           area: client.area,
         });
+        // Semana traida solo para el grafico historico: no aparece en la
+        // bandeja salvo que el usuario la genere explicitamente.
+        if (report.backfill !== false) report.backfill = true;
       } catch {
         // La semana previa es opcional: si falla, el grafico la omite.
       }

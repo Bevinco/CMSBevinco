@@ -3521,3 +3521,68 @@ button:disabled {
 }
 
 :root[data-theme="dark"] .user-card:hover { border-color: var(--sculpture-green); }
+
+/* ===== Paginador (estilo Singulares) ===== */
+.pager {
+  align-items: center;
+  border-top: 1px solid #edf1f0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
+.pager-info {
+  color: #6f7d79;
+  font-size: 0.82rem;
+}
+
+.pager-controls {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.pager-nav {
+  background: transparent;
+  border-radius: 8px;
+  color: #46605a;
+  font-size: 0.84rem;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.pager-nav:hover:not(:disabled) { background: #e8eeee; }
+
+.pager-nav:disabled { opacity: 0.45; }
+
+.pager-number {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #46605a;
+  font-size: 0.84rem;
+  font-weight: 700;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.pager-number:hover { background: #e8eeee; }
+
+.pager-number.active {
+  background: var(--sculpture-blue);
+  color: #ffffff;
+}
+
+.pager-gap { color: #9aa8a3; padding: 0 2px; }
+
+:root[data-theme="dark"] .pager { border-top-color: var(--line-soft); }
+:root[data-theme="dark"] .pager-info { color: var(--text-muted); }
+:root[data-theme="dark"] .pager-nav,
+:root[data-theme="dark"] .pager-number { color: var(--text-muted); }
+:root[data-theme="dark"] .pager-nav:hover:not(:disabled),
+:root[data-theme="dark"] .pager-number:hover { background: var(--surface-muted); }
+:root[data-theme="dark"] .pager-number.active { background: var(--sculpture-green); color: #10231f; }
