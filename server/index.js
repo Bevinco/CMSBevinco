@@ -38,6 +38,76 @@ globalThis.fetch = (input, init = {}) =>
 const app = express();
 const port = process.env.PORT || 3000;
 
+// ===== Persistencia del store en Supabase =====
+// El disco de Render es efimero: sin esto, los reportes/criterios/usuarios se
+// pierden en cada deploy o reinicio. El store completo se respalda como JSON
+// en la tabla cms_store y se restaura al arrancar.
+const supabaseUrl = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  "";
+const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
+let supabaseHydrated = false;
+
+function supabaseHeaders() {
+  return {
+    apikey: supabaseKey,
+    authorization: `Bearer ${supabaseKey}`,
+    "content-type": "application/json",
+  };
+}
+
+async function hydrateStoreFromSupabase() {
+  if (!supabaseConfigured || supabaseHydrated) return;
+  supabaseHydrated = true;
+
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?id=eq.1&select=data`, {
+      headers: supabaseHeaders(),
+    });
+    if (!response.ok) {
+      console.error("[supabase] lectura fallo:", response.status, (await response.text()).slice(0, 200));
+      return;
+    }
+    const rows = await response.json();
+    const remote = rows?.[0]?.data;
+    if (remote && typeof remote === "object" && Array.isArray(remote.reports)) {
+      await fsPromisesMkdir();
+      const tempPath = `${moduleStorePath}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(remote, null, 2));
+      await fs.rename(tempPath, moduleStorePath);
+      console.log(`[supabase] store restaurado (${remote.reports.length} reportes, ${(remote.criteriaDocuments || []).length} criterios)`);
+    } else {
+      console.log("[supabase] sin respaldo previo; se creara al primer guardado");
+    }
+  } catch (error) {
+    console.error("[supabase] no se pudo hidratar el store:", error.message);
+  }
+}
+
+async function fsPromisesMkdir() {
+  await fs.mkdir(dataDir, { recursive: true });
+}
+
+async function persistStoreToSupabase(store) {
+  if (!supabaseConfigured) return;
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?on_conflict=id`, {
+      method: "POST",
+      headers: { ...supabaseHeaders(), prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{ id: 1, data: store, updated_at: new Date().toISOString() }]),
+    });
+    if (!response.ok) {
+      console.error("[supabase] escritura fallo:", response.status, (await response.text()).slice(0, 200));
+    }
+  } catch (error) {
+    console.error("[supabase] no se pudo respaldar el store:", error.message);
+  }
+}
+
 const sculptureBaseUrl =
   process.env.SCULPTURE_BASE_URL || "https://beta.food.sculpturehospitality.com";
 const sculptureFoodBaseUrl =
@@ -854,6 +924,7 @@ async function ensureStore() {
 }
 
 async function readStore() {
+  await hydrateStoreFromSupabase();
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
   let store;
@@ -884,6 +955,7 @@ async function writeStore(store) {
   const tempPath = `${moduleStorePath}.tmp`;
   await fs.writeFile(tempPath, JSON.stringify(store, null, 2));
   await fs.rename(tempPath, moduleStorePath);
+  await persistStoreToSupabase(store);
 }
 
 function findReport(store, reportId) {
@@ -3716,9 +3788,9 @@ function renderTwoPageReportHtml(store, report) {
       const realAbove = yr <= yi;
       let cyReal = clampChip(realAbove ? yr - 14 : yr + 16);
       let cyIdeal = clampChip(realAbove ? yi + 16 : yi - 14);
-      if (Math.abs(cyReal - cyIdeal) < 18) cyIdeal = clampChip(cyReal - 20) === cyReal ? cyReal + 20 : cyReal - 20;
+      if (Math.abs(cyReal - cyIdeal) < 21) cyIdeal = clampChip(cyReal - 23) === cyReal ? cyReal + 23 : cyReal - 23;
       const chip = (cy, color, text) =>
-        `<g><rect x="${x - 27}" y="${cy - 9}" width="54" height="17" rx="2" fill="${color}"/>` +
+        `<g><rect x="${x - 31}" y="${cy - 10}" width="62" height="19" rx="2" fill="${color}"/>` +
         `<text x="${x}" y="${cy + 4}" text-anchor="middle" class="chip">${text}</text></g>`;
       return (p.costPercent ? chip(cyReal, NAVY, fmtPct(p.costPercent)) : "") +
         (p.idealCostPercent ? chip(cyIdeal, GREEN, fmtPct(p.idealCostPercent)) : "");
@@ -3727,7 +3799,7 @@ function renderTwoPageReportHtml(store, report) {
       `<text x="${xAt(i)}" y="${B + 16}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.barlab{font:700 12.5px Calibri,Arial;fill:#fff}.barlab-out{font:700 11px Calibri,Arial;fill:#8c8c8c}.chip{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:12px Calibri,Arial;fill:#808080}.barlab{font:700 14.5px Calibri,Arial;fill:#fff}.barlab-out{font:700 12.5px Calibri,Arial;fill:#8c8c8c}.chip{font:700 12.5px Calibri,Arial;fill:#fff}.leg{font:12.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${rightAxis}${bars}
       ${linePath("costPercent", NAVY)}${linePath("idealCostPercent", GREEN)}
       ${chips}${xLabels}
@@ -3760,16 +3832,16 @@ function renderTwoPageReportHtml(store, report) {
       const yc = T + (i + 0.5) * rowH;
       const x0 = xAt(0); const x1 = xAt(item.amount);
       const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
-      const chipX = item.amount >= 0 ? x1 + 2 : x1 - 56;
+      const chipX = item.amount >= 0 ? x1 + 2 : x1 - 64;
       return `<rect x="${bx}" y="${yc - 9}" width="${bw}" height="18" fill="${color}"/>` +
-        `<rect x="${chipX}" y="${yc - 9}" width="54" height="17" rx="2" fill="${color}"/>` +
-        `<text x="${chipX + 27}" y="${yc + 4}" text-anchor="middle" class="chip">${fmtK(item.amount)}</text>`;
+        `<rect x="${chipX}" y="${yc - 10}" width="62" height="19" rx="2" fill="${color}"/>` +
+        `<text x="${chipX + 31}" y="${yc + 4.5}" text-anchor="middle" class="chip">${fmtK(item.amount)}</text>`;
     }).join("");
     const legend = rows.map((item, i) =>
       `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${paletteFor(item.family, i)}"/>` +
       `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.chip{font:700 10.5px Calibri,Arial;fill:#fff}.leg{font:700 11px Calibri,Arial;fill:#404040}</style>
+      <style>.ax{font:12px Calibri,Arial;fill:#808080}.chip{font:700 12px Calibri,Arial;fill:#fff}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
       ${grid}
       <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#9a9a9a"/>
       ${bars}${legend}
@@ -3804,7 +3876,7 @@ function renderTwoPageReportHtml(store, report) {
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra para las semanas consultadas.</text>`;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:9px Calibri,Arial;fill:#808080}.leg{font:10px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${emptyNote}
       ${rawMaxPurchase ? area("suggestedCost", GREEN, 0.5) + area("purchasedCost", NAVY, 0.42) : ""}
       ${xLabels}
@@ -3851,7 +3923,7 @@ function renderTwoPageReportHtml(store, report) {
     const linePts = covered.map((item) => `${xAt(item.i)},${yDays(item.days)}`).join(" ");
     const chips = covered.map((item) => {
       const x = xAt(item.i); const y = Math.max(T + 12, yDays(item.days) - 16);
-      return `<rect x="${x - 28}" y="${y - 9}" width="56" height="16" rx="2" fill="${TEAL}"/>` +
+      return `<rect x="${x - 32}" y="${y - 10}" width="64" height="18" rx="2" fill="${TEAL}"/>` +
         `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${item.days.toFixed(1)} días</text>`;
     }).join("");
     const covEmptyNote = rawMaxCov
@@ -3861,7 +3933,7 @@ function renderTwoPageReportHtml(store, report) {
       `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:9px Calibri,Arial;fill:#808080}.rotlab{font:700 9.5px Calibri,Arial;fill:#fff}.chipteal{font:700 9.5px Calibri,Arial;fill:#fff}.leg{font:9.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.rotlab{font:700 11px Calibri,Arial;fill:#fff}.chipteal{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${rightAxis}${bars}${covEmptyNote}
       ${covered.length > 1 ? `<polyline points="${linePts}" fill="none" stroke="${TEAL}" stroke-width="2.2"/>` : ""}
       ${chips}${xLabels}
@@ -3897,17 +3969,17 @@ function renderTwoPageReportHtml(store, report) {
       const bar = (v, y, color) => {
         if (!v) return "";
         const bw = Math.max(3, xAt(v) - L);
-        const chipX = Math.max(L + 2, xAt(v) - 52);
+        const chipX = Math.max(L + 2, xAt(v) - 58);
         return `<rect x="${L}" y="${y}" width="${bw}" height="15" fill="${color}"/>` +
-          `<rect x="${chipX}" y="${y - 0.5}" width="50" height="16" rx="2" fill="${color}" stroke="#fff" stroke-width="0.8"/>` +
-          `<text x="${chipX + 25}" y="${y + 11}" text-anchor="middle" class="chip">${fmtK(v)}</text>`;
+          `<rect x="${chipX}" y="${y - 1.5}" width="56" height="18" rx="2" fill="${color}" stroke="#fff" stroke-width="0.8"/>` +
+          `<text x="${chipX + 28}" y="${y + 12}" text-anchor="middle" class="chip">${fmtK(v)}</text>`;
       };
       return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(truncateLabel(row.family, 16))}</text>` +
         (rawMaxFam ? bar(row.purchased, yc - 18, NAVY) + bar(row.suggested, yc + 3, GREEN) : "");
     }).join("");
     const legendY = H - 10;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:9px Calibri,Arial;fill:#808080}.fam{font:700 10.5px Calibri,Arial;fill:${GRAY_TXT}}.chip{font:700 9.5px Calibri,Arial;fill:#fff}.leg{font:10px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.fam{font:700 12px Calibri,Arial;fill:${GRAY_TXT}}.chip{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${bars}${famEmptyNote}
       <rect x="${W / 2 - 112}" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="${W / 2 - 100}" y="${legendY}" class="leg">Compra Realizada</text>
       <rect x="${W / 2 + 8}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 + 20}" y="${legendY}" class="leg">Compra Sugerida</text>
@@ -3969,32 +4041,32 @@ function renderTwoPageReportHtml(store, report) {
     .toolbar button { background: ${NAVY}; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 16px; }
     .bv-page { background: #fff; margin: 0 auto 16px; max-width: 800px; padding: 12px 20px 8px; }
     .bv-head { align-items: start; display: grid; grid-template-columns: 100px 1fr 150px; margin-bottom: 10px; }
-    .bv-title h1 { color: #262626; font-size: 34px; margin: 8px 0 0; text-align: center; }
+    .bv-title h1 { color: #262626; font-size: 36px; margin: 8px 0 0; text-align: center; }
     .bv-underline { background: ${TEAL}; height: 4px; margin: 6px auto 0; width: 300px; }
-    .bv-period { border: 1px solid ${TEAL}; box-shadow: 0 0 0 2px #fff, 0 0 0 3px ${TEAL}; font-size: 12px; margin-top: 4px; }
+    .bv-period { border: 1px solid ${TEAL}; box-shadow: 0 0 0 2px #fff, 0 0 0 3px ${TEAL}; font-size: 13.5px; margin-top: 4px; }
     .bv-period-title { border-bottom: 1px solid ${TEAL}; color: #333; padding: 2px 8px; text-align: center; }
     .bv-period-row { display: flex; justify-content: space-between; padding: 1px 8px; }
     .bv-period-row b { font-weight: 700; }
     .bv-panel { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 10px; }
-    .bv-panel h2 { color: #8c8c8c; font-size: 17px; font-weight: 700; margin: 2px 0 6px; text-align: center; }
+    .bv-panel h2 { color: #8c8c8c; font-size: 19px; font-weight: 700; margin: 2px 0 6px; text-align: center; }
     .bv-svg { display: block; height: auto; width: 100%; }
     .bv-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 218px; margin-bottom: 10px; }
     .bv-kpis { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; position: relative; }
     .bv-kpi { border: 2px solid ${NAVY}; }
-    .bv-kpi-head { background: ${NAVY}; color: #fff; font-size: 14px; font-weight: 700; padding: 4px 6px; text-align: center; }
-    .bv-kpi-value { color: #1a1a1a; font-size: 24px; font-weight: 700; padding: 7px 6px; text-align: center; }
-    .bv-arrow { position: absolute; right: -14px; top: 118px; }
+    .bv-kpi-head { background: ${NAVY}; color: #fff; font-size: 15.5px; font-weight: 700; padding: 4px 6px; text-align: center; }
+    .bv-kpi-value { color: #1a1a1a; font-size: 28px; font-weight: 700; padding: 7px 6px; text-align: center; }
+    .bv-arrow { position: absolute; right: -14px; top: 146px; }
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
-    .bv-ctitle { color: #76a73e; font-size: 14px; margin: 6px 0 4px; }
+    .bv-ctitle { color: #76a73e; font-size: 16px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
     .bv-citem span { color: #333; }
-    .bv-citem p { color: #333; font-size: 12px; line-height: 1.35; margin: 0; text-align: justify; }
+    .bv-citem p { color: #333; font-size: 13.5px; line-height: 1.4; margin: 0; text-align: justify; }
     .bv-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    .bv-table-title { background: ${TEAL}; color: #fff; font-size: 14.5px; font-weight: 700; padding: 5px; text-align: center; }
-    .bv-table th { background: #404040; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 6px; }
+    .bv-table-title { background: ${TEAL}; color: #fff; font-size: 16px; font-weight: 700; padding: 5px; text-align: center; }
+    .bv-table th { background: #404040; color: #fff; font-size: 12.5px; font-weight: 700; padding: 3px 6px; }
     .bv-table th:first-child { text-align: left; }
     .bv-table th:not(:first-child) { text-align: right; }
-    .bv-table td { border: 1px solid #7f7f7f; font-size: 11.5px; padding: 2.5px 6px; }
+    .bv-table td { border: 1px solid #7f7f7f; font-size: 13px; padding: 3px 7px; }
     .bv-table tr.alt td { background: #dcecea; }
     .bv-table .tname { width: 32%; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
