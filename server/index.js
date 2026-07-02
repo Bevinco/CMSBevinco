@@ -875,27 +875,25 @@ function lastFourPeriods(store, selectedPeriodId) {
   return store.periods.slice(selectedIndex, selectedIndex + 4);
 }
 
+// Historial de las ultimas 4 semanas usando SOLO datos reales sincronizados.
+// Un reporte de auditoria no puede inventar cifras: si una semana no fue
+// consultada, sus valores quedan en 0 y los graficos la omiten.
 function historyForReport(store, report) {
   const periods = lastFourPeriods(store, report.periodId);
-  return periods.map((period, index) => {
+  return periods.map((period) => {
     const existing = store.reports.find(
       (candidate) => candidate.clientId === report.clientId && candidate.periodId === period.id,
     );
-
     const summarySource = existing?.summary || (period.id === report.periodId ? report.summary : null);
 
     return {
       periodId: period.id,
       label: period.label,
       endsAt: period.endsAt || "",
-      revenue: existing?.summary?.revenue || Math.round((report.summary.revenue || 0) * (1 - index * 0.04)),
-      costPercent: existing?.summary?.costPercent || Number((report.summary.costPercent + index * 0.7).toFixed(1)),
-      idealCostPercent:
-        existing?.summary?.idealCostPercent ||
-        report.summary.idealCostPercent ||
-        Number(Math.max(0, (report.summary.costPercent || 0) - 1.5).toFixed(1)),
-      varianceAmount:
-        existing?.summary?.varianceAmount || Math.round((report.summary.varianceAmount || 0) * (1 - index * 0.18)),
+      revenue: summarySource?.revenue || 0,
+      costPercent: summarySource?.costPercent || 0,
+      idealCostPercent: summarySource?.idealCostPercent || 0,
+      varianceAmount: summarySource?.varianceAmount || 0,
       usedCost: summarySource?.usedCost || Math.round(((summarySource?.costPercent || 0) / 100) * (summarySource?.revenue || 0)),
       inventoryCost: summarySource?.inventoryCost || 0,
       purchasedCost: summarySource?.purchasedCost || 0,
@@ -1026,7 +1024,46 @@ function aggregateByFamily(entries) {
 // Cocinas: las categorias (Vacuno, Pollo, Pan...) no calzan con las familias
 // de bebidas y todo caia en "Otros". Cuando "Otros" domina, se agrupa por las
 // categorias reales del reporte (top 7 por impacto).
-function aggregateReportGroups(entries) {
+// Excluye totales "padre" (ej. "Total Whisky" que agrupa Scotch/Irish/Bourbon):
+// un total cuyo valor coincide con la suma de los totales anteriores contiguos
+// duplicaria el monto de la familia.
+function dropParentTotals(entries) {
+  const kept = [...entries];
+  const tolerance = (value) => Math.max(3, Math.abs(value) * 0.01);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < kept.length && !changed; i += 1) {
+      const value = kept[i].value || 0;
+      if (!value) continue;
+      // padre despues de los hijos (Total Whisky tras Scotch/Irish/Bourbon)
+      let accumulated = 0;
+      for (let back = i - 1; back >= 0 && i - back <= 12; back -= 1) {
+        accumulated += kept[back].value || 0;
+        if (Math.abs(accumulated - value) <= tolerance(value)) {
+          kept.splice(i, 1);
+          changed = true;
+          break;
+        }
+      }
+      if (changed) break;
+      // padre antes de los hijos (encabezado de grupo con el total ya cargado)
+      accumulated = 0;
+      for (let forward = i + 1; forward < kept.length && forward - i <= 12; forward += 1) {
+        accumulated += kept[forward].value || 0;
+        if (Math.abs(accumulated - value) <= tolerance(value)) {
+          kept.splice(i, 1);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  return kept;
+}
+
+function aggregateReportGroups(rawEntries) {
+  const entries = dropParentTotals(rawEntries);
   const familyRows = aggregateByFamily(entries);
   const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
   const otherAbs = Math.abs(familyRows.find((row) => row.family === "Otros")?.value || 0);
@@ -1034,12 +1071,7 @@ function aggregateReportGroups(entries) {
   if (!totalAbs || otherAbs / totalAbs <= 0.5) return familyRows;
 
   const byCategory = new Map();
-  let previousValue = null;
   for (const { category, value } of entries) {
-    // Los reportes de cocina traen totales anidados (ej. "Palta" y su grupo
-    // "Verduras" con el mismo monto): el total padre consecutivo se descarta.
-    if (previousValue !== null && Math.round(value || 0) === previousValue) continue;
-    previousValue = Math.round(value || 0);
     const key = cleanTotalName(category || "") || "Sin categoria";
     byCategory.set(key, (byCategory.get(key) || 0) + (value || 0));
   }
@@ -2558,11 +2590,17 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           }
           report.summary = merged;
         }
-        if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
-        if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
-        if (metrics.familyVariances?.some((item) => item.amount)) report.familyVariances = metrics.familyVariances;
-        if (metrics.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = metrics.familyPurchases;
-        if (metrics.topUsageProducts?.length) report.topUsageProducts = metrics.topUsageProducts;
+        // Solo el variance DETAILED define categorias, familias y productos:
+        // el summary tiene otra estructura de filas y duplicaba los montos.
+        if (type === "varianceDetailed" || !report.categoryVariances?.length) {
+          if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
+          if (metrics.familyVariances?.some((item) => item.amount)) report.familyVariances = metrics.familyVariances;
+          if (metrics.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = metrics.familyPurchases;
+        }
+        if (type === "varianceDetailed" || !report.topProducts?.length) {
+          if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
+          if (metrics.topUsageProducts?.length) report.topUsageProducts = metrics.topUsageProducts;
+        }
         if (type === "varianceDetailed") {
           const purchaseActuals = extractPurchaseActuals(data);
           if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
@@ -2570,13 +2608,20 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       }
 
       if (type === "intelipar") {
-        const suggestions = data.rows.slice(0, 12).map((row) => ({
-          item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
-          provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
-          stock: pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || ""),
-          suggested: pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || ""),
-          note: pickRecordValue(row.record, ["note", "nota", "excesoDeInventario", "díasRestantes"], "Revisar contra proveedor actualizado"),
-        })).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
+        const suggestions = data.rows.slice(0, 12).map((row) => {
+          const excessCost = parseNumber(pickRecordValue(row.record, ["excesoDeInventario", "excessInventory"], ""));
+          const daysRemaining = parseNumber(pickRecordValue(row.record, ["dAsRestantes", "diasRestantes", "daysRemaining"], ""));
+          const note = excessCost
+            ? `Exceso ${moneyPlain(excessCost)}${daysRemaining ? `, ${daysRemaining.toFixed(1)} dias restantes` : ""}`
+            : "Validar proveedor y sugerencia antes del envio";
+          return {
+            item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
+            provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
+            stock: pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || ""),
+            suggested: pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || ""),
+            note,
+          };
+        }).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
         if (suggestions.length) report.purchaseSuggestions = suggestions;
 
         const suggestedEntries = data.rows
@@ -3593,18 +3638,22 @@ function renderTwoPageReportHtml(store, report) {
     const rightAxis = rightTicks.map((v) =>
       `<text x="${R + 8}" y="${yRev(v) + 3}" class="ax">${v ? fmtK(v) : "K"}</text>`).join("");
     const bars = history.map((p, i) => {
+      if (!p.revenue) return "";
       const x = xAt(i) - 21;
       const y = yRev(p.revenue);
       return `<rect x="${x}" y="${y}" width="42" height="${Math.max(2, B - y)}" fill="${TEAL}"/>` +
         `<text x="${xAt(i)}" y="${Math.min(y + 34, B - 6)}" text-anchor="middle" class="barlab">${fmtK(p.revenue)}</text>`;
     }).join("");
     const linePath = (key, color) => {
-      const pts = history.map((p, i) => `${xAt(i)},${yPct(p[key])}`).join(" ");
-      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.4"/>` +
-        history.map((p, i) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
+      const present = history.map((p, i) => ({ p, i })).filter(({ p }) => p[key]);
+      if (!present.length) return "";
+      const pts = present.map(({ p, i }) => `${xAt(i)},${yPct(p[key])}`).join(" ");
+      return (present.length > 1 ? `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.4"/>` : "") +
+        present.map(({ p, i }) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
     };
     const clampChip = (cy) => Math.min(Math.max(cy, T + 9), B - 10);
     const chips = history.map((p, i) => {
+      if (!p.costPercent && !p.idealCostPercent) return "";
       const x = xAt(i);
       const yr = yPct(p.costPercent); const yi = yPct(p.idealCostPercent);
       const realAbove = yr <= yi;
@@ -3614,7 +3663,8 @@ function renderTwoPageReportHtml(store, report) {
       const chip = (cy, color, text) =>
         `<g><rect x="${x - 27}" y="${cy - 9}" width="54" height="17" rx="2" fill="${color}"/>` +
         `<text x="${x}" y="${cy + 4}" text-anchor="middle" class="chip">${text}</text></g>`;
-      return chip(cyReal, NAVY, fmtPct(p.costPercent)) + chip(cyIdeal, GREEN, fmtPct(p.idealCostPercent));
+      return (p.costPercent ? chip(cyReal, NAVY, fmtPct(p.costPercent)) : "") +
+        (p.idealCostPercent ? chip(cyIdeal, GREEN, fmtPct(p.idealCostPercent)) : "");
     }).join("");
     const xLabels = history.map((p, i) =>
       `<text x="${xAt(i)}" y="${B + 16}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
@@ -3788,6 +3838,7 @@ function renderTwoPageReportHtml(store, report) {
     const bars = rows.map((row, i) => {
       const yc = T + (i + 0.5) * groupH;
       const bar = (v, y, color) => {
+        if (!v) return "";
         const bw = Math.max(3, xAt(v) - L);
         const chipX = Math.max(L + 2, xAt(v) - 52);
         return `<rect x="${L}" y="${y}" width="${bw}" height="15" fill="${color}"/>` +
@@ -4471,16 +4522,57 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     queriedReports.push(buildReportPayload(store, report));
   }
 
+  // El grafico historico compara las ultimas 4 semanas con datos REALES: si
+  // las 3 semanas previas al periodo consultado aun no estan sincronizadas,
+  // se traen aqui (una sola vez; despues quedan guardadas).
+  if (sculptureClientPeriods.length && selectedPeriods.length) {
+    const orderedPeriods = [...sculptureClientPeriods].sort((left, right) =>
+      String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)),
+    );
+    const oldestSelected = [...selectedPeriods].sort((left, right) =>
+      String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)),
+    )[0];
+    const selectedIndex = orderedPeriods.findIndex((period) => period.id === oldestSelected.id);
+    const previousPeriods = selectedIndex >= 0 ? orderedPeriods.slice(selectedIndex + 1, selectedIndex + 4) : [];
+
+    for (const rawPeriod of previousPeriods) {
+      const period = ensurePeriod(store, rawPeriod);
+      if (!period) continue;
+      const existing = store.reports.find(
+        (candidate) => candidate.clientId === client.id && candidate.periodId === period.id,
+      );
+      if (existing?.summary?.revenue) continue;
+
+      try {
+        const report = reportForClientPeriod(store, client.id, period.id);
+        await syncSculptureSources(store, report, {
+          cid: sculptureCid,
+          pid: period.sculpturePid || period.pid,
+          area: client.area,
+        });
+      } catch {
+        // La semana previa es opcional: si falla, el grafico la omite.
+      }
+    }
+  }
+
   await writeStore(store);
 
-  const accumulatedReport = accumulateReportPayloads(queriedReports);
+  // Reconstruir los payloads: el historial de 4 semanas debe reflejar las
+  // semanas previas recien sincronizadas.
+  const refreshedReports = queriedReports.map((payload) => {
+    const stored = store.reports.find((item) => item.id === payload.id);
+    return stored ? buildReportPayload(store, stored) : payload;
+  });
+
+  const accumulatedReport = accumulateReportPayloads(refreshedReports);
 
   response.json({
     client,
     clients: store.clients,
     periods: store.periods,
-    selectedReport: queriedReports[0] || null,
-    queriedReports,
+    selectedReport: refreshedReports[0] || null,
+    queriedReports: refreshedReports,
     accumulatedReport,
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     syncResultsByPeriod,
