@@ -3693,8 +3693,13 @@ function renderTwoPageReportHtml(store, report) {
       if (!p.revenue) return "";
       const x = xAt(i) - 21;
       const y = yRev(p.revenue);
-      return `<rect x="${x}" y="${y}" width="42" height="${Math.max(2, B - y)}" fill="${TEAL}"/>` +
-        `<text x="${xAt(i)}" y="${Math.min(y + 34, B - 6)}" text-anchor="middle" class="barlab">${fmtK(p.revenue)}</text>`;
+      const barHeight = B - y;
+      // La cifra va pegada a la base de la barra (como el reporte modelo);
+      // si la barra es muy corta, se coloca sobre ella en gris.
+      const label = barHeight > 26
+        ? `<text x="${xAt(i)}" y="${B - 9}" text-anchor="middle" class="barlab">${fmtK(p.revenue)}</text>`
+        : `<text x="${xAt(i)}" y="${y - 5}" text-anchor="middle" class="barlab-out">${fmtK(p.revenue)}</text>`;
+      return `<rect x="${x}" y="${y}" width="42" height="${Math.max(2, barHeight)}" fill="${TEAL}"/>` + label;
     }).join("");
     const linePath = (key, color) => {
       const present = history.map((p, i) => ({ p, i })).filter(({ p }) => p[key]);
@@ -3722,7 +3727,7 @@ function renderTwoPageReportHtml(store, report) {
       `<text x="${xAt(i)}" y="${B + 16}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.barlab{font:700 12.5px Calibri,Arial;fill:#fff}.chip{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.barlab{font:700 12.5px Calibri,Arial;fill:#fff}.barlab-out{font:700 11px Calibri,Arial;fill:#8c8c8c}.chip{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${rightAxis}${bars}
       ${linePath("costPercent", NAVY)}${linePath("idealCostPercent", GREEN)}
       ${chips}${xLabels}
@@ -3934,9 +3939,9 @@ function renderTwoPageReportHtml(store, report) {
       <div class="bv-kpi-head">${escapeHtml(title)}</div>
       <div class="bv-kpi-value">${value}</div>
     </div>`;
-  const kpiArrow = `<svg viewBox="0 0 70 84" width="46" height="55" class="bv-arrow" aria-hidden="true">
-    <path d="M8 12 C46 14 56 36 44 58" fill="none" stroke="${NAVY}" stroke-width="10" stroke-linecap="round"/>
-    <polygon points="58,50 38,78 26,48" fill="${NAVY}"/>
+  const kpiArrow = `<svg viewBox="0 0 60 96" width="42" height="67" class="bv-arrow" aria-hidden="true">
+    <path d="M6 8 C46 16 50 48 32 70" fill="none" stroke="${NAVY}" stroke-width="9" stroke-linecap="round"/>
+    <polygon points="46,62 24,88 14,56" fill="${NAVY}"/>
   </svg>`;
 
   const productRows = tableProducts.map((item, index) => {
@@ -3978,7 +3983,7 @@ function renderTwoPageReportHtml(store, report) {
     .bv-kpi { border: 2px solid ${NAVY}; }
     .bv-kpi-head { background: ${NAVY}; color: #fff; font-size: 14px; font-weight: 700; padding: 4px 6px; text-align: center; }
     .bv-kpi-value { color: #1a1a1a; font-size: 24px; font-weight: 700; padding: 7px 6px; text-align: center; }
-    .bv-arrow { position: absolute; right: -12px; top: 132px; }
+    .bv-arrow { position: absolute; right: -14px; top: 118px; }
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
     .bv-ctitle { color: #76a73e; font-size: 14px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
