@@ -279,6 +279,9 @@ function normalizeHeader(value) {
   return value
     .trim()
     .replace(/\s+/g, " ")
+    // Sin esto, "Usado (Costo)" generaba la clave rota "usadoCosto)" y ninguna
+    // columna de costos calzaba al leer los reportes de Sculpture.
+    .replace(/[^a-zA-Z0-9]+$/g, "")
     .replace(/[^a-zA-Z0-9]+(.)/g, (_, char) => char.toUpperCase())
     .replace(/^[A-Z]/, (char) => char.toLowerCase());
 }
@@ -907,8 +910,8 @@ function parseNumber(value) {
     .replace(/\s/g, "")
     .trim();
 
-  const isNegative = normalized.startsWith("-") || normalized.startsWith("(");
-  normalized = normalized.replace(/[()+-]/g, "");
+  const isNegative = normalized.startsWith("-") || normalized.startsWith("−") || normalized.startsWith("(");
+  normalized = normalized.replace(/[()+−-]/g, "");
 
   if (normalized.includes(",") && normalized.includes(".")) {
     normalized = normalized.replace(/,/g, "");
@@ -1020,6 +1023,33 @@ function aggregateByFamily(entries) {
     .map(([family, value]) => ({ family, value: Math.round(value) }));
 }
 
+// Cocinas: las categorias (Vacuno, Pollo, Pan...) no calzan con las familias
+// de bebidas y todo caia en "Otros". Cuando "Otros" domina, se agrupa por las
+// categorias reales del reporte (top 7 por impacto).
+function aggregateReportGroups(entries) {
+  const familyRows = aggregateByFamily(entries);
+  const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
+  const otherAbs = Math.abs(familyRows.find((row) => row.family === "Otros")?.value || 0);
+
+  if (!totalAbs || otherAbs / totalAbs <= 0.5) return familyRows;
+
+  const byCategory = new Map();
+  let previousValue = null;
+  for (const { category, value } of entries) {
+    // Los reportes de cocina traen totales anidados (ej. "Palta" y su grupo
+    // "Verduras" con el mismo monto): el total padre consecutivo se descarta.
+    if (previousValue !== null && Math.round(value || 0) === previousValue) continue;
+    previousValue = Math.round(value || 0);
+    const key = cleanTotalName(category || "") || "Sin categoria";
+    byCategory.set(key, (byCategory.get(key) || 0) + (value || 0));
+  }
+  return [...byCategory.entries()]
+    .map(([family, value]) => ({ family, value: Math.round(value) }))
+    .filter((row) => row.value)
+    .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+    .slice(0, 7);
+}
+
 // Variaciones (ahorro/faltante) agregadas por familia, para el grafico de
 // barras divergentes del PDF.
 function buildFamilyVariances(varianceRows) {
@@ -1029,7 +1059,7 @@ function buildFamilyVariances(varianceRows) {
       category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
       value: parseNumber(row["Diferencia (Costo)"]),
     }));
-  return aggregateByFamily(entries).map(({ family, value }) => ({ family, amount: value }));
+  return aggregateReportGroups(entries).map(({ family, value }) => ({ family, amount: value }));
 }
 
 // Compra realizada ($) por familia, desde los totales del variance.
@@ -1040,7 +1070,7 @@ function buildFamilyPurchases(varianceRows) {
       category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
       value: parseNumber(row["Compras (Costo)"]),
     }));
-  return aggregateByFamily(entries).map(({ family, value }) => ({ family, purchased: value }));
+  return aggregateReportGroups(entries).map(({ family, value }) => ({ family, purchased: value }));
 }
 
 // Compra sugerida ($) por familia, desde los totales de Intelipar (Costo Pedido).
@@ -1051,7 +1081,7 @@ function buildFamilySuggested(inteliparRows) {
       category: cleanTotalName(row["Nombre Artículo"] || row["Nombre ArtÃ­culo"]),
       value: parseNumber(row["Costo Pedido"]),
     }));
-  return aggregateByFamily(entries).map(({ family, value }) => ({ family, suggested: value }));
+  return aggregateReportGroups(entries).map(({ family, value }) => ({ family, suggested: value }));
 }
 
 // Top 10 productos por uso ($) para la tabla "Desempeño de los 10 productos
@@ -1701,9 +1731,7 @@ function extractReportMetrics(parsedTable) {
         "diferenciaCosto",
         "ahorroFaltanteCosto",
         "faltanteCosto",
-      ]) ||
-      values[values.length - 1] ||
-      "0";
+      ]) || "0";
     const amount = parseNumber(varianceValue);
     const percentValue =
       pickRecordValue(row.record, ["variancePercent", "differencePercent", "diferencia", "diferenciaPct", "porcentajeDiferencia"]) ||
@@ -1711,7 +1739,7 @@ function extractReportMetrics(parsedTable) {
     const rowRevenue = parseNumber(pickRecordValue(row.record, ["revenue", "ingresos", "sales", "ventas"]));
     const rowUsedCost = parseNumber(pickRecordValue(row.record, ["usedCost", "usadoCosto", "costoUsado", "usageCost"]));
     const rowSoldCost = parseNumber(pickRecordValue(row.record, ["soldCost", "vendidoCosto", "costoVendido", "salesCost"]));
-    const rowCostPercent = parseNumber(pickRecordValue(row.record, ["costPercent", "porcentajeDeCosto", "porcentajeCosto"]));
+    const rowCostPercent = parseNumber(pickRecordValue(row.record, ["costPercent", "porcentajeDeCosto", "porcentajeCosto", "costoDeAlimentos", "pourCost"]));
     const rowWasteCost = parseNumber(pickRecordValue(row.record, ["wasteCost", "desperdicioCosto", "mermaCosto"]));
     const rowInventoryCost = parseNumber(pickRecordValue(row.record, ["inventoryCost", "existenciaCosto", "stockCosto"]));
     const rowPurchasedCost = parseNumber(pickRecordValue(row.record, ["purchasedCost", "comprasCosto", "compraCosto"]));
@@ -1720,7 +1748,7 @@ function extractReportMetrics(parsedTable) {
       grandSummary = {
         revenue: rowRevenue,
         costPercent: rowCostPercent,
-        idealCostPercent: parseNumber(pickRecordValue(row.record, ["idealCostPercent", "porcentajeDeCostoIdeal", "porcentajeCostoIdeal"])),
+        idealCostPercent: parseNumber(pickRecordValue(row.record, ["idealCostPercent", "porcentajeDeCostoIdeal", "porcentajeCostoIdeal", "costoDeAlimentosIdeal", "pourCostIdeal"])),
         variancePercent: parseNumber(percentValue),
         varianceAmount: amount,
       };
@@ -1792,10 +1820,10 @@ function extractReportMetrics(parsedTable) {
           varianceAmount: varianceTotal,
         },
     categoryVariances: categoryVariances.slice(0, 8),
-    familyVariances: aggregateByFamily(
+    familyVariances: aggregateReportGroups(
       categoryVariances.map((item) => ({ category: item.category, value: item.amount })),
     ).map(({ family, value }) => ({ family, amount: value })),
-    familyPurchases: aggregateByFamily(
+    familyPurchases: aggregateReportGroups(
       [...categoryPurchases.entries()].map(([category, value]) => ({ category, value })),
     ).map(({ family, value }) => ({ family, purchased: value })),
     topUsageProducts: usageProducts.sort((left, right) => right.usedCost - left.usedCost).slice(0, 10),
@@ -2521,7 +2549,14 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           metrics.summary.varianceAmount ||
           metrics.summary.variancePercent
         ) {
-          report.summary = metrics.summary;
+          // El variance summary no trae columnas por producto: al fusionar se
+          // conservan los campos (usado, inventario, merma) que el detailed
+          // ya haya llenado y la otra tabla traiga en cero.
+          const merged = { ...metrics.summary };
+          for (const [key, value] of Object.entries(report.summary || {})) {
+            if (value && !merged[key]) merged[key] = value;
+          }
+          report.summary = merged;
         }
         if (metrics.categoryVariances.length) report.categoryVariances = metrics.categoryVariances;
         if (metrics.topProducts.length) report.topProducts = metrics.topProducts;
@@ -2553,7 +2588,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             category: cleanTotalName(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "")),
             value: parseNumber(pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"])),
           }));
-        const familySuggested = aggregateByFamily(suggestedEntries).map(({ family, value }) => ({ family, suggested: value }));
+        const familySuggested = aggregateReportGroups(suggestedEntries).map(({ family, value }) => ({ family, suggested: value }));
         if (familySuggested.some((item) => item.suggested)) {
           report.familySuggested = familySuggested;
           report.summary = report.summary || {};
@@ -3494,6 +3529,17 @@ function renderTwoPageReportHtml(store, report) {
     return match ? `${match[3]}-${match[2]}-${match[1]}` : "";
   };
   const niceCeil = (value, step) => Math.max(step, Math.ceil((value || 0) / step) * step);
+  // Paso "bonito" para ejes segun la magnitud de los datos (1/2/2.5/5 x 10^n).
+  const niceStep = (maxValue, ticks = 5) => {
+    const rough = Math.max(1, (maxValue || 1) / ticks);
+    const power = Math.pow(10, Math.floor(Math.log10(rough)));
+    for (const base of [1, 2, 2.5, 5, 10]) {
+      if (base * power >= rough) return base * power;
+    }
+    return 10 * power;
+  };
+  const paletteFor = (name, index) =>
+    FAMILY_COLORS[name] || ["#10243e", "#2e75b6", "#90bf4f", "#8bc6c1", "#8c5f42", "#a6a6a6", "#c9b26a"][index % 7];
 
   // ---- Datos ----
   const history = [...(payload.history || [])].sort((a, b) => String(a.endsAt || a.label).localeCompare(String(b.endsAt || b.label)));
@@ -3502,11 +3548,15 @@ function renderTwoPageReportHtml(store, report) {
     : REPORT_FAMILIES.map((family) => ({ family, amount: 0 })));
   const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
   const suggestedMap = new Map((payload.familySuggested || []).map((item) => [item.family, item.suggested || 0]));
-  const familyPurchaseRows = REPORT_FAMILIES.map((family) => ({
-    family,
-    purchased: purchasesMap.get(family) || 0,
-    suggested: suggestedMap.get(family) || 0,
-  }));
+  const familyNames = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys(), ...REPORT_FAMILIES])];
+  const familyPurchaseRows = familyNames
+    .map((family) => ({
+      family,
+      purchased: purchasesMap.get(family) || 0,
+      suggested: suggestedMap.get(family) || 0,
+    }))
+    .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
+    .slice(0, 7);
   const savings = familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
   const shortages = familyVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
   const waste = Math.abs(payload.summary?.wasteCost || 0);
@@ -3527,7 +3577,8 @@ function renderTwoPageReportHtml(store, report) {
     const L = 56; const R = 644; const T = 30; const B = 186;
     const plotW = R - L; const plotH = B - T;
     const n = Math.max(history.length, 1);
-    const revMax = niceCeil(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15, 1e7);
+    const revStep = niceStep(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15);
+    const revMax = niceCeil(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15, revStep);
     const pctMax = niceCeil(Math.max(...history.map((p) => Math.max(p.costPercent || 0, p.idealCostPercent || 0)), 1) * 1.1, 5);
     const xAt = (i) => L + ((i + 0.5) * plotW) / n;
     const yPct = (v) => B - ((v || 0) / pctMax) * plotH;
@@ -3538,7 +3589,7 @@ function renderTwoPageReportHtml(store, report) {
       `<line x1="${L}" y1="${yPct(v)}" x2="${R}" y2="${yPct(v)}" stroke="#e3e3e3" stroke-width="1"/>` +
       `<text x="${L - 6}" y="${yPct(v) + 3}" text-anchor="end" class="ax">${v.toFixed(1)}%</text>`).join("");
     const rightTicks = [];
-    for (let v = 0; v <= revMax; v += 1e7) rightTicks.push(v);
+    for (let v = 0; v <= revMax; v += revStep) rightTicks.push(v);
     const rightAxis = rightTicks.map((v) =>
       `<text x="${R + 8}" y="${yRev(v) + 3}" class="ax">${v ? fmtK(v) : "K"}</text>`).join("");
     const bars = history.map((p, i) => {
@@ -3552,15 +3603,18 @@ function renderTwoPageReportHtml(store, report) {
       return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.4"/>` +
         history.map((p, i) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
     };
+    const clampChip = (cy) => Math.min(Math.max(cy, T + 9), B - 10);
     const chips = history.map((p, i) => {
       const x = xAt(i);
       const yr = yPct(p.costPercent); const yi = yPct(p.idealCostPercent);
       const realAbove = yr <= yi;
+      let cyReal = clampChip(realAbove ? yr - 14 : yr + 16);
+      let cyIdeal = clampChip(realAbove ? yi + 16 : yi - 14);
+      if (Math.abs(cyReal - cyIdeal) < 18) cyIdeal = clampChip(cyReal - 20) === cyReal ? cyReal + 20 : cyReal - 20;
       const chip = (cy, color, text) =>
         `<g><rect x="${x - 27}" y="${cy - 9}" width="54" height="17" rx="2" fill="${color}"/>` +
         `<text x="${x}" y="${cy + 4}" text-anchor="middle" class="chip">${text}</text></g>`;
-      return chip(realAbove ? yr - 14 : yr + 16, NAVY, fmtPct(p.costPercent)) +
-        chip(realAbove ? yi + 16 : yi - 14, GREEN, fmtPct(p.idealCostPercent));
+      return chip(cyReal, NAVY, fmtPct(p.costPercent)) + chip(cyIdeal, GREEN, fmtPct(p.idealCostPercent));
     }).join("");
     const xLabels = history.map((p, i) =>
       `<text x="${xAt(i)}" y="${B + 16}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
@@ -3584,7 +3638,8 @@ function renderTwoPageReportHtml(store, report) {
     const W = 470; const H = 240;
     const L = 150; const R = 452; const T = 22; const B = 200;
     const plotW = R - L; const plotH = B - T;
-    const rows = familyVariances.filter((item) => REPORT_FAMILIES.includes(item.family) || item.amount);
+    const nonZero = familyVariances.filter((item) => item.amount);
+    const rows = nonZero.length ? nonZero : familyVariances.slice(0, 6);
     const maxAbs = niceCeil(Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.25, 5e4);
     const xAt = (v) => L + ((v + maxAbs) / (2 * maxAbs)) * plotW;
     const ticks = [];
@@ -3594,7 +3649,7 @@ function renderTwoPageReportHtml(store, report) {
       `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v === 0 ? "K" : fmtK(v)}</text>`).join("");
     const rowH = plotH / Math.max(rows.length, 1);
     const bars = rows.map((item, i) => {
-      const color = FAMILY_COLORS[item.family] || "#999";
+      const color = paletteFor(item.family, i);
       const yc = T + (i + 0.5) * rowH;
       const x0 = xAt(0); const x1 = xAt(item.amount);
       const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
@@ -3604,7 +3659,7 @@ function renderTwoPageReportHtml(store, report) {
         `<text x="${chipX + 27}" y="${yc + 4}" text-anchor="middle" class="chip">${fmtK(item.amount)}</text>`;
     }).join("");
     const legend = rows.map((item, i) =>
-      `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${FAMILY_COLORS[item.family] || "#999"}"/>` +
+      `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${paletteFor(item.family, i)}"/>` +
       `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.chip{font:700 10.5px Calibri,Arial;fill:#fff}.leg{font:700 11px Calibri,Arial;fill:#404040}</style>
@@ -3620,27 +3675,31 @@ function renderTwoPageReportHtml(store, report) {
     const L = 46; const R = 326; const T = 26; const B = 172;
     const plotW = R - L; const plotH = B - T;
     const n = Math.max(history.length, 1);
-    const maxV = niceCeil(Math.max(...history.map((p) => Math.max(p.purchasedCost || 0, p.suggestedCost || 0)), 1) * 1.15, 2e6);
+    const rawMaxPurchase = Math.max(...history.map((p) => Math.max(p.purchasedCost || 0, p.suggestedCost || 0)), 0);
+    const stepP = niceStep(Math.max(rawMaxPurchase, 1) * 1.15);
+    const maxV = niceCeil(Math.max(rawMaxPurchase, 1) * 1.15, stepP);
     const xAt = (i) => L + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
     const yAt = (v) => B - ((v || 0) / maxV) * plotH;
     const ticks = [];
-    for (let v = 0; v <= maxV; v += 2e6) ticks.push(v);
+    for (let v = 0; v <= maxV; v += stepP) ticks.push(v);
     const grid = ticks.map((v) =>
       `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
-      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
     const area = (key, color, opacity) => {
       const pts = history.map((p, i) => `${xAt(i)},${yAt(p[key])}`).join(" ");
       return `<polygon points="${xAt(0)},${B} ${pts} ${xAt(n - 1)},${B}" fill="${color}" opacity="${opacity}"/>` +
         `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
     };
     const xLabels = history.map((p, i) =>
-      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
+    const emptyNote = rawMaxPurchase
+      ? ""
+      : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra para las semanas consultadas.</text>`;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:9px Calibri,Arial;fill:#808080}.leg{font:10px Calibri,Arial;fill:${GRAY_TXT}}</style>
-      ${grid}
-      ${area("suggestedCost", GREEN, 0.5)}
-      ${area("purchasedCost", NAVY, 0.42)}
+      ${grid}${emptyNote}
+      ${rawMaxPurchase ? area("suggestedCost", GREEN, 0.5) + area("purchasedCost", NAVY, 0.42) : ""}
       ${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
@@ -3654,17 +3713,19 @@ function renderTwoPageReportHtml(store, report) {
     const L = 48; const R = 296; const T = 26; const B = 188;
     const plotW = R - L; const plotH = B - T;
     const n = Math.max(history.length, 1);
-    const maxV = niceCeil(Math.max(...history.map((p) => Math.max(p.inventoryCost || 0, p.usedCost || 0)), 1) * 1.15, 1e7);
+    const rawMaxCov = Math.max(...history.map((p) => Math.max(p.inventoryCost || 0, p.usedCost || 0)), 0);
+    const stepC = niceStep(Math.max(rawMaxCov, 1) * 1.15);
+    const maxV = niceCeil(Math.max(rawMaxCov, 1) * 1.15, stepC);
     const coverage = history.map((p) => (p.usedCost ? (p.inventoryCost / (p.usedCost / 7)) : 0));
     const maxDays = niceCeil(Math.max(...coverage, 1) * 1.2, 5);
     const xAt = (i) => L + ((i + 0.5) * plotW) / n;
     const yAt = (v) => B - ((v || 0) / maxV) * plotH;
     const yDays = (v) => B - ((v || 0) / maxDays) * plotH;
     const ticksLeft = [];
-    for (let v = 0; v <= maxV; v += 1e7) ticksLeft.push(v);
+    for (let v = 0; v <= maxV; v += stepC) ticksLeft.push(v);
     const grid = ticksLeft.map((v) =>
       `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
-      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+      `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
     const ticksRight = [];
     for (let v = 0; v <= maxDays; v += 5) ticksRight.push(v);
     const rightAxis = ticksRight.map((v) =>
@@ -3674,24 +3735,28 @@ function renderTwoPageReportHtml(store, report) {
       const yu = yAt(p.usedCost); const yi = yAt(p.inventoryCost);
       const rot = (bx, by, text) =>
         `<text x="${bx}" y="${by}" class="rotlab" transform="rotate(-90 ${bx} ${by})">${text}</text>`;
-      return `<rect x="${x - 18}" y="${yu}" width="15" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` +
-        `<rect x="${x + 2}" y="${yi}" width="15" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` +
-        (B - yu > 34 ? rot(x - 7, B - 6, fmtK(p.usedCost)) : "") +
-        (B - yi > 34 ? rot(x + 13, B - 6, fmtK(p.inventoryCost)) : "");
+      return (p.usedCost ? `<rect x="${x - 18}" y="${yu}" width="15" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` : "") +
+        (p.inventoryCost ? `<rect x="${x + 2}" y="${yi}" width="15" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` : "") +
+        (p.usedCost && B - yu > 40 ? rot(x - 7, B - 6, fmtK(p.usedCost)) : "") +
+        (p.inventoryCost && B - yi > 40 ? rot(x + 13, B - 6, fmtK(p.inventoryCost)) : "");
     }).join("");
-    const linePts = history.map((p, i) => `${xAt(i)},${yDays(coverage[i])}`).join(" ");
-    const chips = history.map((p, i) => {
-      const x = xAt(i); const y = yDays(coverage[i]) - 16;
+    const covered = history.map((p, i) => ({ i, days: coverage[i] })).filter((item) => item.days > 0);
+    const linePts = covered.map((item) => `${xAt(item.i)},${yDays(item.days)}`).join(" ");
+    const chips = covered.map((item) => {
+      const x = xAt(item.i); const y = Math.max(T + 12, yDays(item.days) - 16);
       return `<rect x="${x - 28}" y="${y - 9}" width="56" height="16" rx="2" fill="${TEAL}"/>` +
-        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${coverage[i].toFixed(1)} días</text>`;
+        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${item.days.toFixed(1)} días</text>`;
     }).join("");
+    const covEmptyNote = rawMaxCov
+      ? ""
+      : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de inventario para las semanas consultadas.</text>`;
     const xLabels = history.map((p, i) =>
       `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:9px Calibri,Arial;fill:#808080}.rotlab{font:700 9.5px Calibri,Arial;fill:#fff}.chipteal{font:700 9.5px Calibri,Arial;fill:#fff}.leg{font:9.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
-      ${grid}${rightAxis}${bars}
-      <polyline points="${linePts}" fill="none" stroke="${TEAL}" stroke-width="2.2"/>
+      ${grid}${rightAxis}${bars}${covEmptyNote}
+      ${covered.length > 1 ? `<polyline points="${linePts}" fill="none" stroke="${TEAL}" stroke-width="2.2"/>` : ""}
       ${chips}${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="14" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="26" y="${legendY}" class="leg">Consumo $</text>
@@ -3705,14 +3770,20 @@ function renderTwoPageReportHtml(store, report) {
     const W = 340; const H = 500;
     const L = 92; const R = 318; const T = 24; const B = 452;
     const plotW = R - L; const plotH = B - T;
-    const rows = familyPurchaseRows;
-    const maxV = niceCeil(Math.max(...rows.map((r) => Math.max(r.purchased, r.suggested)), 1) * 1.25, 5e5);
+    const nonZeroRows = familyPurchaseRows.filter((r) => r.purchased || r.suggested);
+    const rows = nonZeroRows.length ? nonZeroRows : familyPurchaseRows.slice(0, 6);
+    const rawMaxFam = Math.max(...rows.map((r) => Math.max(r.purchased, r.suggested)), 0);
+    const stepF = niceStep(Math.max(rawMaxFam, 1) * 1.25);
+    const maxV = niceCeil(Math.max(rawMaxFam, 1) * 1.25, stepF);
     const xAt = (v) => L + ((v || 0) / maxV) * plotW;
     const ticks = [];
-    for (let v = 0; v <= maxV; v += maxV / 7) ticks.push(v);
+    for (let v = 0; v <= maxV; v += stepF) ticks.push(v);
     const grid = ticks.map((v) =>
       `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e9e9e9"/>` +
-      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v ? fmtK(v) : "0.0K"}</text>`).join("");
+      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
+    const famEmptyNote = rawMaxFam
+      ? ""
+      : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra por familia para este periodo.</text>`;
     const groupH = plotH / rows.length;
     const bars = rows.map((row, i) => {
       const yc = T + (i + 0.5) * groupH;
@@ -3723,14 +3794,13 @@ function renderTwoPageReportHtml(store, report) {
           `<rect x="${chipX}" y="${y - 0.5}" width="50" height="16" rx="2" fill="${color}" stroke="#fff" stroke-width="0.8"/>` +
           `<text x="${chipX + 25}" y="${y + 11}" text-anchor="middle" class="chip">${fmtK(v)}</text>`;
       };
-      return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(row.family)}</text>` +
-        bar(row.purchased, yc - 18, NAVY) +
-        bar(row.suggested, yc + 3, GREEN);
+      return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(truncateLabel(row.family, 16))}</text>` +
+        (rawMaxFam ? bar(row.purchased, yc - 18, NAVY) + bar(row.suggested, yc + 3, GREEN) : "");
     }).join("");
     const legendY = H - 10;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:9px Calibri,Arial;fill:#808080}.fam{font:700 10.5px Calibri,Arial;fill:${GRAY_TXT}}.chip{font:700 9.5px Calibri,Arial;fill:#fff}.leg{font:10px Calibri,Arial;fill:${GRAY_TXT}}</style>
-      ${grid}${bars}
+      ${grid}${bars}${famEmptyNote}
       <rect x="${W / 2 - 112}" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="${W / 2 - 100}" y="${legendY}" class="leg">Compra Realizada</text>
       <rect x="${W / 2 + 8}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 + 20}" y="${legendY}" class="leg">Compra Sugerida</text>
     </svg>`;
@@ -3789,7 +3859,7 @@ function renderTwoPageReportHtml(store, report) {
     body { background: #e9edef; color: #333; font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 0; padding: 16px; }
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 12px; max-width: 800px; }
     .toolbar button { background: ${NAVY}; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 16px; }
-    .bv-page { background: #fff; margin: 0 auto 16px; max-width: 800px; padding: 16px 22px 12px; }
+    .bv-page { background: #fff; margin: 0 auto 16px; max-width: 800px; padding: 12px 20px 8px; }
     .bv-head { align-items: start; display: grid; grid-template-columns: 100px 1fr 150px; margin-bottom: 10px; }
     .bv-title h1 { color: #262626; font-size: 34px; margin: 8px 0 0; text-align: center; }
     .bv-underline { background: ${TEAL}; height: 4px; margin: 6px auto 0; width: 300px; }
@@ -3808,15 +3878,15 @@ function renderTwoPageReportHtml(store, report) {
     .bv-arrow { position: absolute; right: -12px; top: 132px; }
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
     .bv-ctitle { color: #76a73e; font-size: 14px; margin: 6px 0 4px; }
-    .bv-citem { display: flex; gap: 10px; margin: 0 0 5px; }
+    .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
     .bv-citem span { color: #333; }
-    .bv-citem p { color: #333; font-size: 12px; line-height: 1.45; margin: 0; text-align: justify; }
+    .bv-citem p { color: #333; font-size: 12px; line-height: 1.35; margin: 0; text-align: justify; }
     .bv-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
     .bv-table-title { background: ${TEAL}; color: #fff; font-size: 14.5px; font-weight: 700; padding: 5px; text-align: center; }
     .bv-table th { background: #404040; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 6px; }
     .bv-table th:first-child { text-align: left; }
     .bv-table th:not(:first-child) { text-align: right; }
-    .bv-table td { border: 1px solid #7f7f7f; font-size: 11.5px; padding: 3.5px 6px; }
+    .bv-table td { border: 1px solid #7f7f7f; font-size: 11.5px; padding: 2.5px 6px; }
     .bv-table tr.alt td { background: #dcecea; }
     .bv-table .tname { width: 32%; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
@@ -3833,6 +3903,7 @@ function renderTwoPageReportHtml(store, report) {
       .toolbar { display: none; }
       .bv-page { margin: 0; max-width: none; padding: 0; }
       .bv-panel, .bv-comments { break-inside: avoid; }
+      .bv-table { break-inside: avoid; }
     }
   </style>
 </head>
