@@ -345,12 +345,17 @@ async function readJson<T>(response: Response): Promise<T> {
     try {
       payload = JSON.parse(rawPayload);
     } catch {
-      payload = { error: rawPayload.slice(0, 240) };
+      // Respuesta no-JSON (pagina de error HTML): nunca mostrarla cruda.
+      payload = {
+        error: response.ok
+          ? "Respuesta inesperada del servidor."
+          : `Error del servidor (${response.status}). Intenta de nuevo en unos segundos.`,
+      };
     }
   }
 
   if (!response.ok) {
-    throw new Error(payload.error || payload.message || "La solicitud fallo.");
+    throw new Error(payload.error || payload.message || `La solicitud fallo (${response.status}).`);
   }
   return payload as T;
 }
@@ -1549,7 +1554,16 @@ function App() {
         </header>
 
         {error ? (
-          <div className={`toast ${workStatus === "error" ? "toast-error" : workStatus === "loading" ? "toast-info" : "toast-success"}`} role="status">
+          <div
+            className={`toast ${
+              workStatus === "error" || /error|fall[oó]|no se pudo|no pudimos|invalid|requerid/i.test(error)
+                ? "toast-error"
+                : workStatus === "loading"
+                  ? "toast-info"
+                  : "toast-success"
+            }`}
+            role="status"
+          >
             <span>
               {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
                 ? "ClickUp no está disponible en este momento. Avisa al administrador."

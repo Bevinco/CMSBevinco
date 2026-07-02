@@ -5123,6 +5123,16 @@ app.get(/.*/, (_request, response) => {
   response.sendFile(path.join(distPath, "index.html"));
 });
 
+// Manejador global: cualquier excepcion no capturada en una ruta responde
+// JSON legible (y queda logueada) en lugar de la pagina HTML de Express.
+app.use((error, _request, response, _next) => {
+  console.error("[error]", error?.stack || error?.message || error);
+  if (response.headersSent) return;
+  response.status(error?.status || 500).json({
+    error: "Error interno del servidor. Intenta de nuevo en unos segundos.",
+  });
+});
+
 app.listen(port, () => {
   console.log(`Bevinco CMS listening on port ${port}`);
 });
