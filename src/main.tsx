@@ -2492,24 +2492,28 @@ function App() {
             <div className="users-list">
               {cmsUsers.map((user) => (
                 <article className="user-card" key={user.id}>
-                  <div className="user-avatar">{(user.name || user.email || "U").slice(0, 1).toUpperCase()}</div>
+                  <div className="user-avatar">
+                    {(user.name || user.email || "U").slice(0, 1).toUpperCase()}
+                    <span className={`presence-dot presence-badge presence-${user.presence || "disponible"}`} />
+                  </div>
                   <div className="user-main">
                     <div className="user-title-row">
                       <strong>{user.name || user.email}</strong>
-                      <span>{user.role || "Usuario"}</span>
+                      <span className="user-role-chip">{user.role || "Usuario"}</span>
                       <span className="user-presence">
-                        <span className={`presence-dot presence-${user.presence || "disponible"}`} />
                         {presenceOptions.find((option) => option.id === (user.presence || "disponible"))?.label || "Disponible"}
                       </span>
                     </div>
                     <small>{user.email || "Sin email"}</small>
                     <div className="permission-chips">
-                      {user.permissions.map((permission) => (
-                        <span className="permission-chip enabled" key={`${user.id}-${permission}`}>
-                          {userPermissionOptions.find((item) => item.id === permission)?.label || permission}
-                        </span>
-                      ))}
-                      {user.source === "env" ? <span className="permission-chip locked">Variable ENV</span> : null}
+                      {userPermissionOptions.map((option) => {
+                        const enabled = user.role === "Superadmin" || user.permissions.includes(option.id);
+                        return (
+                          <span className={`permission-chip ${enabled ? "enabled" : "denied"}`} key={`${user.id}-${option.id}`}>
+                            {option.label}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                   <div className="user-actions">
@@ -2518,7 +2522,7 @@ function App() {
                     ) : (
                       <>
                         <button className="secondary-button" onClick={() => openEditUserModal(user)}>Editar</button>
-                        <button className="danger-button" onClick={() => deleteUser(user.id)}>Eliminar</button>
+                        <button className="link-danger" onClick={() => deleteUser(user.id)}>Eliminar</button>
                       </>
                     )}
                   </div>

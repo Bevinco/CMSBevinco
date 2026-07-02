@@ -1571,7 +1571,7 @@ button:disabled {
   display: grid;
   gap: 14px;
   margin: 0 auto;
-  max-width: 1080px;
+  max-width: 1240px;
   width: 100%;
 }
 
@@ -1615,8 +1615,7 @@ button:disabled {
 
 .users-list {
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 12px;
 }
 
 .user-card {
@@ -3189,4 +3188,63 @@ button:disabled {
 :root[data-theme="dark"] .dashboard-kpis .kpi-card small,
 :root[data-theme="dark"] .user-presence {
   color: var(--text-muted);
+}
+
+/* ===== Usuarios estilo lista (Singulares) ===== */
+.user-card {
+  border-radius: 12px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.user-card:hover {
+  border-color: #c6d6d1;
+  box-shadow: 0 14px 30px rgba(16, 32, 29, 0.09);
+}
+
+.user-avatar {
+  position: relative;
+}
+
+.user-role-chip {
+  background: #eef2f1;
+  border-radius: 999px;
+  color: #46605a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+}
+
+.permission-chip.denied {
+  background: #fdeeee;
+  border: 1px solid #f3cfcf;
+  color: #b3564f;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.link-danger {
+  background: none;
+  color: #d64545;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.link-danger:hover {
+  background: #fdeeee;
+}
+
+:root[data-theme="dark"] .user-role-chip {
+  background: #203b35;
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .permission-chip.denied {
+  background: #2a1210;
+  border-color: #5a2420;
+  color: #e79a93;
+}
+
+:root[data-theme="dark"] .link-danger:hover {
+  background: #2a1210;
 }
