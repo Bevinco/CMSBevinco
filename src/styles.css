@@ -3586,3 +3586,104 @@ button:disabled {
 :root[data-theme="dark"] .pager-nav:hover:not(:disabled),
 :root[data-theme="dark"] .pager-number:hover { background: var(--surface-muted); }
 :root[data-theme="dark"] .pager-number.active { background: var(--sculpture-green); color: #10231f; }
+
+/* ===== Analisis del agente: tarjetas premium ===== */
+.agent-panel {
+  overflow: hidden;
+  position: relative;
+}
+
+.agent-panel::before {
+  background: linear-gradient(90deg, #054372 0%, #90bf4f 55%, #8bc6c1 100%);
+  content: "";
+  height: 4px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.analysis-card {
+  border: 1px solid #e4eae8;
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.analysis-card header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.analysis-card header strong {
+  color: #172026;
+  font-size: 0.92rem;
+}
+
+.analysis-icon {
+  align-items: center;
+  border-radius: 9px;
+  display: flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.analysis-count {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  color: #46605a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-left: auto;
+  padding: 2px 9px;
+}
+
+.tone-pos header { background: #f0f7e9; }
+.tone-pos .analysis-icon { background: #dcedc9; color: #4c7a28; }
+.tone-neg header { background: #fdf0ee; }
+.tone-neg .analysis-icon { background: #f8dcd7; color: #b23c2e; }
+.tone-info header { background: #ecf5f4; }
+.tone-info .analysis-icon { background: #d5eae8; color: #33716a; }
+.tone-brand header { background: #edf2f7; }
+.tone-brand .analysis-icon { background: #d8e4ef; color: #054372; }
+
+.analysis-items {
+  display: grid;
+}
+
+.analysis-item {
+  border-top: 1px solid #eef2f1;
+  color: #3f4f4a;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  margin: 0;
+  padding: 11px 16px;
+}
+
+.analysis-item.is-empty {
+  color: #8b9a95;
+  font-style: italic;
+}
+
+.fig {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.fig-pos { color: #3e7a2c; }
+.fig-neg { color: #c0392b; }
+
+:root[data-theme="dark"] .analysis-card { border-color: var(--line); }
+:root[data-theme="dark"] .analysis-card header strong { color: var(--text); }
+:root[data-theme="dark"] .analysis-item { border-top-color: var(--line-soft); color: var(--text-muted); }
+:root[data-theme="dark"] .analysis-count { background: rgba(255, 255, 255, 0.08); color: var(--text-muted); }
+:root[data-theme="dark"] .tone-pos header { background: #1c2f1a; }
+:root[data-theme="dark"] .tone-neg header { background: #331a16; }
+:root[data-theme="dark"] .tone-info header { background: #14302c; }
+:root[data-theme="dark"] .tone-brand header { background: #14293c; }
+:root[data-theme="dark"] .fig-pos { color: #9fd07c; }
+:root[data-theme="dark"] .fig-neg { color: #f0938a; }

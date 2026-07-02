@@ -22,7 +22,10 @@ import {
   RefreshCw,
   Send,
   Sun,
+  TrendingDown,
+  TrendingUp,
   Trash2,
+  BookOpenCheck,
   Upload,
   Users,
   ShoppingCart,
@@ -350,6 +353,23 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new Error(payload.error || payload.message || "La solicitud fallo.");
   }
   return payload as T;
+}
+
+// Resalta montos ($1.234.567) y porcentajes ((21.1%)) dentro del texto del
+// analisis: verde para positivos, rojo para negativos.
+function highlightFigures(text: string) {
+  const parts = String(text).split(/(\$\s?-?[\d.,]+|\(-?\d+(?:[.,]\d+)?%\))/g);
+  return parts.map((part, index) => {
+    const isMoney = /^\$\s?-?[\d.,]+$/.test(part);
+    const isPercent = /^\(-?\d+(?:[.,]\d+)?%\)$/.test(part);
+    if (!isMoney && !isPercent) return <span key={index}>{part}</span>;
+    const negative = part.includes("-");
+    return (
+      <b key={index} className={`fig ${negative ? "fig-neg" : "fig-pos"}`}>
+        {part}
+      </b>
+    );
+  });
 }
 
 function SculptureMark() {
@@ -1898,7 +1918,7 @@ function App() {
         ) : null}
 
         {selectedReport?.analysis ? (
-          <section className="panel">
+          <section className="panel agent-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Análisis del agente</p>
@@ -1907,26 +1927,57 @@ function App() {
               <Bot size={22} />
             </div>
             <div className="agent-analysis-grid">
-              <article>
-                <strong>Lo mejor de la semana</strong>
-                <ul>{(selectedReport.analysis.bestOfWeek?.length ? selectedReport.analysis.bestOfWeek : ["Sin hallazgos positivos relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
-              </article>
-              <article>
-                <strong>Los desafíos de la semana</strong>
-                <ul>{(selectedReport.analysis.weeklyChallenges?.length ? selectedReport.analysis.weeklyChallenges : ["Sin desafíos relevantes esta semana."]).map((item) => <li key={item}>{item}</li>)}</ul>
-              </article>
-              <article>
-                <strong>Eficiencia de stock y compra</strong>
-                <ul>{(selectedReport.analysis.stockEfficiency?.length ? selectedReport.analysis.stockEfficiency : ["Sin observaciones de stock y compra para este periodo."]).map((item) => <li key={item}>{item}</li>)}</ul>
-              </article>
-              {selectedReport.analysis.criteriaApplied?.length ? (
-                <article>
-                  <strong>Criterios aplicados</strong>
-                  <ul>
-                    {selectedReport.analysis.criteriaApplied.map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                </article>
-              ) : null}
+              {[
+                {
+                  key: "bestOfWeek",
+                  title: "Lo mejor de la semana",
+                  tone: "pos",
+                  icon: <TrendingUp size={17} />,
+                  items: selectedReport.analysis.bestOfWeek || [],
+                  empty: "Sin hallazgos positivos relevantes esta semana.",
+                },
+                {
+                  key: "weeklyChallenges",
+                  title: "Los desafíos de la semana",
+                  tone: "neg",
+                  icon: <TrendingDown size={17} />,
+                  items: selectedReport.analysis.weeklyChallenges || [],
+                  empty: "Sin desafíos relevantes esta semana.",
+                },
+                {
+                  key: "stockEfficiency",
+                  title: "Eficiencia de stock y compra",
+                  tone: "info",
+                  icon: <ShoppingCart size={17} />,
+                  items: selectedReport.analysis.stockEfficiency || [],
+                  empty: "Sin observaciones de stock y compra para este periodo.",
+                },
+                {
+                  key: "criteriaApplied",
+                  title: "Criterios aplicados",
+                  tone: "brand",
+                  icon: <BookOpenCheck size={17} />,
+                  items: selectedReport.analysis.criteriaApplied || [],
+                  empty: "",
+                },
+              ]
+                .filter((block) => block.items.length || block.empty)
+                .map((block) => (
+                  <article className={`analysis-card tone-${block.tone}`} key={block.key}>
+                    <header>
+                      <span className="analysis-icon">{block.icon}</span>
+                      <strong>{block.title}</strong>
+                      {block.items.length ? <span className="analysis-count">{block.items.length}</span> : null}
+                    </header>
+                    <div className="analysis-items">
+                      {(block.items.length ? block.items : [block.empty]).map((item) => (
+                        <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
+                          {highlightFigures(item)}
+                        </p>
+                      ))}
+                    </div>
+                  </article>
+                ))}
             </div>
             {!selectedReport.analysis.criteriaApplied?.length ? (
               <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
