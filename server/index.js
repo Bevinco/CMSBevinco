@@ -4424,7 +4424,9 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
     return;
   }
 
-  const assignedClient = store.clients.find((client) => client.id === String(request.body?.clientId || ""));
+  const requestedClientId = String(request.body?.clientId || "");
+  const assignedClient = store.clients.find((client) => client.id === requestedClientId);
+  const assignedClientName = assignedClient?.name || String(request.body?.clientName || "");
   const documents = files.map((file) => {
     const text = String(file.text || "").replace(/\0/g, "").trim();
     const name = String(file.name || "criterio.txt").trim();
@@ -4437,8 +4439,8 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
       size: Number(file.size || text.length || 0),
       source: String(file.source || request.body?.source || "manual"),
       category: String(file.category || request.body?.category || "criteria"),
-      clientId: assignedClient?.id || "",
-      clientName: assignedClient?.name || "",
+      clientId: requestedClientId,
+      clientName: assignedClientName,
       uploadedAt: new Date().toISOString(),
     };
   });

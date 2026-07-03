@@ -476,14 +476,6 @@ function App() {
   const [criteriaClientId, setCriteriaClientId] = useState("");
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
-  const [selectedChatGptFiles, setSelectedChatGptFiles] = useState<File[]>([]);
-  const [chatGptImport, setChatGptImport] = useState({
-    projectName: "",
-    instructions: "",
-    reportPrompt: "",
-    examples: "",
-    notes: "",
-  });
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
@@ -1075,7 +1067,14 @@ function App() {
         await fetch("/api/module1/criteria-documents", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ files: encodedFiles, clientId: criteriaClientId }),
+          body: JSON.stringify({
+            files: encodedFiles,
+            clientId: criteriaClientId,
+            clientName:
+              sculptureUnits.find((unit) => unit.id === criteriaClientId)?.name ||
+              clients.find((client) => client.id === criteriaClientId)?.name ||
+              "",
+          }),
         }),
       );
       applyBootstrapPayload(payload);
@@ -1084,70 +1083,6 @@ function App() {
       setWorkStatus("ready");
     } catch (criteriaError) {
       setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
-      setWorkStatus("error");
-    }
-  }
-
-  async function importChatGptProject() {
-    const projectName = chatGptImport.projectName.trim() || "Proyecto ChatGPT";
-    const totalSize = selectedChatGptFiles.reduce((sum, file) => sum + file.size, 0) +
-      chatGptImport.instructions.length +
-      chatGptImport.reportPrompt.length +
-      chatGptImport.examples.length +
-      chatGptImport.notes.length;
-
-    if (
-      !chatGptImport.instructions.trim() &&
-      !chatGptImport.reportPrompt.trim() &&
-      !chatGptImport.examples.trim() &&
-      !chatGptImport.notes.trim() &&
-      !selectedChatGptFiles.length
-    ) {
-      setError("Pega instrucciones, prompts, ejemplos o sube archivos descargados de ChatGPT.");
-      setWorkStatus("error");
-      return;
-    }
-
-    if (totalSize > 5 * 1024 * 1024) {
-      setError("La importacion desde ChatGPT supera 5 MB. Divide el contenido por proyecto o por tema.");
-      setWorkStatus("error");
-      return;
-    }
-
-    setWorkStatus("loading");
-    setError("Procesando contenido con OpenAI y guardándolo en la biblioteca...");
-
-    try {
-      const fileDocuments = await Promise.all(
-        selectedChatGptFiles.map(async (file) => ({
-          name: file.name,
-          type: file.type || "text/plain",
-          size: file.size,
-          text: await file.text(),
-        })),
-      );
-      const payload = await readJson<BootstrapPayload & { importSummary?: string; importedCount?: number }>(
-        await fetch("/api/module1/criteria-documents/import-chatgpt", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            projectName,
-            clientId: criteriaClientId,
-            instructions: chatGptImport.instructions,
-            reportPrompt: chatGptImport.reportPrompt,
-            examples: chatGptImport.examples,
-            notes: chatGptImport.notes,
-            files: fileDocuments,
-          }),
-        }),
-      );
-      applyBootstrapPayload(payload);
-      setSelectedChatGptFiles([]);
-      setChatGptImport({ projectName: "", instructions: "", reportPrompt: "", examples: "", notes: "" });
-      setError(`${payload.importedCount || 0} criterio(s) importado(s) con OpenAI. ${payload.importSummary || "El agente los usara al generar reportes."}`);
-      setWorkStatus("ready");
-    } catch (criteriaError) {
-      setError(criteriaError instanceof Error ? criteriaError.message : "No se pudo importar contenido desde ChatGPT con OpenAI.");
       setWorkStatus("error");
     }
   }
@@ -2584,105 +2519,17 @@ function App() {
 
         {activeView === "criteria" ? (
           <section className="page-grid">
-            <div className="panel chatgpt-import-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Importar desde ChatGPT</p>
-                  <h2>Procesar criterios con OpenAI</h2>
-                </div>
-                <Bot size={22} />
-              </div>
-              <p className="muted-copy">Pega instrucciones, prompts o ejemplos del Project. OpenAI los ordena como criterios y el CMS los guarda en la biblioteca que alimenta los reportes.</p>
-              <div className="chatgpt-import-grid">
-                <label>
-                  Nombre del proyecto
-                  <input
-                    placeholder="Ej. Bevinco reportes semanales"
-                    value={chatGptImport.projectName}
-                    onChange={(event) => setChatGptImport((current) => ({ ...current, projectName: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Instrucciones del Project
-                  <textarea
-                    placeholder="Pega aqui las instrucciones del proyecto de ChatGPT..."
-                    value={chatGptImport.instructions}
-                    onChange={(event) => setChatGptImport((current) => ({ ...current, instructions: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Prompt de reporte semanal
-                  <textarea
-                    placeholder="Pega el prompt que usan para crear reportes..."
-                    value={chatGptImport.reportPrompt}
-                    onChange={(event) => setChatGptImport((current) => ({ ...current, reportPrompt: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Ejemplos de buenos comentarios
-                  <textarea
-                    placeholder="Pega comentarios buenos generados o corregidos por el equipo..."
-                    value={chatGptImport.examples}
-                    onChange={(event) => setChatGptImport((current) => ({ ...current, examples: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Notas, reglas o cuestionario operaciones
-                  <textarea
-                    placeholder="Pega reglas de costo ideal, compra sugerida, cuestionario de operaciones, etc."
-                    value={chatGptImport.notes}
-                    onChange={(event) => setChatGptImport((current) => ({ ...current, notes: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Archivos descargados de ChatGPT
-                  <input
-                    accept=".txt,.md,.csv,.json,.html,text/plain,text/markdown,text/csv,application/json,text/html"
-                    multiple
-                    type="file"
-                    onChange={(event) => setSelectedChatGptFiles(Array.from(event.target.files || []))}
-                  />
-                </label>
-              </div>
-              {selectedChatGptFiles.length ? (
-                <div className="selected-files">
-                  {selectedChatGptFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}
-                </div>
-              ) : (
-                <small className="muted-copy">Para export ZIP completo aun conviene extraer/copiar los archivos utiles antes de subirlos. PDFs/DOCX requieren un extractor adicional.</small>
-              )}
-              <div className="upload-actions">
-                <button className="primary-button" disabled={workStatus === "loading"} onClick={importChatGptProject}>
-                  <Bot size={17} /> Procesar e importar
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={workStatus === "loading"}
-                  onClick={() => {
-                    setSelectedChatGptFiles([]);
-                    setChatGptImport({ projectName: "", instructions: "", reportPrompt: "", examples: "", notes: "" });
-                  }}
-                >
-                  Limpiar
-                </button>
-              </div>
-            </div>
-
             <div className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Alimentar al agente</p>
-                  <h2>Subir criterios de reporte</h2>
-                </div>
-                <Upload size={22} />
-              </div>
               <div className="upload-box criteria-uploader">
                 <label>
-                  Cliente (opcional)
+                  Cliente de la skill
                   <select value={criteriaClientId} onChange={(event) => setCriteriaClientId(event.target.value)}>
                     <option value="">General (todos los clientes)</option>
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>
+                    {(sculptureUnits.filter((unit) => !unit.hidden).length
+                      ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ id: unit.id, name: unit.name }))
+                      : clients.map((client) => ({ id: client.id, name: clientDisplayName(client) }))
+                    ).map((option) => (
+                      <option key={option.id} value={option.id}>{option.name}</option>
                     ))}
                   </select>
                 </label>
