@@ -3909,3 +3909,32 @@ button:disabled {
 :root[data-theme="dark"] .unit-summary article {
   border-left-color: #3d7d76;
 }
+
+/* Criterios estilo skills: chip de cliente + banner de respaldo */
+.criteria-client-chip {
+  background: #edf2f7;
+  border-radius: 999px;
+  color: #054372;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 3px 10px;
+}
+
+.criteria-client-chip.is-general {
+  background: #eef2f1;
+  color: #66706d;
+}
+
+.backup-banner {
+  background: #fdf1dc;
+  border: 1px solid #ecd3a1;
+  border-left: 4px solid #d99a2b;
+  border-radius: 10px;
+  color: #7a5a1c;
+  font-size: 0.86rem;
+  padding: 10px 14px;
+}
+
+:root[data-theme="dark"] .criteria-client-chip { background: #14293c; color: #86b4dd; }
+:root[data-theme="dark"] .criteria-client-chip.is-general { background: var(--surface-muted); color: var(--text-muted); }
+:root[data-theme="dark"] .backup-banner { background: #3a2f14; border-color: #6b5320; border-left-color: #c99b35; color: #e3c37c; }

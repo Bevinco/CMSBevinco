@@ -141,9 +141,19 @@ type CriteriaDocument = {
   uploadedAt: string;
   source?: string;
   category?: string;
+  clientId?: string;
+  clientName?: string;
+};
+
+type BackupStatus = {
+  configured: boolean;
+  restored: boolean;
+  lastOkAt: string;
+  lastError: string;
 };
 
 type BootstrapPayload = {
+  backupStatus?: BackupStatus;
   clients: Client[];
   periods: Period[];
   criteriaDocuments: CriteriaDocument[];
@@ -463,6 +473,8 @@ function App() {
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
+  const [criteriaClientId, setCriteriaClientId] = useState("");
+  const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [selectedChatGptFiles, setSelectedChatGptFiles] = useState<File[]>([]);
   const [chatGptImport, setChatGptImport] = useState({
@@ -618,6 +630,7 @@ function App() {
   }
 
   function applyBootstrapPayload(payload: BootstrapPayload) {
+    if (payload.backupStatus) setBackupStatus(payload.backupStatus);
     setClients(payload.clients);
     setPeriods(payload.periods);
     setReports(payload.reports);
@@ -1062,7 +1075,7 @@ function App() {
         await fetch("/api/module1/criteria-documents", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ files: encodedFiles }),
+          body: JSON.stringify({ files: encodedFiles, clientId: criteriaClientId }),
         }),
       );
       applyBootstrapPayload(payload);
@@ -1119,6 +1132,7 @@ function App() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             projectName,
+            clientId: criteriaClientId,
             instructions: chatGptImport.instructions,
             reportPrompt: chatGptImport.reportPrompt,
             examples: chatGptImport.examples,
@@ -1552,6 +1566,15 @@ function App() {
             <h1>{viewMeta[1]}</h1>
           </div>
         </header>
+
+        {isAdminUser(currentUserInfo) && backupStatus && (!backupStatus.configured || backupStatus.lastError) ? (
+          <div className="backup-banner" role="alert">
+            <strong>Respaldo de datos:</strong>{" "}
+            {backupStatus.configured
+              ? backupStatus.lastError
+              : "Supabase sin configurar: los reportes y criterios no sobreviven reinicios del servidor."}
+          </div>
+        ) : null}
 
         {error ? (
           <div
@@ -2655,6 +2678,15 @@ function App() {
               </div>
               <div className="upload-box criteria-uploader">
                 <label>
+                  Cliente (opcional)
+                  <select value={criteriaClientId} onChange={(event) => setCriteriaClientId(event.target.value)}>
+                    <option value="">General (todos los clientes)</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Archivos de criterio
                   <input
                     accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
@@ -2704,6 +2736,9 @@ function App() {
                   <article key={document.id}>
                     <div>
                       <div className="criteria-doc-title">
+                        <span className={`criteria-client-chip ${document.clientId ? "" : "is-general"}`}>
+                          {document.clientName || "General"}
+                        </span>
                         <strong>{document.name}</strong>
                         {document.source ? (
                           <span className={`criteria-source ${document.source.startsWith("chatgpt") ? "chatgpt" : ""}`}>

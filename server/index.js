@@ -50,7 +50,13 @@ const supabaseKey =
   process.env.VITE_SUPABASE_ANON_KEY ||
   "";
 const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
-let supabaseHydrated = false;
+let hydrationPromise = null;
+const supabaseStatus = {
+  configured: supabaseConfigured,
+  restored: false,
+  lastOkAt: "",
+  lastError: supabaseConfigured ? "" : "Sin configurar: los datos no sobreviven reinicios del servidor.",
+};
 
 function supabaseHeaders() {
   return {
@@ -60,15 +66,22 @@ function supabaseHeaders() {
   };
 }
 
-async function hydrateStoreFromSupabase() {
-  if (!supabaseConfigured || supabaseHydrated) return;
-  supabaseHydrated = true;
+function hydrateStoreFromSupabase() {
+  if (!supabaseConfigured) return Promise.resolve();
+  // Promesa compartida: TODAS las peticiones del arranque esperan la misma
+  // hidratacion. Sin esto, una escritura temprana (login dispara varias
+  // peticiones en paralelo) pisaba el respaldo remoto con el store de muestras.
+  if (!hydrationPromise) hydrationPromise = performSupabaseHydration();
+  return hydrationPromise;
+}
 
+async function performSupabaseHydration() {
   try {
     const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?id=eq.1&select=data`, {
       headers: supabaseHeaders(),
     });
     if (!response.ok) {
+      supabaseStatus.lastError = `Lectura rechazada (${response.status}). Revisa URL, clave service_role y la tabla cms_store.`;
       console.error("[supabase] lectura fallo:", response.status, (await response.text()).slice(0, 200));
       return;
     }
@@ -79,11 +92,15 @@ async function hydrateStoreFromSupabase() {
       const tempPath = `${moduleStorePath}.tmp`;
       await fs.writeFile(tempPath, JSON.stringify(remote, null, 2));
       await fs.rename(tempPath, moduleStorePath);
+      supabaseStatus.restored = true;
+      supabaseStatus.lastOkAt = new Date().toISOString();
       console.log(`[supabase] store restaurado (${remote.reports.length} reportes, ${(remote.criteriaDocuments || []).length} criterios)`);
     } else {
+      supabaseStatus.lastOkAt = new Date().toISOString();
       console.log("[supabase] sin respaldo previo; se creara al primer guardado");
     }
   } catch (error) {
+    supabaseStatus.lastError = `No se pudo restaurar el respaldo: ${error.message}`;
     console.error("[supabase] no se pudo hidratar el store:", error.message);
   }
 }
@@ -101,9 +118,14 @@ async function persistStoreToSupabase(store) {
       body: JSON.stringify([{ id: 1, data: store, updated_at: new Date().toISOString() }]),
     });
     if (!response.ok) {
+      supabaseStatus.lastError = `Escritura rechazada (${response.status}). Revisa que la clave sea la service_role.`;
       console.error("[supabase] escritura fallo:", response.status, (await response.text()).slice(0, 200));
+    } else {
+      supabaseStatus.lastError = "";
+      supabaseStatus.lastOkAt = new Date().toISOString();
     }
   } catch (error) {
+    supabaseStatus.lastError = `No se pudo respaldar: ${error.message}`;
     console.error("[supabase] no se pudo respaldar el store:", error.message);
   }
 }
@@ -1426,7 +1448,7 @@ function generateReportAnalysis(payload) {
   const purchaseItems = (payload.purchaseSuggestions || [])
     .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
     .slice(0, 4);
-  const criteriaApplied = criteriaForClient(payload.criteriaDocuments || [], payload.client?.name)
+  const criteriaApplied = criteriaForClient(payload.criteriaDocuments || [], payload.client?.name, payload.client?.id || payload.clientId || "")
     .slice(0, 4)
     .map((document) => summarizeCriteriaForDisplay(document));
 
@@ -1461,16 +1483,26 @@ function generateReportAnalysis(payload) {
 // Selecciona los criterios de la biblioteca que corresponden al cliente del
 // reporte. Prioriza los documentos que mencionan al cliente; si no hay match,
 // usa los criterios generales.
-function criteriaForClient(criteriaDocuments = [], clientName = "") {
+// Criterios estilo "skills": cada documento puede asignarse a un cliente y se
+// activa solo al generar SU reporte. Prioridad: asignados al cliente >
+// generales que lo mencionan > generales. Los asignados a OTRO cliente nunca
+// se filtran hacia reportes ajenos.
+function criteriaForClient(criteriaDocuments = [], clientName = "", clientId = "") {
+  const assigned = clientId
+    ? criteriaDocuments.filter((document) => document.clientId === clientId)
+    : [];
+  if (assigned.length) return assigned.slice(0, 6);
+
+  const general = criteriaDocuments.filter((document) => !document.clientId);
   const clientKey = String(clientName || "").toLowerCase().trim();
   const accountKey = clientKey.split(" - ")[0].trim();
   const matched = clientKey
-    ? criteriaDocuments.filter((document) => {
+    ? general.filter((document) => {
         const haystack = `${document.name} ${document.category} ${document.text}`.toLowerCase();
         return haystack.includes(clientKey) || (accountKey && haystack.includes(accountKey));
       })
     : [];
-  return (matched.length ? matched : criteriaDocuments).slice(0, 6);
+  return (matched.length ? matched : general).slice(0, 6);
 }
 
 // Metodologia estandar de analisis Bevinco (prompt maestro compartido por el
@@ -1520,7 +1552,7 @@ async function generateReportAnalysisAI(payload) {
   const CRITERIA_PER_DOC = 8000;
   const CRITERIA_TOTAL_BUDGET = 20000;
   let criteriaBudget = CRITERIA_TOTAL_BUDGET;
-  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName)
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "")
     .map((document) => {
       if (criteriaBudget <= 0) return null;
       const contenido = String(document.text || "").trim().slice(0, Math.min(CRITERIA_PER_DOC, criteriaBudget));
@@ -4151,6 +4183,10 @@ function renderTwoPageReportHtml(store, report) {
 </html>`;
 }
 
+app.get("/api/system/backup-status", requireAuth, (_request, response) => {
+  response.json(supabaseStatus);
+});
+
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
@@ -4360,6 +4396,7 @@ app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
     criteriaDocuments: store.criteriaDocuments || [],
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: report ? buildReportPayload(store, report) : null,
+    backupStatus: supabaseStatus,
   });
 });
 
@@ -4387,6 +4424,7 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
     return;
   }
 
+  const assignedClient = store.clients.find((client) => client.id === String(request.body?.clientId || ""));
   const documents = files.map((file) => {
     const text = String(file.text || "").replace(/\0/g, "").trim();
     const name = String(file.name || "criterio.txt").trim();
@@ -4399,6 +4437,8 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
       size: Number(file.size || text.length || 0),
       source: String(file.source || request.body?.source || "manual"),
       category: String(file.category || request.body?.category || "criteria"),
+      clientId: assignedClient?.id || "",
+      clientName: assignedClient?.name || "",
       uploadedAt: new Date().toISOString(),
     };
   });
@@ -4430,6 +4470,7 @@ app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (r
       notas_reglas_cuestionario: request.body?.notes,
     };
     const aiImport = await generateChatGptCriteriaDocuments({ projectName, sections, files });
+    const assignedClient = store.clients.find((client) => client.id === String(request.body?.clientId || ""));
 
     const documents = aiImport.documents.map((document) => {
       const text = String(document.text || "").replace(/\0/g, "").trim();
@@ -4442,6 +4483,8 @@ app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (r
         size: text.length,
         source: "chatgpt-api",
         category: document.category,
+        clientId: assignedClient?.id || "",
+        clientName: assignedClient?.name || "",
         uploadedAt: new Date().toISOString(),
       };
     });
@@ -5134,5 +5177,10 @@ app.use((error, _request, response, _next) => {
 });
 
 app.listen(port, () => {
+  console.log(
+    supabaseConfigured
+      ? `[supabase] respaldo configurado (${supabaseUrl.replace(/^https?:\/\//, "")})`
+      : "[supabase] SIN CONFIGURAR: los reportes y criterios no sobreviviran reinicios",
+  );
   console.log(`Bevinco CMS listening on port ${port}`);
 });
