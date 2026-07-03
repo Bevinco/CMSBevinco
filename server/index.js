@@ -4445,7 +4445,7 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
     };
   });
 
-  store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 30);
+  store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 60);
   store.reports.forEach((report) => {
     report.analysis = null;
   });
@@ -4491,7 +4491,7 @@ app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (r
       };
     });
 
-    store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 30);
+    store.criteriaDocuments = [...documents, ...(store.criteriaDocuments || [])].slice(0, 60);
     store.reports.forEach((report) => {
       report.analysis = null;
     });
