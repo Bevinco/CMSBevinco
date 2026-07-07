@@ -119,6 +119,7 @@ type Report = {
   emailDraft: string;
   isAccumulated?: boolean;
   backfill?: boolean;
+  chat?: Array<{ role: "user" | "assistant"; content: string }>;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
     id?: string;
@@ -475,6 +476,9 @@ function App() {
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
   const [criteriaClientId, setCriteriaClientId] = useState("");
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
@@ -1172,6 +1176,32 @@ function App() {
     if (patch.emailDraft !== undefined) setEmailDraft(updated.emailDraft || "");
   }
 
+  async function sendChatMessage() {
+    const message = chatInput.trim();
+    if (!message || !selectedReport || chatSending) return;
+    setChatSending(true);
+    setChatInput("");
+    setChatMessages((current) => [...current, { role: "user", content: message }]);
+
+    try {
+      const payload = await readJson<{ reply: string; chat: Array<{ role: "user" | "assistant"; content: string }> }>(
+        await fetch(`/api/module1/reports/${selectedReport.id}/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message }),
+        }),
+      );
+      setChatMessages(payload.chat || []);
+    } catch (chatError) {
+      setChatMessages((current) => [
+        ...current,
+        { role: "assistant", content: chatError instanceof Error ? `⚠ ${chatError.message}` : "⚠ No se pudo contactar al agente." },
+      ]);
+    } finally {
+      setChatSending(false);
+    }
+  }
+
   async function generateSummary() {
     if (!selectedReport) return;
     setWorkStatus("loading");
@@ -1253,6 +1283,10 @@ function App() {
     const timer = setTimeout(() => setError(""), workStatus === "error" ? 9000 : 5500);
     return () => clearTimeout(timer);
   }, [error, workStatus]);
+
+  useEffect(() => {
+    setChatMessages(selectedReport?.chat || []);
+  }, [selectedReport?.id]);
 
   useEffect(() => {
     if (authStatus !== "authenticated") return;
@@ -2039,6 +2073,64 @@ function App() {
                 <PencilLine size={17} /> Guardar cambios
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="panel agent-chat-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Conversa con el agente</p>
+              <h2>Ajusta el reporte en un ida y vuelta</h2>
+            </div>
+            <Bot size={22} />
+          </div>
+          <div className="chat-thread" aria-live="polite">
+            {!chatMessages.length ? (
+              <div className="chat-empty">
+                <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
+                <div className="chat-suggestions">
+                  {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
+                    <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              chatMessages.map((item, index) => (
+                <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
+                  <div className="chat-bubble-content">{item.content}</div>
+                  {item.role === "assistant" && !item.content.startsWith("⚠") ? (
+                    <div className="chat-bubble-actions">
+                      <button type="button" onClick={() => setCommentsDraft(item.content)}>Usar como resumen</button>
+                      <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+            {chatSending ? (
+              <div className="chat-bubble assistant">
+                <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
+              </div>
+            ) : null}
+          </div>
+          <div className="chat-composer">
+            <textarea
+              placeholder={selectedReport ? "Escribe tu ajuste o pregunta..." : "Genera un reporte primero para conversar sobre él."}
+              disabled={!selectedReport || chatSending}
+              rows={2}
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  sendChatMessage();
+                }
+              }}
+            />
+            <button className="primary-button" disabled={!selectedReport || chatSending || !chatInput.trim()} onClick={sendChatMessage}>
+              {chatSending ? <span className="btn-spinner" /> : <Send size={17} />}
+              Enviar
+            </button>
           </div>
         </section>
 

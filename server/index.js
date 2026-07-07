@@ -4949,6 +4949,103 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
   response.json(buildReportPayload(store, report));
 });
 
+// Chat conversacional sobre un reporte: mismo contexto que el analisis con IA
+// (metodo Bevinco + skill del cliente + datos de la semana + analisis actual),
+// con historial persistido en el reporte. Ida y vuelta estilo ChatGPT.
+app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  if (!openaiApiKey) {
+    response.status(503).json({ error: "La IA no está configurada en el servidor (falta OPENAI_API_KEY)." });
+    return;
+  }
+
+  const message = String(request.body?.message || "").trim().slice(0, 4000);
+  if (!message) {
+    response.status(400).json({ error: "Escribe un mensaje para el agente." });
+    return;
+  }
+
+  const payload = buildReportPayload(store, report);
+  const clientName = payload.client?.name || report.clientId;
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "")
+    .map((document) => ({
+      nombre: document.name,
+      contenido: String(document.text || "").trim().slice(0, 6000),
+    }));
+
+  const summary = payload.summary || {};
+  const contextText = [
+    BEVINCO_ANALYSIS_METHOD,
+    "",
+    "Eres el asistente conversacional de este reporte. Responde SIEMPRE en español, breve, técnico y accionable.",
+    "Cuando el usuario pida redactar o ajustar comentarios, entrégalos LISTOS para pegar (sin preámbulos como 'aquí tienes').",
+    "Usa solo las cifras entregadas; nunca inventes datos.",
+    "",
+    `Criterios del cliente (${clientName}):`,
+    criteria.length ? JSON.stringify(criteria) : "Sin criterios específicos; aplica la metodología estándar.",
+    "",
+    "Datos del reporte:",
+    JSON.stringify({
+      cliente: clientName,
+      periodo: payload.period?.label || report.periodId,
+      resumen: {
+        ingresos: summary.revenue || 0,
+        costoPorcentaje: summary.costPercent || 0,
+        costoIdeal: summary.idealCostPercent || 0,
+        variancePorcentaje: summary.variancePercent || 0,
+        varianceMonto: summary.varianceAmount || 0,
+      },
+      categorias: (payload.categoryVariances || []).slice(0, 10),
+      productos: (payload.topProducts || []).slice(0, 10),
+      sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 10),
+      historico: (payload.history || []).slice(0, 4),
+    }),
+    "",
+    "Análisis/resumen actual del reporte (el usuario puede pedir ajustarlo):",
+    String(report.comments || "(aún no generado)").slice(0, 3000),
+  ].join("\n");
+
+  const history = Array.isArray(report.chat) ? report.chat.slice(-16) : [];
+  const input = [
+    { role: "system", content: contextText },
+    ...history.map((item) => ({ role: item.role, content: item.content })),
+    { role: "user", content: message },
+  ];
+
+  try {
+    const aiResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: openaiModel, input, max_output_tokens: 1600 }),
+    });
+    const aiPayload = await aiResponse.json().catch(() => ({}));
+    if (!aiResponse.ok) {
+      response.status(502).json({ error: aiPayload?.error?.message || "El agente no pudo responder. Intenta de nuevo." });
+      return;
+    }
+    const reply = extractOpenAiText(aiPayload).trim();
+    if (!reply) {
+      response.status(502).json({ error: "El agente devolvió una respuesta vacía. Intenta de nuevo." });
+      return;
+    }
+
+    report.chat = [...history, { role: "user", content: message }, { role: "assistant", content: reply }].slice(-24);
+    report.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    response.json({ reply, chat: report.chat });
+  } catch (error) {
+    console.error("[openai] chat fallo:", error.message);
+    response.status(502).json({ error: "No se pudo contactar al agente. Intenta de nuevo en unos segundos." });
+  }
+});
+
 app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);
