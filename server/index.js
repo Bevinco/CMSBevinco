@@ -1541,7 +1541,7 @@ TONO Y ESTILO: tecnico, claro, consultivo, no acusatorio, breve y directo. Usa "
 // Genera el analisis ejecutivo con OpenAI usando los criterios del cliente.
 // Devuelve null ante cualquier problema para que el flujo caiga en la plantilla.
 async function generateReportAnalysisAI(payload) {
-  if (!openaiApiKey) return null;
+  if (!openaiApiKey) { console.error("[openai] sin OPENAI_API_KEY configurada"); return null; }
 
   const summary = payload.summary || {};
   const clientName = payload.client?.name || payload.clientId;
@@ -1625,8 +1625,12 @@ ${JSON.stringify(reportData, null, 2)}
       return null;
     }
 
-    const parsed = extractJsonPayload(extractOpenAiText(responsePayload));
-    if (!parsed?.analysis) return null;
+    const rawText = extractOpenAiText(responsePayload);
+    const parsed = extractJsonPayload(rawText);
+    if (!parsed?.analysis) {
+      console.error("[openai] respuesta sin analysis parseable. status:", responsePayload?.status, "| texto (300):", String(rawText).slice(0, 300));
+      return null;
+    }
 
     const toList = (value) =>
       Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean).slice(0, 5) : [];
@@ -1682,8 +1686,7 @@ function extractOpenAiText(payload) {
   const chunks = [];
   for (const output of payload?.output || []) {
     for (const content of output.content || []) {
-      if (content.text) chunks.push(content.text);
-      if (content.type === "output_text" && content.text) chunks.push(content.text);
+      if (typeof content.text === "string" && content.text) chunks.push(content.text);
     }
   }
   return chunks.join("\n").trim();
