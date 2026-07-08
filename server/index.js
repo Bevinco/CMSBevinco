@@ -229,6 +229,29 @@ async function renderReportPdf(store, report, attempt = 0) {
 }
 
 // Plantilla de correo (compatible con Gmail/Outlook: tablas + estilos inline).
+// Envio por Gmail/Workspace (SMTP con contraseña de aplicación). Si esta
+// configurado, tiene prioridad sobre Resend: sale desde la casilla real del
+// equipo, con la reputación del dominio ya establecida y sin tocar DNS.
+const gmailUser = process.env.GMAIL_USER || "";
+const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
+const gmailConfigured = Boolean(gmailUser && gmailAppPassword);
+let gmailTransportPromise = null;
+
+async function getGmailTransport() {
+  if (!gmailTransportPromise) {
+    gmailTransportPromise = (async () => {
+      const nodemailer = (await import("nodemailer")).default;
+      return nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: { user: gmailUser, pass: gmailAppPassword },
+      });
+    })();
+  }
+  return gmailTransportPromise;
+}
+
 function renderEmailShellHtml({ clientName, bodyText }) {
   const paragraphs = String(bodyText || "")
     .split(/\n{2,}/)
@@ -5469,13 +5492,13 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   const defaultSubject = `Reporte ${isMonthly ? "mensual" : "semanal"} Bevinco - ${client?.name || report.clientId}`;
   const subject = String(request.body?.subject || "").trim().slice(0, 160) || defaultSubject;
 
-  if (!process.env.RESEND_API_KEY) {
+  if (!gmailConfigured && !process.env.RESEND_API_KEY) {
     response.json({
       prepared: true,
       sent: false,
-      message: "RESEND_API_KEY is not configured. Email draft is ready but was not sent.",
+      message: "El correo no está configurado (falta GMAIL_USER/GMAIL_APP_PASSWORD o RESEND_API_KEY). El borrador quedó listo.",
       recipients,
-      subject: `Reporte semanal Bevinco - ${client?.name || report.clientId}`,
+      subject,
       body: report.emailDraft,
     });
     return;
@@ -5487,6 +5510,42 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   } catch (pdfError) {
     console.error("[pdf] fallo al adjuntar:", pdfError.stack || pdfError.message);
     response.status(500).json({ error: "No se pudo generar el PDF adjunto. Intenta de nuevo en unos segundos." });
+    return;
+  }
+
+  if (gmailConfigured) {
+    try {
+      const transport = await getGmailTransport();
+      await transport.sendMail({
+        from: process.env.REPORTS_FROM_EMAIL || `Bevinco Reportes <${gmailUser}>`,
+        to: recipients.join(", "),
+        replyTo: process.env.REPORTS_REPLY_TO || gmailUser,
+        subject,
+        html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
+        attachments: [
+          {
+            filename: `${subject.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120)}.pdf`,
+            content: reportPdf,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+    } catch (gmailError) {
+      console.error("[gmail] envio fallo:", gmailError.message);
+      response.status(502).json({
+        error: /invalid login|username and password/i.test(String(gmailError.message))
+          ? "Gmail rechazó las credenciales: revisa GMAIL_USER y la contraseña de aplicación."
+          : "No se pudo enviar por Gmail. Intenta de nuevo en unos segundos.",
+      });
+      return;
+    }
+
+    report.status = "Enviado";
+    report.emailLog = { sentAt: new Date().toISOString(), recipients, subject };
+    report.updatedAt = new Date().toISOString();
+    if (client) client.recipients = recipients;
+    await writeStore(store);
+    response.json({ sent: true, via: "gmail", report: buildReportPayload(store, report) });
     return;
   }
 
