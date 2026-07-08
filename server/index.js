@@ -186,9 +186,9 @@ async function getPdfBrowser() {
       }
       const chromium = (await import("@sparticuz/chromium")).default;
       return puppeteer.launch({
-        args: chromium.args,
+        args: [...chromium.args, "--disable-gpu", "--no-zygote"],
         executablePath: await chromium.executablePath(),
-        headless: true,
+        headless: chromium.headless,
       });
     })().catch((error) => {
       pdfBrowserPromise = null;
@@ -198,9 +198,19 @@ async function getPdfBrowser() {
   return pdfBrowserPromise;
 }
 
-async function renderReportPdf(store, report) {
+async function renderReportPdf(store, report, attempt = 0) {
   const html = renderTwoPageReportHtml(store, report);
-  const browser = await getPdfBrowser();
+  let browser;
+  try {
+    browser = await getPdfBrowser();
+    if (!browser.connected) throw new Error("browser desconectado");
+  } catch (error) {
+    // El navegador pudo morir (memoria/reinicio): resetear y reintentar una vez.
+    pdfBrowserPromise = null;
+    if (attempt < 1) return renderReportPdf(store, report, attempt + 1);
+    console.error("[pdf] launch fallo:", error.stack || error.message);
+    throw error;
+  }
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
@@ -5420,7 +5430,7 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
     response.setHeader("content-disposition", `attachment; filename="${fileName}.pdf"`);
     response.send(pdf);
   } catch (error) {
-    console.error("[pdf] fallo:", error.message);
+    console.error("[pdf] fallo:", error.stack || error.message);
     response.status(500).json({ error: "No se pudo generar el PDF. Intenta de nuevo." });
   }
 });
@@ -5465,7 +5475,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   try {
     reportPdf = await renderReportPdf(store, report);
   } catch (pdfError) {
-    console.error("[pdf] fallo al adjuntar:", pdfError.message);
+    console.error("[pdf] fallo al adjuntar:", pdfError.stack || pdfError.message);
     response.status(500).json({ error: "No se pudo generar el PDF adjunto. Intenta de nuevo en unos segundos." });
     return;
   }
