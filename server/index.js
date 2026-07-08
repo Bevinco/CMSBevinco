@@ -169,6 +169,102 @@ const sculptureSessionCookieCache = new Map();
 let clickupAccessTokenCache = "";
 let cachedLogoDataUri = "";
 
+// Renderiza el reporte de dos paginas como PDF real usando Chromium headless.
+// En Render (Linux) usa @sparticuz/chromium (binario liviano para servidores);
+// en desarrollo Windows usa el Chrome instalado.
+let pdfBrowserPromise = null;
+
+async function getPdfBrowser() {
+  if (!pdfBrowserPromise) {
+    pdfBrowserPromise = (async () => {
+      const puppeteer = (await import("puppeteer-core")).default;
+      if (process.platform === "win32") {
+        return puppeteer.launch({
+          executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
+          headless: true,
+        });
+      }
+      const chromium = (await import("@sparticuz/chromium")).default;
+      return puppeteer.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
+    })().catch((error) => {
+      pdfBrowserPromise = null;
+      throw error;
+    });
+  }
+  return pdfBrowserPromise;
+}
+
+async function renderReportPdf(store, report) {
+  const html = renderTwoPageReportHtml(store, report);
+  const browser = await getPdfBrowser();
+  const page = await browser.newPage();
+  try {
+    await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
+    const pdf = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      // El lienzo del reporte mide ~810px y el A4 util ~740px: se escala para
+      // que cada pagina del reporte entre exacta en una hoja.
+      scale: 0.88,
+      margin: { top: "7mm", bottom: "7mm", left: "6mm", right: "6mm" },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+// Plantilla de correo (compatible con Gmail/Outlook: tablas + estilos inline).
+function renderEmailShellHtml({ clientName, bodyText }) {
+  const paragraphs = String(bodyText || "")
+    .split(/\n{2,}/)
+    .map((block) => `<p style="margin:0 0 14px;color:#333333;font-size:14.5px;line-height:1.65;">${escapeHtml(block).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#eef2f1;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f1;padding:26px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #dce4e2;">
+        <tr>
+          <td style="height:5px;background:linear-gradient(90deg,#054372 0%,#90bf4f 55%,#8bc6c1 100%);font-size:0;line-height:0;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:30px 40px 6px;">
+            <div style="font-family:Ubuntu,'Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;color:#054372;letter-spacing:0.4px;">BEVINCO</div>
+            <div style="font-family:Ubuntu,'Segoe UI',Arial,sans-serif;font-size:11px;color:#8ba39c;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Sculpture Hospitality</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:22px 40px 8px;font-family:Ubuntu,'Segoe UI',Arial,sans-serif;">
+            ${paragraphs}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:4px 40px 28px;font-family:Ubuntu,'Segoe UI',Arial,sans-serif;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="background:#f5f8f7;border:1px solid #e2eae7;border-radius:10px;width:100%;">
+              <tr>
+                <td style="padding:12px 16px;color:#526862;font-size:13px;line-height:1.5;">
+                  📎 El reporte completo de <strong style="color:#054372;">${escapeHtml(clientName)}</strong> va adjunto en PDF, con los gráficos y el detalle por producto.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:0 40px 26px;font-family:Ubuntu,'Segoe UI',Arial,sans-serif;color:#8ba39c;font-size:11.5px;border-top:1px solid #eef2f1;padding-top:16px;">
+            Reporte generado por Bevinco CMS · Sculpture Hospitality
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
 function logoDataUri() {
   if (cachedLogoDataUri) return cachedLogoDataUri;
   const candidates = [
@@ -5272,6 +5368,27 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
   response.send(renderTwoPageReportHtml(store, report));
 });
 
+app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  try {
+    const pdf = await renderReportPdf(store, report);
+    const client = store.clients.find((candidate) => candidate.id === report.clientId);
+    const period = store.periods.find((candidate) => candidate.id === report.periodId);
+    const fileName = `Reporte Bevinco - ${client?.name || report.clientId} - ${period?.label || report.periodId}`.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
+    response.setHeader("content-type", "application/pdf");
+    response.setHeader("content-disposition", `attachment; filename="${fileName}.pdf"`);
+    response.send(pdf);
+  } catch (error) {
+    console.error("[pdf] fallo:", error.message);
+    response.status(500).json({ error: "No se pudo generar el PDF. Intenta de nuevo." });
+  }
+});
+
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);
@@ -5308,6 +5425,15 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     return;
   }
 
+  let reportPdf;
+  try {
+    reportPdf = await renderReportPdf(store, report);
+  } catch (pdfError) {
+    console.error("[pdf] fallo al adjuntar:", pdfError.message);
+    response.status(500).json({ error: "No se pudo generar el PDF adjunto. Intenta de nuevo en unos segundos." });
+    return;
+  }
+
   const resendResponse = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -5321,10 +5447,13 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       // un dominio de envio (Resend) distinto.
       reply_to: process.env.REPORTS_REPLY_TO || undefined,
       subject,
-      html: `<div style="font-family:Ubuntu,Segoe UI,sans-serif;max-width:820px;margin:0 auto;">` +
-        `<div style="white-space:pre-wrap;color:#333;font-size:14px;line-height:1.6;padding:18px 6px;">${escapeHtml(report.emailDraft || "")}</div>` +
-        renderPolishedReportHtml(store, report) +
-        `</div>`,
+      html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
+      attachments: [
+        {
+          filename: `${subject.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120)}.pdf`,
+          content: reportPdf.toString("base64"),
+        },
+      ],
     }),
   });
 

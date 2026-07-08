@@ -10,10 +10,12 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "@vitejs/plugin-react": "^5.1.1",
     "cheerio": "^1.1.2",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
+    "puppeteer-core": "^25.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "typescript": "^5.8.3",
