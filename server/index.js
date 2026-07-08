@@ -1080,17 +1080,35 @@ function findReport(store, reportId) {
   return store.reports.find((report) => report.id === reportId);
 }
 
-function lastFourPeriods(store, selectedPeriodId) {
-  const selectedIndex = store.periods.findIndex((period) => period.id === selectedPeriodId);
-  if (selectedIndex === -1) return store.periods.slice(0, 4);
-  return store.periods.slice(selectedIndex, selectedIndex + 4);
+function lastFourPeriods(store, report) {
+  // Historico POR CLIENTE: los periodos del store son globales (varios
+  // restaurantes comparten rangos), asi que solo cuentan el periodo del
+  // reporte y los periodos donde ESTE cliente tiene reporte guardado.
+  // Se excluyen los sinteticos mensuales y se ordena por fecha.
+  const clientPeriodIds = new Set(
+    store.reports.filter((item) => item.clientId === report.clientId).map((item) => item.periodId),
+  );
+  const seenStarts = new Set();
+  const weekly = store.periods
+    .filter((period) => period.source !== "mensual" && !String(period.id).startsWith("mensual-"))
+    .filter((period) => period.id === report.periodId || clientPeriodIds.has(period.id))
+    .sort((left, right) => String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)))
+    .filter((period) => {
+      const key = period.startsAt || period.label;
+      if (seenStarts.has(key)) return false;
+      seenStarts.add(key);
+      return true;
+    });
+  const selectedIndex = weekly.findIndex((period) => period.id === report.periodId);
+  if (selectedIndex === -1) return weekly.slice(-4);
+  return weekly.slice(Math.max(0, selectedIndex - 3), selectedIndex + 1);
 }
 
 // Historial de las ultimas 4 semanas usando SOLO datos reales sincronizados.
 // Un reporte de auditoria no puede inventar cifras: si una semana no fue
 // consultada, sus valores quedan en 0 y los graficos la omiten.
 function historyForReport(store, report) {
-  const periods = lastFourPeriods(store, report.periodId);
+  const periods = lastFourPeriods(store, report);
   return periods.map((period) => {
     const existing = store.reports.find(
       (candidate) => candidate.clientId === report.clientId && candidate.periodId === period.id,
