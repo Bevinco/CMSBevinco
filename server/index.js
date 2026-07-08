@@ -5317,6 +5317,9 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     body: JSON.stringify({
       from: process.env.REPORTS_FROM_EMAIL || "reportes@bevinco.local",
       to: recipients,
+      // Las respuestas del cliente llegan al equipo aunque el remitente sea
+      // un dominio de envio (Resend) distinto.
+      reply_to: process.env.REPORTS_REPLY_TO || undefined,
       subject,
       html: `<div style="font-family:Ubuntu,Segoe UI,sans-serif;max-width:820px;margin:0 auto;">` +
         `<div style="white-space:pre-wrap;color:#333;font-size:14px;line-height:1.6;padding:18px 6px;">${escapeHtml(report.emailDraft || "")}</div>` +
