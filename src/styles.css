@@ -4072,3 +4072,47 @@ button:disabled {
 :root[data-theme="dark"] .chat-bubble-content { background: var(--surface-muted); color: var(--text); }
 :root[data-theme="dark"] .chat-bubble.user .chat-bubble-content { background: var(--sculpture-blue); color: #fff; }
 :root[data-theme="dark"] .chat-bubble-actions button { background: #142e12; border-color: #2c4a1f; color: #c7e3b1; }
+
+/* ===== Reportes mensuales ===== */
+.monthly-weeks {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.monthly-weeks strong { color: #172026; font-size: 0.9rem; }
+.monthly-weeks small { color: #6f7d79; }
+
+.monthly-week-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.week-chip {
+  background: #f5f8f7;
+  border: 1px solid #d6e0dd;
+  border-radius: 999px;
+  color: #526862;
+  font-size: 0.8rem;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 4px 14px;
+  transition: all 130ms ease;
+}
+
+.week-chip:hover { border-color: var(--sculpture-green); }
+
+.week-chip.active {
+  background: #eef4ea;
+  border-color: var(--sculpture-green);
+  color: #3b5a24;
+}
+
+.monthly-result { display: grid; gap: 14px; }
+
+:root[data-theme="dark"] .monthly-weeks strong { color: var(--text); }
+:root[data-theme="dark"] .monthly-weeks small { color: var(--text-muted); }
+:root[data-theme="dark"] .week-chip { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
+:root[data-theme="dark"] .week-chip.active { background: #142e12; border-color: #2c4a1f; color: #c7e3b1; }

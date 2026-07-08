@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bot,
   Building2,
+  CalendarDays,
   ClipboardList,
   Cloud,
   Database,
@@ -36,7 +37,7 @@ import "./styles.css";
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "tasks" | "reports" | "criteria" | "users";
+type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
 type ThemeMode = "light" | "dark";
 
 type Client = {
@@ -119,6 +120,7 @@ type Report = {
   emailDraft: string;
   isAccumulated?: boolean;
   backfill?: boolean;
+  monthly?: boolean;
   chat?: Array<{ role: "user" | "assistant"; content: string }>;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
@@ -479,6 +481,10 @@ function App() {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [monthlyMonth, setMonthlyMonth] = useState("");
+  const [monthlySelectedIds, setMonthlySelectedIds] = useState<string[]>([]);
+  const [monthlyReport, setMonthlyReport] = useState<Report | null>(null);
+  const [monthlyGenerating, setMonthlyGenerating] = useState(false);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
@@ -1176,6 +1182,49 @@ function App() {
     if (patch.emailDraft !== undefined) setEmailDraft(updated.emailDraft || "");
   }
 
+  async function generateMonthlyReport() {
+    const selectedUnit = sculptureUnits.find((item) => item.id === selectedSculptureUnitId);
+    if ((!selectedUnit && !selectedClientId) || !monthlyMonth || monthlyGenerating) return;
+
+    setMonthlyGenerating(true);
+    setError("Acumulando las semanas del mes...");
+    setWorkStatus("loading");
+
+    try {
+      const payload = await readJson<{ report: Report; reports: Report[] }>(
+        await fetch("/api/module1/monthly/generate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            unit: selectedUnit,
+            clientId: selectedUnit ? "" : selectedClientId,
+            month: monthlyMonth,
+            periodIds: monthlySelectedIds,
+          }),
+        }),
+      );
+      setMonthlyReport(payload.report);
+      setReports(payload.reports);
+      setError(`Reporte mensual listo: ${(payload.report.includedPeriods || []).length} semana(s) acumuladas.`);
+      setWorkStatus("ready");
+    } catch (monthlyError) {
+      setError(monthlyError instanceof Error ? monthlyError.message : "No se pudo generar el reporte mensual.");
+      setWorkStatus("error");
+    } finally {
+      setMonthlyGenerating(false);
+    }
+  }
+
+  function openMonthlyReport() {
+    if (!monthlyReport) return;
+    setSelectedClientId(monthlyReport.clientId);
+    setSelectedPeriodId(monthlyReport.periodId);
+    setSelectedReport(monthlyReport);
+    setCommentsDraft(monthlyReport.comments || "");
+    setEmailDraft(monthlyReport.emailDraft || "");
+    navigateTo("module1");
+  }
+
   async function sendChatMessage() {
     const message = chatInput.trim();
     if (!message || !selectedReport || chatSending) return;
@@ -1287,6 +1336,24 @@ function App() {
   useEffect(() => {
     setChatMessages(selectedReport?.chat || []);
   }, [selectedReport?.id]);
+
+  const monthlyPeriods = useMemo(
+    () => clientPeriods.filter((period) => monthFromPeriod(period) === monthlyMonth),
+    [clientPeriods, monthlyMonth],
+  );
+
+  useEffect(() => {
+    if (!monthlyMonth && clientPeriods.length) {
+      const latest = monthFromPeriod(clientPeriods[0]);
+      if (latest) setMonthlyMonth(latest);
+    }
+  }, [clientPeriods, monthlyMonth]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    setMonthlySelectedIds(monthlyPeriods.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id));
+    setMonthlyReport(null);
+  }, [monthlyMonth, monthlyPeriods.length, selectedSculptureUnitId]);
 
   useEffect(() => {
     if (authStatus !== "authenticated") return;
@@ -1443,6 +1510,7 @@ function App() {
   const viewMeta = {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Operación semanal", "Reportes semanales"],
+    monthly: ["Operación mensual", "Reportes mensuales"],
     tasks: ["Gestión operativa", "Pendientes ClickUp"],
     reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
@@ -1478,6 +1546,7 @@ function App() {
         <nav className="nav-list" aria-label="Modulos">
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -2265,6 +2334,135 @@ function App() {
             </>
           ) : null}
         </details>
+          </>
+        ) : null}
+
+        {activeView === "monthly" ? (
+          <>
+          <section className="panel unit-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Acumulado del mes</p>
+                <h2>Genera el reporte mensual</h2>
+              </div>
+              <CalendarDays size={22} />
+            </div>
+            <p className="managed-help">
+              Ingresos, ventas y compras se suman entre las semanas del mes; las existencias y la sugerencia de compra toman el último periodo, igual que en Sculpture.
+            </p>
+            <div className="unit-form-grid">
+              <label>
+                Restaurante/local
+                <select
+                  value={selectedSculptureUnitId || (selectedClientId ? `cms:${selectedClientId}` : "")}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value.startsWith("cms:")) {
+                      setSelectedClientId(value.slice(4));
+                      setSelectedSculptureUnitId("");
+                    } else {
+                      setSelectedSculptureUnitId(value);
+                    }
+                  }}
+                >
+                  {sculptureUnits.filter((unit) => !unit.hidden).map((unit) => (
+                    <option key={unit.id} value={unit.id}>{unit.name} - {unit.area}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Mes
+                <input type="month" value={monthlyMonth} onChange={(event) => setMonthlyMonth(event.target.value)} />
+              </label>
+            </div>
+            <div className="monthly-weeks">
+              <strong>Semanas que componen el mes</strong>
+              <small>{clientPeriodsLoading ? "Cargando periodos del restaurante..." : `${monthlySelectedIds.length} de ${monthlyPeriods.length} seleccionadas — toca una semana para incluirla o quitarla.`}</small>
+              <div className="monthly-week-chips">
+                {monthlyPeriods.map((period) => {
+                  const active = monthlySelectedIds.includes(period.id);
+                  return (
+                    <button
+                      className={`week-chip ${active ? "active" : ""}`}
+                      key={period.id}
+                      type="button"
+                      onClick={() =>
+                        setMonthlySelectedIds((current) =>
+                          current.includes(period.id) ? current.filter((id) => id !== period.id) : [...current, period.id],
+                        )
+                      }
+                    >
+                      {active ? "✓ " : ""}{period.label}
+                    </button>
+                  );
+                })}
+                {!monthlyPeriods.length && !clientPeriodsLoading ? (
+                  <span className="managed-help">Este restaurante no tiene periodos en el mes elegido.</span>
+                ) : null}
+              </div>
+            </div>
+            <div className="query-actions">
+              <button
+                className="primary-button"
+                disabled={monthlyGenerating || !monthlySelectedIds.length}
+                onClick={generateMonthlyReport}
+                type="button"
+              >
+                {monthlyGenerating ? <span className="btn-spinner" /> : <CalendarDays size={17} />}
+                {monthlyGenerating ? "Acumulando..." : "Generar reporte mensual"}
+              </button>
+            </div>
+          </section>
+
+          {monthlyReport ? (
+            <>
+            <section className="metrics" aria-label="Resumen mensual">
+              <article>
+                <span><FileSpreadsheet size={18} /> Ingresos (suma)</span>
+                <strong>{money(monthlyReport.summary.revenue || 0)}</strong>
+                <small>{(monthlyReport.includedPeriods || []).length} semana(s)</small>
+              </article>
+              <article>
+                <span><BarChart3 size={18} /> % costo</span>
+                <strong>{monthlyReport.summary.costPercent || 0}%</strong>
+                <small>Sobre ingresos acumulados</small>
+              </article>
+              <article>
+                <span><FileText size={18} /> Variance (suma)</span>
+                <strong>{monthlyReport.summary.variancePercent || 0}%</strong>
+                <small>{money(monthlyReport.summary.varianceAmount || 0)}</small>
+              </article>
+              <article>
+                <span><ListChecks size={18} /> Stock</span>
+                <strong className="metric-status">Último periodo</strong>
+                <small>{(monthlyReport.purchaseSuggestions || []).length} artículo(s)</small>
+              </article>
+            </section>
+
+            <section className="panel monthly-result">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Reporte mensual</p>
+                  <h2>{monthlyReport.period?.label || "Acumulado"} · {monthlyReport.client?.name || ""}</h2>
+                </div>
+                <CalendarDays size={22} />
+              </div>
+              <div className="accumulated-periods">
+                {(monthlyReport.includedPeriods || []).map((period) => (
+                  <span className="accumulated-chip" key={period.id}>{period.label}</span>
+                ))}
+              </div>
+              <div className="action-row wrap-actions">
+                <a className="button-link" href={`/api/module1/reports/${monthlyReport.id}/export`} target="_blank" rel="noreferrer">
+                  <Printer size={17} /> Exportar PDF
+                </a>
+                <button className="primary-button" onClick={openMonthlyReport} type="button">
+                  <Bot size={17} /> Abrir para análisis, chat y envío
+                </button>
+              </div>
+            </section>
+            </>
+          ) : null}
           </>
         ) : null}
 

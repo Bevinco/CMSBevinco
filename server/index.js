@@ -2870,7 +2870,7 @@ function summarySoldCost(summary = {}) {
 // se toman del ULTIMO periodo, tal como opera Sculpture.
 function accumulateReportPayloads(payloads = []) {
   const valid = payloads.filter(Boolean);
-  if (valid.length <= 1) return null;
+  if (!valid.length) return null;
 
   const ordered = [...valid].sort((left, right) => periodSortKey(left).localeCompare(periodSortKey(right)));
   const first = ordered[0];
@@ -2880,8 +2880,15 @@ function accumulateReportPayloads(payloads = []) {
   let usedCost = 0;
   let soldCost = 0;
   let varianceAmount = 0;
+  let wasteCost = 0;
+  let purchasedCost = 0;
+  let suggestedCost = 0;
   const categoryMap = new Map();
   const productMap = new Map();
+  const familyMap = new Map();
+  const familyPurchaseMap = new Map();
+  const familySuggestedMap = new Map();
+  const monthlyHistory = [];
 
   for (const payload of ordered) {
     const summary = payload.summary || {};
@@ -2889,6 +2896,33 @@ function accumulateReportPayloads(payloads = []) {
     usedCost += summaryUsedCost(summary);
     soldCost += summarySoldCost(summary);
     varianceAmount += summary.varianceAmount || 0;
+    wasteCost += summary.wasteCost || 0;
+    purchasedCost += summary.purchasedCost || 0;
+    suggestedCost += summary.suggestedCost || 0;
+
+    for (const family of payload.familyVariances || []) {
+      familyMap.set(family.family, (familyMap.get(family.family) || 0) + (family.amount || 0));
+    }
+    for (const family of payload.familyPurchases || []) {
+      familyPurchaseMap.set(family.family, (familyPurchaseMap.get(family.family) || 0) + (family.purchased || 0));
+    }
+    for (const family of payload.familySuggested || []) {
+      familySuggestedMap.set(family.family, (familySuggestedMap.get(family.family) || 0) + (family.suggested || 0));
+    }
+
+    monthlyHistory.push({
+      periodId: payload.periodId,
+      label: payload.period?.label || payload.periodId,
+      endsAt: payload.period?.endsAt || "",
+      revenue: summary.revenue || 0,
+      costPercent: summary.costPercent || 0,
+      idealCostPercent: summary.idealCostPercent || 0,
+      varianceAmount: summary.varianceAmount || 0,
+      usedCost: summaryUsedCost(summary),
+      inventoryCost: summary.inventoryCost || 0,
+      purchasedCost: summary.purchasedCost || 0,
+      suggestedCost: summary.suggestedCost || 0,
+    });
 
     for (const category of payload.categoryVariances || []) {
       const key = category.category || "Sin categoría";
@@ -2948,12 +2982,24 @@ function accumulateReportPayloads(payloads = []) {
       revenue,
       usedCost,
       soldCost,
+      wasteCost,
+      purchasedCost,
+      suggestedCost,
+      // Las existencias son una foto: se toma la del ULTIMO periodo del mes.
+      inventoryCost: last.summary?.inventoryCost || 0,
+      idealCostPercent: last.summary?.idealCostPercent || 0,
       costPercent: revenue ? round1((usedCost / revenue) * 100) : 0,
       variancePercent: soldCost ? round1((varianceAmount / soldCost) * 100) : 0,
       varianceAmount,
     },
     categoryVariances,
     topProducts,
+    familyVariances: [...familyMap.entries()]
+      .map(([family, amount]) => ({ family, amount: Math.round(amount) }))
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+    familyPurchases: [...familyPurchaseMap.entries()].map(([family, purchased]) => ({ family, purchased: Math.round(purchased) })),
+    familySuggested: [...familySuggestedMap.entries()].map(([family, suggested]) => ({ family, suggested: Math.round(suggested) })),
+    monthlyHistory,
     // Las existencias/stock son una foto: se toman del ultimo periodo, no se suman.
     purchaseSuggestions: last.purchaseSuggestions || [],
     sourceStatus: last.sourceStatus || {},
@@ -2968,7 +3014,10 @@ function buildReportPayload(store, report) {
     ...report,
     client,
     period,
-    history: historyForReport(store, report),
+    // Los reportes mensuales traen su propio historial: las semanas del mes.
+    history: Array.isArray(report.monthlyHistory) && report.monthlyHistory.length
+      ? report.monthlyHistory
+      : historyForReport(store, report),
     criteriaDocuments: store.criteriaDocuments || [],
   };
   payload.analysis = report.analysis || generateReportAnalysis(payload);
@@ -4947,6 +4996,135 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
   report.updatedAt = new Date().toISOString();
   await writeStore(store);
   response.json(buildReportPayload(store, report));
+});
+
+const MONTH_NAMES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+// Reporte MENSUAL: acumula los periodos semanales seleccionados de un mes.
+// Regla del equipo: ingresos/ventas/compras se SUMAN; existencias/stock y
+// sugerencia de compra se toman del ULTIMO periodo. El resultado se guarda
+// como un reporte real (Historial, PDF, analisis IA y chat funcionan igual).
+app.post("/api/module1/monthly/generate", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const { unit, clientId, month, periodIds = [] } = request.body || {};
+  const resolvedUnit = unit || store.clients.find((candidate) => candidate.id === clientId);
+
+  if (!resolvedUnit) {
+    response.status(400).json({ error: "Selecciona un restaurante para el reporte mensual." });
+    return;
+  }
+  const monthKey = String(month || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+    response.status(400).json({ error: "Selecciona el mes del reporte." });
+    return;
+  }
+
+  const sculptureCid = configuredIdentifier(resolvedUnit.sculptureCid, resolvedUnit.cid);
+  if (!sculptureCid) {
+    response.status(400).json({ error: "El restaurante seleccionado no tiene CID numérico de Sculpture." });
+    return;
+  }
+
+  const client = ensureClient(store, {
+    ...resolvedUnit,
+    cid: sculptureCid,
+    sculptureCid,
+    sculptureBaseUrl: resolvedUnit.baseUrl || resolvedUnit.sculptureBaseUrl || baseUrlForSculptureArea(resolvedUnit.area),
+    recipients: resolvedUnit.recipients || [],
+  });
+
+  let clientPeriods = [];
+  try {
+    clientPeriods = await fetchSculpturePeriodsForClient({
+      baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
+      cid: sculptureCid,
+    });
+  } catch {
+    clientPeriods = [];
+  }
+
+  const requestedIds = Array.isArray(periodIds) ? periodIds.filter(Boolean) : [];
+  const monthPeriods = clientPeriods.filter((period) => periodMonthKey(period) === monthKey);
+  const chosen = requestedIds.length
+    ? monthPeriods.filter((period) => requestedIds.includes(period.id))
+    : monthPeriods;
+
+  if (!chosen.length) {
+    response.status(400).json({ error: "No hay periodos semanales de ese mes para acumular." });
+    return;
+  }
+
+  const payloads = [];
+  for (const rawPeriod of [...chosen].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)))) {
+    const period = ensurePeriod(store, rawPeriod);
+    if (!period) continue;
+    const weekly = reportForClientPeriod(store, client.id, period.id);
+    if (!(weekly.summary?.revenue > 0)) {
+      try {
+        await syncSculptureSources(store, weekly, {
+          cid: sculptureCid,
+          pid: period.sculpturePid || period.pid,
+          area: client.area,
+        });
+      } catch {
+        // Semana sin datos: se omite del acumulado.
+      }
+      if (weekly.backfill !== false) weekly.backfill = true;
+    }
+    if (weekly.summary?.revenue > 0) payloads.push(buildReportPayload(store, weekly));
+  }
+
+  if (!payloads.length) {
+    response.status(400).json({ error: "Ninguna semana de ese mes tiene datos de auditoría cerrados." });
+    return;
+  }
+
+  const accumulated = accumulateReportPayloads(payloads);
+  const [yearText, monthNumber] = monthKey.split("-");
+  const monthLabel = `${MONTH_NAMES_ES[Number(monthNumber) - 1]} ${yearText}`;
+
+  const syntheticPeriod = ensurePeriod(store, {
+    id: `mensual-${monthKey}`,
+    label: `Mes de ${monthLabel}`,
+    startsAt: accumulated.period.startsAt,
+    endsAt: accumulated.period.endsAt,
+    source: "mensual",
+  });
+
+  const reportId = `mensual-${client.id}-${monthKey}`;
+  let report = store.reports.find((candidate) => candidate.id === reportId);
+  if (!report) {
+    report = { id: reportId, clientId: client.id, comments: "", emailDraft: "", chat: [] };
+    store.reports.push(report);
+  }
+
+  Object.assign(report, {
+    clientId: client.id,
+    periodId: syntheticPeriod?.id || `mensual-${monthKey}`,
+    status: report.status || "Borrador",
+    monthly: true,
+    backfill: false,
+    summary: accumulated.summary,
+    categoryVariances: accumulated.categoryVariances,
+    topProducts: accumulated.topProducts,
+    familyVariances: accumulated.familyVariances,
+    familyPurchases: accumulated.familyPurchases,
+    familySuggested: accumulated.familySuggested,
+    purchaseSuggestions: accumulated.purchaseSuggestions,
+    monthlyHistory: accumulated.monthlyHistory,
+    includedPeriods: accumulated.includedPeriods,
+    sourceStatus: accumulated.sourceStatus,
+    analysis: null,
+    updatedAt: new Date().toISOString(),
+  });
+
+  await writeStore(store);
+
+  response.json({
+    report: buildReportPayload(store, report),
+    weeksIncluded: accumulated.includedPeriods,
+    reports: store.reports.map((item) => buildReportPayload(store, item)),
+  });
 });
 
 // Chat conversacional sobre un reporte: mismo contexto que el analisis con IA
