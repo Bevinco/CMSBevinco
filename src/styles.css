@@ -619,7 +619,8 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.unit-form label {
+.unit-form label,
+.unit-form-grid label {
   color: #46605a;
   display: grid;
   font-size: 0.76rem;
@@ -4077,7 +4078,11 @@ button:disabled {
 .monthly-weeks {
   display: grid;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 18px;
+}
+
+.unit-panel > .unit-form-grid {
+  margin-top: 6px;
 }
 
 .monthly-weeks strong { color: #172026; font-size: 0.9rem; }
