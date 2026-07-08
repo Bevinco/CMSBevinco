@@ -18,6 +18,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  Paperclip,
   Moon,
   PencilLine,
   Plus,
@@ -552,6 +553,8 @@ function App() {
   const [emailRecipientInput, setEmailRecipientInput] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailSending, setEmailSending] = useState(false);
+  const [reportTab, setReportTab] = useState<"draft" | "chat" | "send">("draft");
+  const [chatFiles, setChatFiles] = useState<File[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
@@ -1351,17 +1354,37 @@ function App() {
 
   async function sendChatMessage() {
     const message = chatInput.trim();
-    if (!message || !selectedReport || chatSending) return;
+    if ((!message && !chatFiles.length) || !selectedReport || chatSending) return;
     setChatSending(true);
     setChatInput("");
-    setChatMessages((current) => [...current, { role: "user", content: message }]);
+
+    const images: Array<{ name: string; dataUrl: string }> = [];
+    const texts: Array<{ name: string; content: string }> = [];
+    for (const file of chatFiles.slice(0, 4)) {
+      if (file.type.startsWith("image/")) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        images.push({ name: file.name, dataUrl });
+      } else {
+        texts.push({ name: file.name, content: (await file.text()).slice(0, 12000) });
+      }
+    }
+    setChatFiles([]);
+
+    const attachmentNote = [...images, ...texts].map((item) => `📎 ${item.name}`).join("  ");
+    const shownMessage = [message, attachmentNote].filter(Boolean).join("\n");
+    setChatMessages((current) => [...current, { role: "user", content: shownMessage }]);
 
     try {
       const payload = await readJson<{ reply: string; chat: Array<{ role: "user" | "assistant"; content: string }> }>(
         await fetch(`/api/module1/reports/${selectedReport.id}/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message }),
+          body: JSON.stringify({ message: message || "Analiza los archivos adjuntos.", images, texts }),
         }),
       );
       setChatMessages(payload.chat || []);
@@ -2226,20 +2249,19 @@ function App() {
           <div className="action-row wrap-actions">
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
-            <a className="button-link" href="#email-panel"><Send size={17} /> Ir a envío por correo</a>
+            <a className="button-link" href="#workspace" onClick={() => setReportTab("send")}><Send size={17} /> Ir a envío por correo</a>
           </div>
         </section>
 
-        <section className="split-section">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Histórico</p>
-                <h2>Últimos 4 periodos</h2>
-              </div>
-              <BarChart3 size={22} />
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Histórico</p>
+              <h2>Últimos 4 periodos</h2>
             </div>
-            <div className="history-chart">
+            <BarChart3 size={22} />
+          </div>
+          <div className="history-chart">
               {selectedReport?.history.map((point) => (
                 <article key={point.periodId}>
                   <span>{point.label}</span>
@@ -2250,145 +2272,173 @@ function App() {
                 </article>
               ))}
             </div>
-          </div>
-
-          <div className="panel" id="comments">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Reporte generado</p>
-                <h2>Resumen ejecutivo para cliente</h2>
-              </div>
-              <Bot size={22} />
-            </div>
-            <div className="summary-help">
-              <strong>Generador de reporte</strong>
-              <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja del Historial.</small>
-            </div>
-            <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
-            <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
-            <div className="action-row wrap-actions">
-              <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
-                {workStatus === "loading" ? <span className="btn-spinner btn-spinner-dark" /> : <Bot size={17} />}
-                {workStatus === "loading" ? "Generando..." : "Generar reporte"}
-              </button>
-              <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
-                <PencilLine size={17} /> Guardar cambios
-              </button>
-            </div>
-          </div>
         </section>
 
-        <section className="panel email-panel" id="email-panel">
+        <section className="panel workspace-panel" id="workspace">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Envío al cliente</p>
-              <h2>Enviar reporte por correo</h2>
-            </div>
-            <Mail size={22} />
-          </div>
-          {selectedReport?.emailLog ? (
-            <p className="email-sent-note">
-              ✓ Último envío: {new Date(selectedReport.emailLog.sentAt).toLocaleString("es-CL")} a {selectedReport.emailLog.recipients.join(", ")}
-            </p>
-          ) : null}
-          <div className="email-grid">
-            <label>
-              Destinatarios
-              <div className="email-recipients">
-                {emailRecipients.map((email) => (
-                  <span className="email-chip" key={email}>
-                    {email}
-                    <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailRecipients((current) => current.filter((item) => item !== email))}>×</button>
-                  </span>
-                ))}
-                <input
-                  placeholder={emailRecipients.length ? "Agregar otro..." : "correo@cliente.com"}
-                  value={emailRecipientInput}
-                  onChange={(event) => setEmailRecipientInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === "," || event.key === ";") {
-                      event.preventDefault();
-                      addEmailRecipient();
-                    }
-                  }}
-                  onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
-                />
-              </div>
-              <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
-            </label>
-            <label>
-              Asunto
-              <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
-            </label>
-          </div>
-          <div className="email-preview">
-            <strong>Se enviará:</strong>
-            <span>el cuerpo del correo (editable en <a href="#comments">Resumen ejecutivo</a>) + el reporte visual con gráficos.</span>
-          </div>
-          <div className="action-row wrap-actions">
-            <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
-              {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
-              {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
-            </button>
-          </div>
-        </section>
-
-        <section className="panel agent-chat-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Conversa con el agente</p>
-              <h2>Ajusta el reporte en un ida y vuelta</h2>
+              <p className="eyebrow">Reporte generado</p>
+              <h2>Trabajar el reporte</h2>
             </div>
             <Bot size={22} />
           </div>
-          <div className="chat-thread" aria-live="polite">
-            {!chatMessages.length ? (
-              <div className="chat-empty">
-                <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
-                <div className="chat-suggestions">
-                  {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
-                    <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              chatMessages.map((item, index) => (
-                <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
-                  <div className="chat-bubble-content">{item.content}</div>
-                  {item.role === "assistant" && !item.content.startsWith("⚠") ? (
-                    <div className="chat-bubble-actions">
-                      <button type="button" onClick={() => setCommentsDraft(item.content)}>Usar como resumen</button>
-                      <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
-                    </div>
-                  ) : null}
-                </div>
-              ))
-            )}
-            {chatSending ? (
-              <div className="chat-bubble assistant">
-                <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
-              </div>
-            ) : null}
-          </div>
-          <div className="chat-composer">
-            <textarea
-              placeholder={selectedReport ? "Escribe tu ajuste o pregunta..." : "Genera un reporte primero para conversar sobre él."}
-              disabled={!selectedReport || chatSending}
-              rows={2}
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  sendChatMessage();
-                }
-              }}
-            />
-            <button className="primary-button" disabled={!selectedReport || chatSending || !chatInput.trim()} onClick={sendChatMessage}>
-              {chatSending ? <span className="btn-spinner" /> : <Send size={17} />}
-              Enviar
+          <div className="report-tabs" role="tablist">
+            <button className={reportTab === "draft" ? "active" : ""} role="tab" onClick={() => setReportTab("draft")}>
+              <PencilLine size={15} /> Resumen y correo
+            </button>
+            <button className={reportTab === "chat" ? "active" : ""} role="tab" onClick={() => setReportTab("chat")}>
+              <Bot size={15} /> Chat con el agente
+            </button>
+            <button className={reportTab === "send" ? "active" : ""} role="tab" onClick={() => setReportTab("send")}>
+              <Send size={15} /> Enviar{selectedReport?.emailLog ? " ✓" : ""}
             </button>
           </div>
+
+          {reportTab === "draft" ? (
+            <div className="report-tab-body" id="comments">
+              <div className="summary-help">
+                <strong>Generador de reporte</strong>
+                <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja del Historial.</small>
+              </div>
+              <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
+              <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
+              <div className="action-row wrap-actions">
+                <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
+                  {workStatus === "loading" ? <span className="btn-spinner btn-spinner-dark" /> : <Bot size={17} />}
+                  {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
+                </button>
+                <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
+                  <PencilLine size={17} /> Guardar cambios
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {reportTab === "chat" ? (
+            <div className="report-tab-body">
+            <div className="chat-thread" aria-live="polite">
+              {!chatMessages.length ? (
+                <div className="chat-empty">
+                  <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
+                  <div className="chat-suggestions">
+                    {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
+                      <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                chatMessages.map((item, index) => (
+                  <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
+                    <div className="chat-bubble-content">{item.content}</div>
+                    {item.role === "assistant" && !item.content.startsWith("⚠") ? (
+                      <div className="chat-bubble-actions">
+                        <button type="button" onClick={() => setCommentsDraft(item.content)}>Usar como resumen</button>
+                        <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+              {chatSending ? (
+                <div className="chat-bubble assistant">
+                  <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
+                </div>
+              ) : null}
+            </div>
+            {chatFiles.length ? (
+              <div className="chat-attachments">
+                {chatFiles.map((file) => (
+                  <span className="email-chip" key={`${file.name}-${file.size}`}>
+                    📎 {file.name}
+                    <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => setChatFiles((current) => current.filter((item) => item !== file))}>×</button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="chat-composer">
+              <label className="chat-attach" title="Adjuntar imágenes o archivos de texto">
+                <Paperclip size={17} />
+                <input
+                  accept="image/png,image/jpeg,image/webp,.txt,.md,.csv"
+                  multiple
+                  type="file"
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files || []).filter((file) => file.size <= 4 * 1024 * 1024);
+                    setChatFiles((current) => [...current, ...files].slice(0, 4));
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <textarea
+                placeholder={selectedReport ? "Escribe tu ajuste o pregunta..." : "Genera un reporte primero para conversar sobre él."}
+                disabled={!selectedReport || chatSending}
+                rows={2}
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    sendChatMessage();
+                  }
+                }}
+              />
+              <button className="primary-button" disabled={!selectedReport || chatSending || (!chatInput.trim() && !chatFiles.length)} onClick={sendChatMessage}>
+                {chatSending ? <span className="btn-spinner" /> : <Send size={17} />}
+                Enviar
+              </button>
+            </div>
+            </div>
+          ) : null}
+
+          {reportTab === "send" ? (
+            <div className="report-tab-body">
+            {selectedReport?.emailLog ? (
+              <p className="email-sent-note">
+                ✓ Último envío: {new Date(selectedReport.emailLog.sentAt).toLocaleString("es-CL")} a {selectedReport.emailLog.recipients.join(", ")}
+              </p>
+            ) : null}
+            <div className="email-grid">
+              <label>
+                Destinatarios
+                <div className="email-recipients">
+                  {emailRecipients.map((email) => (
+                    <span className="email-chip" key={email}>
+                      {email}
+                      <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailRecipients((current) => current.filter((item) => item !== email))}>×</button>
+                    </span>
+                  ))}
+                  <input
+                    placeholder={emailRecipients.length ? "Agregar otro..." : "correo@cliente.com"}
+                    value={emailRecipientInput}
+                    onChange={(event) => setEmailRecipientInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === "," || event.key === ";") {
+                        event.preventDefault();
+                        addEmailRecipient();
+                      }
+                    }}
+                    onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
+                  />
+                </div>
+                <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
+              </label>
+              <label>
+                Asunto
+                <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+              </label>
+            </div>
+            <div className="email-preview">
+              <strong>Se enviará:</strong>
+              <span>el cuerpo del correo (editable en <a href="#comments">Resumen ejecutivo</a>) + el reporte visual con gráficos.</span>
+            </div>
+            <div className="action-row wrap-actions">
+              <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
+                {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
+                {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
+              </button>
+            </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="module-grid">

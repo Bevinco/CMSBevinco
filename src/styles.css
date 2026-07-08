@@ -4343,3 +4343,61 @@ button:disabled {
 :root[data-theme="dark"] .email-chip { background: #14293c; color: #86b4dd; }
 :root[data-theme="dark"] .email-preview { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
 :root[data-theme="dark"] .email-preview a { color: #86b4dd; }
+
+/* ===== Pestañas del reporte ===== */
+.workspace-panel { display: grid; gap: 14px; }
+
+.report-tabs {
+  border-bottom: 1px solid #e4eae8;
+  display: flex;
+  gap: 4px;
+}
+
+.report-tabs button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  border-radius: 8px 8px 0 0;
+  color: #66706d;
+  display: inline-flex;
+  font-size: 0.86rem;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.report-tabs button:hover { background: #f2f6f5; color: #172026; }
+
+.report-tabs button.active {
+  border-bottom-color: var(--sculpture-green);
+  color: #054372;
+}
+
+.report-tab-body { display: grid; gap: 14px; }
+.report-tab-body textarea { min-height: 150px; }
+
+.chat-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chat-attach {
+  align-items: center;
+  background: #eef2f1;
+  border-radius: 10px;
+  color: #46605a;
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  height: 52px;
+  justify-content: center;
+  width: 46px;
+}
+
+.chat-attach:hover { background: #e0e8e6; color: #054372; }
+.chat-attach input { display: none; }
+
+:root[data-theme="dark"] .report-tabs { border-bottom-color: var(--line); }
+:root[data-theme="dark"] .report-tabs button { color: var(--text-muted); }
+:root[data-theme="dark"] .report-tabs button:hover { background: var(--surface-soft); color: var(--text); }
+:root[data-theme="dark"] .report-tabs button.active { color: #86b4dd; }
+:root[data-theme="dark"] .chat-attach { background: var(--surface-muted); color: var(--text-muted); }

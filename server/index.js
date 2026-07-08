@@ -5258,7 +5258,11 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
   }
 
   const message = String(request.body?.message || "").trim().slice(0, 4000);
-  if (!message) {
+  const images = (Array.isArray(request.body?.images) ? request.body.images : [])
+    .filter((item) => /^data:image\/(png|jpe?g|webp);base64,/.test(String(item?.dataUrl || "")))
+    .slice(0, 4);
+  const texts = (Array.isArray(request.body?.texts) ? request.body.texts : []).slice(0, 4);
+  if (!message && !images.length && !texts.length) {
     response.status(400).json({ error: "Escribe un mensaje para el agente." });
     return;
   }
@@ -5304,10 +5308,22 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
   ].join("\n");
 
   const history = Array.isArray(report.chat) ? report.chat.slice(-16) : [];
+  // Contenido multimodal: texto + imagenes (vision) + archivos de texto inline.
+  let userText = message || "Analiza los archivos adjuntos y complementa el reporte.";
+  for (const file of texts) {
+    userText += `
+
+[Contenido de ${String(file.name || "archivo").slice(0, 80)}]:
+${String(file.content || "").slice(0, 12000)}`;
+  }
+  const userContent = [{ type: "input_text", text: userText }];
+  for (const image of images) {
+    userContent.push({ type: "input_image", image_url: image.dataUrl });
+  }
   const input = [
     { role: "system", content: contextText },
     ...history.map((item) => ({ role: item.role, content: item.content })),
-    { role: "user", content: message },
+    { role: "user", content: userContent },
   ];
 
   try {
@@ -5327,7 +5343,9 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       return;
     }
 
-    report.chat = [...history, { role: "user", content: message }, { role: "assistant", content: reply }].slice(-24);
+    const attachmentNote = [...images, ...texts].map((item) => `📎 ${String(item.name || "adjunto").slice(0, 60)}`).join("  ");
+    const storedMessage = [message, attachmentNote].filter(Boolean).join("\n");
+    report.chat = [...history, { role: "user", content: storedMessage }, { role: "assistant", content: reply }].slice(-24);
     report.updatedAt = new Date().toISOString();
     await writeStore(store);
 
