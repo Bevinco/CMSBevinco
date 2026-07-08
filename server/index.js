@@ -4200,7 +4200,13 @@ function renderTwoPageReportHtml(store, report) {
   const footerLogo = logoSrc ? `<img src="${logoSrc}" width="52" height="52" alt=""/>` : "";
   const pageHeader = `
     <header class="bv-head">
-      <div class="bv-mark">${brandMark}</div>
+      <div class="bv-mark">
+        ${brandMark}
+        <div class="bv-brand-text">
+          <div class="bv-brand-name">BEVINCO</div>
+          <div class="bv-brand-by">by Sculpture Hospitality</div>
+        </div>
+      </div>
       <div class="bv-title"><h1>${escapeHtml(clientTitle)}</h1><div class="bv-underline"></div></div>
       <div class="bv-period">
         <div class="bv-period-title">Periodo</div>
@@ -4220,8 +4226,8 @@ function renderTwoPageReportHtml(store, report) {
       <div class="bv-kpi-value">${value}</div>
     </div>`;
   const kpiArrow = `<svg viewBox="0 0 60 96" width="42" height="67" class="bv-arrow" aria-hidden="true">
-    <path d="M6 8 C46 16 50 48 32 70" fill="none" stroke="${NAVY}" stroke-width="9" stroke-linecap="round"/>
-    <polygon points="46,62 24,88 14,56" fill="${NAVY}"/>
+    <path d="M6 8 C46 16 50 48 32 70" fill="none" stroke="${GREEN}" stroke-width="9" stroke-linecap="round"/>
+    <polygon points="46,62 24,88 14,56" fill="${GREEN}"/>
   </svg>`;
 
   const productRows = tableProducts.map((item, index) => {
@@ -4248,7 +4254,11 @@ function renderTwoPageReportHtml(store, report) {
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 12px; max-width: 800px; }
     .toolbar button { background: ${NAVY}; border: 0; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 16px; }
     .bv-page { background: #fff; margin: 0 auto 16px; max-width: 800px; padding: 12px 20px 8px; }
-    .bv-head { align-items: start; display: grid; grid-template-columns: 100px 1fr 150px; margin-bottom: 10px; }
+    .bv-head { align-items: start; display: grid; grid-template-columns: 210px 1fr 150px; margin-bottom: 10px; }
+    .bv-mark { align-items: center; display: flex; gap: 10px; }
+    .bv-brand-text { line-height: 1.15; }
+    .bv-brand-name { color: ${NAVY}; font-size: 17px; font-weight: 700; letter-spacing: 0.6px; }
+    .bv-brand-by { color: ${TEAL}; font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; }
     .bv-title h1 { color: #262626; font-size: 36px; margin: 8px 0 0; text-align: center; }
     .bv-underline { background: ${TEAL}; height: 4px; margin: 6px auto 0; width: 300px; }
     .bv-period { border: 1px solid ${TEAL}; box-shadow: 0 0 0 2px #fff, 0 0 0 3px ${TEAL}; font-size: 13.5px; margin-top: 4px; }
