@@ -1411,11 +1411,22 @@ function App() {
     }
   }, [clientPeriods, monthlyMonth]);
 
+  const monthlyInitRef = useRef("");
   useEffect(() => {
+    const key = `${selectedSculptureUnitId}|${selectedClientId}|${monthlyMonth}`;
+    if (!monthlyPeriods.length) {
+      // La lista aun no llega para esta combinacion: limpiar sin marcarla
+      // como inicializada, para preseleccionar cuando cargue.
+      if (monthlyInitRef.current !== key) setMonthlySelectedIds([]);
+      return;
+    }
+    if (monthlyInitRef.current === key) return; // ya inicializado: NUNCA pisar lo que marco el usuario
+    monthlyInitRef.current = key;
     const today = new Date().toISOString().slice(0, 10);
-    setMonthlySelectedIds(monthlyPeriods.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id));
+    const closed = monthlyPeriods.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id);
+    setMonthlySelectedIds(closed.length ? closed : monthlyPeriods.map((period) => period.id));
     setMonthlyReport(null);
-  }, [monthlyMonth, monthlyPeriods.length, selectedSculptureUnitId]);
+  }, [monthlyMonth, monthlyPeriods, selectedSculptureUnitId, selectedClientId]);
 
   useEffect(() => {
     if (authStatus !== "authenticated") return;
@@ -2432,6 +2443,10 @@ function App() {
             <div className="monthly-weeks">
               <strong>Semanas que componen el mes</strong>
               <small>{clientPeriodsLoading ? "Cargando periodos del restaurante..." : `${monthlySelectedIds.length} de ${monthlyPeriods.length} seleccionadas — toca una semana para incluirla o quitarla.`}</small>
+              <div className="monthly-week-actions">
+                <button type="button" onClick={() => setMonthlySelectedIds(monthlyPeriods.map((period) => period.id))}>Todas</button>
+                <button type="button" onClick={() => setMonthlySelectedIds([])}>Ninguna</button>
+              </div>
               <div className="monthly-week-chips">
                 {monthlyPeriods.map((period) => {
                   const active = monthlySelectedIds.includes(period.id);

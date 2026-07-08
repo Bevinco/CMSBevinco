@@ -4219,3 +4219,16 @@ button:disabled {
 :root[data-theme="dark"] .month-picker-year button { background: var(--surface-muted); color: var(--text-muted); }
 :root[data-theme="dark"] .month-cell { background: var(--surface-soft); color: var(--text-muted); }
 :root[data-theme="dark"] .month-cell.selected { background: var(--sculpture-green); color: #10231f; }
+
+.monthly-week-actions { display: flex; gap: 8px; margin-top: 4px; }
+.monthly-week-actions button {
+  background: none;
+  border: none;
+  color: #054372;
+  font-size: 0.76rem;
+  font-weight: 700;
+  min-height: 24px;
+  padding: 0 4px;
+  text-decoration: underline;
+}
+:root[data-theme="dark"] .monthly-week-actions button { color: #86b4dd; }
