@@ -4121,3 +4121,101 @@ button:disabled {
 :root[data-theme="dark"] .monthly-weeks small { color: var(--text-muted); }
 :root[data-theme="dark"] .week-chip { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
 :root[data-theme="dark"] .week-chip.active { background: #142e12; border-color: #2c4a1f; color: #c7e3b1; }
+
+/* ===== Selector de mes (popover de marca) ===== */
+.month-picker {
+  position: relative;
+}
+
+.month-picker-trigger {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  display: flex;
+  font-weight: 600;
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.month-picker-trigger svg { color: #3d7d76; flex: 0 0 auto; }
+.month-picker-trigger.is-empty span { color: #8b9a95; font-weight: 500; }
+.month-picker-trigger:hover { border-color: var(--sculpture-green); }
+
+.month-picker-backdrop {
+  inset: 0;
+  position: fixed;
+  z-index: 45;
+}
+
+.month-picker-pop {
+  animation: view-in 140ms ease;
+  background: #ffffff;
+  border: 1px solid #dce4e2;
+  border-radius: 14px;
+  box-shadow: 0 22px 48px rgba(9, 28, 24, 0.18);
+  left: 0;
+  margin-top: 6px;
+  padding: 12px;
+  position: absolute;
+  top: 100%;
+  width: 268px;
+  z-index: 46;
+}
+
+.month-picker-year {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.month-picker-year strong { color: #172026; font-size: 1rem; }
+
+.month-picker-year button {
+  background: #eef2f1;
+  border-radius: 8px;
+  color: #46605a;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0;
+}
+
+.month-picker-year button:hover { background: #e0e8e6; }
+
+.month-picker-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.month-cell {
+  background: #f5f8f7;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #3f4f4a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-height: 38px;
+  padding: 0;
+}
+
+.month-cell:hover { border-color: var(--sculpture-green); }
+.month-cell.current { border-color: #b9d9d5; }
+
+.month-cell.selected {
+  background: var(--sculpture-blue);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .month-picker-trigger { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+:root[data-theme="dark"] .month-picker-trigger svg { color: #7cc4bb; }
+:root[data-theme="dark"] .month-picker-pop { background: var(--surface); border-color: var(--line); }
+:root[data-theme="dark"] .month-picker-year strong { color: var(--text); }
+:root[data-theme="dark"] .month-picker-year button { background: var(--surface-muted); color: var(--text-muted); }
+:root[data-theme="dark"] .month-cell { background: var(--surface-soft); color: var(--text-muted); }
+:root[data-theme="dark"] .month-cell.selected { background: var(--sculpture-green); color: #10231f; }

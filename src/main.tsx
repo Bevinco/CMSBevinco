@@ -5,6 +5,8 @@ import {
   Bot,
   Building2,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Cloud,
   Database,
@@ -388,6 +390,66 @@ function highlightFigures(text: string) {
       </b>
     );
   });
+}
+
+const MONTH_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const MONTH_FULL = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: string; onChange: (next: string) => void; placeholder?: string }) {
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(() => Number((value || "").slice(0, 4)) || new Date().getFullYear());
+  const selectedYear = Number((value || "").slice(0, 4)) || null;
+  const selectedMonth = Number((value || "").slice(5, 7)) || null;
+
+  useEffect(() => {
+    if (open && selectedYear) setViewYear(selectedYear);
+  }, [open, selectedYear]);
+
+  const monthName = selectedMonth ? MONTH_FULL[selectedMonth - 1] : "";
+  const display = selectedYear && selectedMonth
+    ? `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)} de ${selectedYear}`
+    : placeholder;
+
+  return (
+    <div className="month-picker">
+      <button className={`month-picker-trigger ${value ? "" : "is-empty"}`} type="button" onClick={() => setOpen((current) => !current)}>
+        <CalendarDays size={16} />
+        <span>{display}</span>
+      </button>
+      {open ? (
+        <>
+          <div className="month-picker-backdrop" onClick={() => setOpen(false)} />
+          <div className="month-picker-pop" role="dialog" aria-label="Elegir mes">
+            <div className="month-picker-year">
+              <button type="button" aria-label="Año anterior" onClick={() => setViewYear((year) => year - 1)}><ChevronLeft size={16} /></button>
+              <strong>{viewYear}</strong>
+              <button type="button" aria-label="Año siguiente" onClick={() => setViewYear((year) => year + 1)}><ChevronRight size={16} /></button>
+            </div>
+            <div className="month-picker-grid">
+              {MONTH_LABELS.map((label, index) => {
+                const isSelected = selectedYear === viewYear && selectedMonth === index + 1;
+                const now = new Date();
+                const isCurrent = now.getFullYear() === viewYear && now.getMonth() === index;
+                return (
+                  <button
+                    className={`month-cell ${isSelected ? "selected" : ""} ${isCurrent ? "current" : ""}`}
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      onChange(`${viewYear}-${String(index + 1).padStart(2, "0")}`);
+                      setOpen(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function SculptureMark() {
@@ -1896,19 +1958,11 @@ function App() {
                 </label>
                 <label>
                   Desde mes
-                  <input
-                    type="month"
-                    value={fromMonth}
-                    onChange={(event) => setFromMonth(event.target.value)}
-                  />
+                  <MonthPicker value={fromMonth} onChange={setFromMonth} />
                 </label>
                 <label>
                   Hasta mes
-                  <input
-                    type="month"
-                    value={toMonth}
-                    onChange={(event) => setToMonth(event.target.value)}
-                  />
+                  <MonthPicker value={toMonth} onChange={setToMonth} />
                 </label>
               </div>
               <div className="query-actions">
@@ -2372,7 +2426,7 @@ function App() {
               </label>
               <label>
                 Mes
-                <input type="month" value={monthlyMonth} onChange={(event) => setMonthlyMonth(event.target.value)} />
+                <MonthPicker value={monthlyMonth} onChange={setMonthlyMonth} />
               </label>
             </div>
             <div className="monthly-weeks">
