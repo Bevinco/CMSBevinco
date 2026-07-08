@@ -5282,7 +5282,19 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
-  const recipients = request.body?.recipients || client?.recipients || [];
+  const rawRecipients = Array.isArray(request.body?.recipients) && request.body.recipients.length
+    ? request.body.recipients
+    : client?.recipients || [];
+  const recipients = [...new Set(rawRecipients.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^s@]+@[^s@]+.[^s@]+$/.test(email)))];
+
+  if (!recipients.length && process.env.RESEND_API_KEY) {
+    response.status(400).json({ error: "Agrega al menos un destinatario válido antes de enviar." });
+    return;
+  }
+
+  const isMonthly = Boolean(report.monthly);
+  const defaultSubject = `Reporte ${isMonthly ? "mensual" : "semanal"} Bevinco - ${client?.name || report.clientId}`;
+  const subject = String(request.body?.subject || "").trim().slice(0, 160) || defaultSubject;
 
   if (!process.env.RESEND_API_KEY) {
     response.json({
@@ -5305,8 +5317,11 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     body: JSON.stringify({
       from: process.env.REPORTS_FROM_EMAIL || "reportes@bevinco.local",
       to: recipients,
-      subject: `Reporte semanal Bevinco - ${client?.name || report.clientId}`,
-      html: renderPolishedReportHtml(store, report),
+      subject,
+      html: `<div style="font-family:Ubuntu,Segoe UI,sans-serif;max-width:820px;margin:0 auto;">` +
+        `<div style="white-space:pre-wrap;color:#333;font-size:14px;line-height:1.6;padding:18px 6px;">${escapeHtml(report.emailDraft || "")}</div>` +
+        renderPolishedReportHtml(store, report) +
+        `</div>`,
     }),
   });
 
@@ -5317,7 +5332,9 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   report.status = "Enviado";
+  report.emailLog = { sentAt: new Date().toISOString(), recipients, subject };
   report.updatedAt = new Date().toISOString();
+  if (client) client.recipients = recipients;
   await writeStore(store);
   response.json({ sent: true, payload, report: buildReportPayload(store, report) });
 });

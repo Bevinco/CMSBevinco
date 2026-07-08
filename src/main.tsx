@@ -123,6 +123,7 @@ type Report = {
   isAccumulated?: boolean;
   backfill?: boolean;
   monthly?: boolean;
+  emailLog?: { sentAt: string; recipients: string[]; subject: string };
   chat?: Array<{ role: "user" | "assistant"; content: string }>;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
@@ -547,6 +548,10 @@ function App() {
   const [monthlySelectedIds, setMonthlySelectedIds] = useState<string[]>([]);
   const [monthlyReport, setMonthlyReport] = useState<Report | null>(null);
   const [monthlyGenerating, setMonthlyGenerating] = useState(false);
+  const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+  const [emailRecipientInput, setEmailRecipientInput] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
@@ -1287,6 +1292,63 @@ function App() {
     navigateTo("module1");
   }
 
+  function addEmailRecipient(raw?: string) {
+    const value = (raw ?? emailRecipientInput).trim().toLowerCase().replace(/[,;]+$/, "");
+    if (!value) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      setError(`"${value}" no parece un correo válido.`);
+      setWorkStatus("error");
+      return;
+    }
+    setEmailRecipients((current) => (current.includes(value) ? current : [...current, value]));
+    setEmailRecipientInput("");
+  }
+
+  async function sendReportEmail() {
+    if (!selectedReport || emailSending) return;
+    if (!emailRecipients.length) {
+      setError("Agrega al menos un destinatario antes de enviar.");
+      setWorkStatus("error");
+      return;
+    }
+
+    setEmailSending(true);
+    setWorkStatus("loading");
+    setError("Enviando el reporte por correo...");
+
+    try {
+      // Guardar el borrador actual antes de enviar, para que el correo salga con lo editado.
+      await readJson(await fetch(`/api/module1/reports/${selectedReport.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ comments: commentsDraft, emailDraft }),
+      }));
+      const payload = await readJson<{ sent: boolean; message?: string; report?: Report }>(
+        await fetch(`/api/module1/reports/${selectedReport.id}/email`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ recipients: emailRecipients, subject: emailSubject }),
+        }),
+      );
+      if (payload.report) {
+        setSelectedReport(payload.report);
+        setReports((current) => current.map((item) => (item.id === payload.report!.id ? payload.report! : item)));
+      }
+      if (payload.sent) {
+        setError(`Correo enviado a ${emailRecipients.join(", ")}.`);
+        setWorkStatus("ready");
+      } else {
+        setError(payload.message || "El correo quedó preparado pero no se envió (falta configurar Resend).");
+        setWorkStatus("error");
+      }
+    } catch (emailError) {
+      setError(emailError instanceof Error ? emailError.message : "No se pudo enviar el correo.");
+      setWorkStatus("error");
+    } finally {
+      setEmailSending(false);
+    }
+  }
+
   async function sendChatMessage() {
     const message = chatInput.trim();
     if (!message || !selectedReport || chatSending) return;
@@ -1397,6 +1459,12 @@ function App() {
 
   useEffect(() => {
     setChatMessages(selectedReport?.chat || []);
+    setEmailRecipients(selectedReport?.emailLog?.recipients || selectedReport?.client?.recipients || []);
+    setEmailSubject(
+      selectedReport?.emailLog?.subject ||
+        `Reporte ${selectedReport?.monthly ? "mensual" : "semanal"} Bevinco - ${selectedReport?.client?.name || ""}`.trim(),
+    );
+    setEmailRecipientInput("");
   }, [selectedReport?.id]);
 
   const monthlyPeriods = useMemo(
@@ -2158,7 +2226,7 @@ function App() {
           <div className="action-row wrap-actions">
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
             <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
-            <button className="primary-button" onClick={sendEmail}><Send size={17} /> Preparar/enviar email</button>
+            <a className="button-link" href="#email-panel"><Send size={17} /> Ir a envío por correo</a>
           </div>
         </section>
 
@@ -2207,6 +2275,61 @@ function App() {
                 <PencilLine size={17} /> Guardar cambios
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="panel email-panel" id="email-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Envío al cliente</p>
+              <h2>Enviar reporte por correo</h2>
+            </div>
+            <Mail size={22} />
+          </div>
+          {selectedReport?.emailLog ? (
+            <p className="email-sent-note">
+              ✓ Último envío: {new Date(selectedReport.emailLog.sentAt).toLocaleString("es-CL")} a {selectedReport.emailLog.recipients.join(", ")}
+            </p>
+          ) : null}
+          <div className="email-grid">
+            <label>
+              Destinatarios
+              <div className="email-recipients">
+                {emailRecipients.map((email) => (
+                  <span className="email-chip" key={email}>
+                    {email}
+                    <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailRecipients((current) => current.filter((item) => item !== email))}>×</button>
+                  </span>
+                ))}
+                <input
+                  placeholder={emailRecipients.length ? "Agregar otro..." : "correo@cliente.com"}
+                  value={emailRecipientInput}
+                  onChange={(event) => setEmailRecipientInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === "," || event.key === ";") {
+                      event.preventDefault();
+                      addEmailRecipient();
+                    }
+                  }}
+                  onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
+                />
+              </div>
+              <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
+            </label>
+            <label>
+              Asunto
+              <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+            </label>
+          </div>
+          <div className="email-preview">
+            <strong>Se enviará:</strong>
+            <span>el cuerpo del correo (editable en <a href="#comments">Resumen ejecutivo</a>) + el reporte visual con gráficos.</span>
+          </div>
+          <div className="action-row wrap-actions">
+            <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
+              {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
+              {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
+            </button>
           </div>
         </section>
 

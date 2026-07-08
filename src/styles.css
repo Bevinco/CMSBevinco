@@ -4232,3 +4232,114 @@ button:disabled {
   text-decoration: underline;
 }
 :root[data-theme="dark"] .monthly-week-actions button { color: #86b4dd; }
+
+/* ===== Panel de envio por correo ===== */
+.email-panel { display: grid; gap: 14px; }
+
+.email-sent-note {
+  background: #f0f7e9;
+  border: 1px solid #d5e5c6;
+  border-radius: 10px;
+  color: #3b5a24;
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 10px 14px;
+}
+
+.email-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+}
+
+.email-grid label {
+  color: #46605a;
+  display: grid;
+  font-size: 0.76rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.email-grid input {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  font-weight: 500;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.email-recipients {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 42px;
+  padding: 6px 8px;
+}
+
+.email-recipients input {
+  border: none;
+  flex: 1;
+  min-height: 28px;
+  min-width: 160px;
+  outline: none;
+  padding: 0 4px;
+}
+
+.email-chip {
+  align-items: center;
+  background: #edf2f7;
+  border-radius: 999px;
+  color: #054372;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  padding: 3px 6px 3px 11px;
+}
+
+.email-chip button {
+  background: rgba(5, 67, 114, 0.12);
+  border-radius: 50%;
+  color: #054372;
+  font-size: 0.8rem;
+  min-height: 18px;
+  min-width: 18px;
+  padding: 0;
+}
+
+.email-chip button:hover { background: rgba(179, 38, 30, 0.16); color: #b3261e; }
+
+.email-hint { color: #8b9a95; font-weight: 500; }
+
+.email-preview {
+  background: #f5f8f7;
+  border: 1px dashed #d6e0dd;
+  border-radius: 10px;
+  color: #526862;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  gap: 6px;
+  padding: 10px 14px;
+}
+
+.email-preview a { color: #054372; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .email-grid { grid-template-columns: 1fr; }
+}
+
+:root[data-theme="dark"] .email-sent-note { background: #1c2f1a; border-color: #2c4a1f; color: #c7e3b1; }
+:root[data-theme="dark"] .email-grid label { color: var(--text-muted); }
+:root[data-theme="dark"] .email-grid input,
+:root[data-theme="dark"] .email-recipients { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+:root[data-theme="dark"] .email-recipients input { background: transparent; color: var(--text); }
+:root[data-theme="dark"] .email-chip { background: #14293c; color: #86b4dd; }
+:root[data-theme="dark"] .email-preview { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
+:root[data-theme="dark"] .email-preview a { color: #86b4dd; }
