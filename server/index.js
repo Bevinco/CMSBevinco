@@ -4253,6 +4253,34 @@ function renderTwoPageReportHtml(store, report) {
     <polygon points="46,62 24,88 14,56" fill="${GREEN}"/>
   </svg>`;
 
+  // Diferencia del costo real vs el ideal por periodo: en puntos porcentuales
+  // y en pesos (cuanto dinero representa esa desviacion sobre los ingresos).
+  const costDiffRows = history
+    .filter((item) => item.revenue && item.costPercent)
+    .map((item, index) => {
+      const hasIdeal = (item.idealCostPercent || 0) > 0;
+      const diffPp = hasIdeal ? (item.costPercent || 0) - (item.idealCostPercent || 0) : 0;
+      const diffAmount = hasIdeal ? Math.round(((item.revenue || 0) * diffPp) / 100) : 0;
+      const over = hasIdeal && diffAmount > 0;
+      return `<tr class="${index % 2 ? "alt" : ""}">
+        <td class="tname">${ddmmyyyy(item.endsAt) || escapeHtml(item.label)}</td>
+        <td class="tmoney"><span>$</span><span>${fmtMoney(item.revenue)}</span></td>
+        <td class="tpct">${fmtPct(item.costPercent)}</td>
+        <td class="tpct">${hasIdeal ? fmtPct(item.idealCostPercent) : "-"}</td>
+        <td class="tpct ${over ? "neg" : ""}">${hasIdeal ? `${diffPp >= 0 ? "+" : ""}${diffPp.toFixed(1)} pp` : "-"}</td>
+        <td class="tmoney ${over ? "neg" : ""}">${hasIdeal ? `<span>$</span><span>${fmtMoney(diffAmount)}</span>` : "<span></span><span>-</span>"}</td>
+      </tr>`;
+    }).join("");
+  const costDiffTable = costDiffRows ? `<table class="bv-table bv-difftable">
+      <thead>
+        <tr><th colspan="6" class="bv-table-title">Diferencia de costo: real vs ideal</th></tr>
+        <tr>
+          <th>Periodo</th><th>Ingresos</th><th>% Costo Real</th><th>% Costo Ideal</th><th>Dif. (pp)</th><th>Dif. de costo ($)</th>
+        </tr>
+      </thead>
+      <tbody>${costDiffRows}</tbody>
+    </table>` : "";
+
   const productRows = tableProducts.map((item, index) => {
     const neg = (item.varianceAmount || 0) < 0;
     return `<tr class="${index % 2 ? "alt" : ""}">
@@ -4310,6 +4338,8 @@ function renderTwoPageReportHtml(store, report) {
     .bv-table td { border: 1px solid #7f7f7f; font-size: 13px; padding: 3px 7px; }
     .bv-table tr.alt td { background: #dcecea; }
     .bv-table .tname { width: 32%; }
+    .bv-difftable { margin-top: 8px; }
+    .bv-difftable .tname { width: 18%; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
     .tmoney span:first-child { float: left; }
     .tmoney.neg span:last-child { color: #e00000; }
@@ -4323,7 +4353,12 @@ function renderTwoPageReportHtml(store, report) {
       body { background: #fff; padding: 0; }
       .toolbar { display: none; }
       .bv-page { margin: 0; max-width: none; padding: 0; }
-      .bv-panel, .bv-comments { break-inside: avoid; }
+      .bv-panel { break-inside: avoid; }
+      /* Los comentarios pueden fluir entre paginas (cada punto entero),
+         asi la pagina 1 no queda con un vacio cuando el bloque es largo. */
+      .bv-comments { break-inside: auto; }
+      .bv-citem { break-inside: avoid; }
+      .bv-ctitle { break-after: avoid; }
       .bv-table { break-inside: avoid; }
     }
   </style>
@@ -4336,6 +4371,7 @@ function renderTwoPageReportHtml(store, report) {
     <section class="bv-panel">
       <h2>Costo real vs Costo Ideal</h2>
       ${costComboSvg()}
+      ${costDiffTable}
     </section>
     <section class="bv-row">
       <div class="bv-panel">
