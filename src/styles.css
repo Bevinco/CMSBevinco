@@ -4330,6 +4330,8 @@ button:disabled {
 }
 
 .email-preview a { color: #054372; font-weight: 700; }
+.inline-link { background: none; border: 0; color: #054372; cursor: pointer; font: inherit; font-weight: 700; padding: 0; text-decoration: underline; }
+:root[data-theme="dark"] .inline-link { color: #86b4dd; }
 
 @media (max-width: 900px) {
   .email-grid { grid-template-columns: 1fr; }

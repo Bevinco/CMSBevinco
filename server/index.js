@@ -1661,7 +1661,7 @@ REGLAS BASE
 - El reporte (variance) es la fuente principal y prioritaria. Los comentarios de operaciones (OPS) son solo contexto y se usan unicamente si ayudan a explicar una desviacion relevante; no fuerces explicaciones sin sustento en los datos.
 - Prioriza siempre el impacto economico real. No comentes ruido ni desviaciones insignificantes.
 - Clasifica cada producto antes de redactar como: positivo, desafio o ruido. Un mismo producto NO puede aparecer en "Lo mejor" y en "Los desafios".
-- No comentes familias de forma general si la desviacion la explica uno o pocos productos: identifica el producto que explica la mayor parte de la desviacion y enfoca el comentario en ese producto.
+- Estructura el analisis priorizando las CATEGORIAS/familias sobre el detalle por producto: identifica primero las categorias con mayor desviacion y comenta a ese nivel. Usa el producto que explica la mayor parte de la desviacion como evidencia dentro del comentario de su categoria, no como comentario suelto.
 
 FORMATO DE DESVIACIONES
 - Toda desviacion relevante se muestra asi: En [producto] (kgs o unidades / % / $). Ejemplo: "En merluza (-3,5 kgs / 22% / $31.500)". Usa solo los datos disponibles, sin inventar. Formatea montos en pesos chilenos (CLP).
@@ -1693,6 +1693,7 @@ async function generateReportAnalysisAI(payload) {
   const summary = payload.summary || {};
   const clientName = payload.client?.name || payload.clientId;
   const periodLabel = payload.period?.label || payload.periodId;
+  const isMonthly = Boolean(payload.monthly || payload.isAccumulated);
   // Presupuesto de caracteres para los criterios del cliente. Se usa el documento
   // (casi) completo para no perder reglas ni ejemplos, con un tope total que
   // controla el costo por reporte.
@@ -1711,6 +1712,8 @@ async function generateReportAnalysisAI(payload) {
   const reportData = {
     cliente: clientName,
     periodo: periodLabel,
+    tipo: isMonthly ? "mensual (acumulado de las semanas incluidas)" : "semanal",
+    semanasIncluidas: isMonthly ? (payload.includedPeriods || []).map((item) => item.label) : undefined,
     resumen: {
       ingresos: summary.revenue || 0,
       costoPorcentaje: summary.costPercent || 0,
@@ -1720,12 +1723,21 @@ async function generateReportAnalysisAI(payload) {
     categorias: (payload.categoryVariances || []).slice(0, 10),
     productos: (payload.topProducts || []).slice(0, 10),
     sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 12),
-    historico: (payload.history || []).slice(0, 4),
+    historico: (payload.history || []).slice(0, 6),
   };
+
+  const monthlyNote = isMonthly ? `
+INSTRUCCIONES PARA REPORTE MENSUAL
+- Este reporte es un ACUMULADO MENSUAL: ingresos, costos y variance son la SUMA de las semanas incluidas; el stock/existencias es la foto de la ultima semana.
+- Analiza el mes como un todo usando los totales del periodo completo; no comentes una semana suelta como si fuera el reporte entero.
+- Usa el historico (las semanas incluidas) para describir la tendencia dentro del mes: que semanas explican el resultado y si hay mejora o deterioro sostenido.
+- Redacta los hallazgos como "lo mejor del mes" y "los desafios del mes" (manten las mismas claves JSON bestOfWeek/weeklyChallenges).
+- En eficiencia de stock y compra evalua el comportamiento del mes completo (compra vs consumo acumulado, tendencia de cobertura), no la foto de la ultima semana.
+` : "";
 
   const prompt = `
 ${BEVINCO_ANALYSIS_METHOD}
-
+${monthlyNote}
 Aplica ESTRICTAMENTE los criterios especificos del cliente cuando existan (tienen prioridad sobre las reglas generales si hay conflicto). No inventes datos: usa solo las cifras entregadas.
 
 Si los criterios del cliente incluyen EJEMPLOS de comentarios o reportes anteriores, imita fielmente ese estilo, estructura y redaccion (no copies los productos ni las cifras del ejemplo: usa solo los datos del reporte actual).
@@ -1733,7 +1745,7 @@ Si los criterios del cliente incluyen EJEMPLOS de comentarios o reportes anterio
 Devuelve SOLO JSON valido con esta forma:
 {
   "comments": "resumen ejecutivo en 1-3 parrafos para el cuerpo del reporte",
-  "emailDraft": "cuerpo de correo breve y profesional para enviar al cliente, con saludo y cierre",
+  "emailDraft": "resumen ejecutivo BREVE para el cuerpo del correo (maximo ~120 palabras): saludo, diagnostico principal del periodo, % de costo, variance en $ y %, 2-3 puntos clave, y cierre que indique que el detalle completo va adjunto en PDF",
   "analysis": {
     "bestOfWeek": ["frases de lo mejor de la semana, formato 'En [producto] (.../%/$)...'"],
     "weeklyChallenges": ["frases de desafios, enfocadas en el producto que explica la desviacion, con impacto kgs/%/$"],
@@ -3035,6 +3047,7 @@ function accumulateReportPayloads(payloads = []) {
   const familyMap = new Map();
   const familyPurchaseMap = new Map();
   const familySuggestedMap = new Map();
+  const usageMap = new Map();
   const monthlyHistory = [];
 
   for (const payload of ordered) {
@@ -3071,6 +3084,26 @@ function accumulateReportPayloads(payloads = []) {
       suggestedCost: summary.suggestedCost || 0,
     });
 
+    // Uso ($) por producto: se suman las semanas para que la tabla de
+    // "10 productos con mayor uso" tenga datos en el reporte mensual.
+    for (const product of payload.topUsageProducts || []) {
+      const key = `${product.name || "Sin nombre"}::${product.category || ""}`;
+      const current = usageMap.get(key) || {
+        name: product.name || "Sin nombre",
+        category: product.category || "",
+        usedCost: 0,
+        varianceAmount: 0,
+        realCostBase: 0,
+        variancePctBase: 0,
+      };
+      current.usedCost += product.usedCost || 0;
+      current.varianceAmount += product.varianceAmount || 0;
+      // Promedios ponderados por el uso de cada semana.
+      current.realCostBase += (product.realCostPercent || 0) * (product.usedCost || 0);
+      current.variancePctBase += (product.variancePercent || 0) * (product.usedCost || 0);
+      usageMap.set(key, current);
+    }
+
     for (const category of payload.categoryVariances || []) {
       const key = category.category || "Sin categoría";
       const current = categoryMap.get(key) || { category: key, amount: 0 };
@@ -3103,6 +3136,18 @@ function accumulateReportPayloads(payloads = []) {
       variancePercent: soldCost ? round1((item.varianceAmount / soldCost) * 100) : 0,
     }))
     .sort((a, b) => Math.abs(b.varianceAmount) - Math.abs(a.varianceAmount))
+    .slice(0, 10);
+  const topUsageProducts = [...usageMap.values()]
+    .filter((item) => item.usedCost > 0)
+    .map((item) => ({
+      name: item.name,
+      category: item.category,
+      usedCost: Math.round(item.usedCost),
+      varianceAmount: Math.round(item.varianceAmount),
+      variancePercent: round1(item.variancePctBase / item.usedCost),
+      realCostPercent: round1(item.realCostBase / item.usedCost),
+    }))
+    .sort((a, b) => b.usedCost - a.usedCost)
     .slice(0, 10);
 
   const includedPeriods = ordered.map((payload) => ({
@@ -3141,6 +3186,7 @@ function accumulateReportPayloads(payloads = []) {
     },
     categoryVariances,
     topProducts,
+    topUsageProducts,
     familyVariances: [...familyMap.entries()]
       .map(([family, amount]) => ({ family, amount: Math.round(amount) }))
       .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
@@ -3970,6 +4016,7 @@ function renderTwoPageReportHtml(store, report) {
         realCostPercent: 0,
       }))).slice(0, 10);
   const clientTitle = payload.client?.accountName || payload.client?.name || report.clientId;
+  const isMonthlyReport = Boolean(report.monthly || payload.isAccumulated);
 
   // ---- Grafico 1: Costo real vs Costo Ideal (barras + 2 lineas) ----
   function costComboSvg() {
@@ -4255,30 +4302,60 @@ function renderTwoPageReportHtml(store, report) {
 
   // Diferencia del costo real vs el ideal por periodo: en puntos porcentuales
   // y en pesos (cuanto dinero representa esa desviacion sobre los ingresos).
-  const costDiffRows = history
-    .filter((item) => item.revenue && item.costPercent)
+  // Con mas de un periodo se agrega la fila Total (pedido de Pedro): suma de
+  // ingresos y costos, con los porcentajes ponderados por los ingresos.
+  const costDiffPeriods = history.filter((item) => item.revenue && item.costPercent);
+  const diffCell = (item) => {
+    const hasIdeal = (item.idealCostPercent || 0) > 0;
+    const diffPp = hasIdeal ? (item.costPercent || 0) - (item.idealCostPercent || 0) : 0;
+    const diffAmount = hasIdeal ? Math.round(((item.revenue || 0) * diffPp) / 100) : 0;
+    return { hasIdeal, diffPp, diffAmount, over: hasIdeal && diffAmount > 0 };
+  };
+  const costDiffRows = costDiffPeriods
     .map((item, index) => {
-      const hasIdeal = (item.idealCostPercent || 0) > 0;
-      const diffPp = hasIdeal ? (item.costPercent || 0) - (item.idealCostPercent || 0) : 0;
-      const diffAmount = hasIdeal ? Math.round(((item.revenue || 0) * diffPp) / 100) : 0;
-      const over = hasIdeal && diffAmount > 0;
+      const { hasIdeal, diffPp, diffAmount, over } = diffCell(item);
+      const used = item.usedCost || Math.round(((item.revenue || 0) * (item.costPercent || 0)) / 100);
       return `<tr class="${index % 2 ? "alt" : ""}">
         <td class="tname">${ddmmyyyy(item.endsAt) || escapeHtml(item.label)}</td>
         <td class="tmoney"><span>$</span><span>${fmtMoney(item.revenue)}</span></td>
+        <td class="tmoney"><span>$</span><span>${fmtMoney(used)}</span></td>
         <td class="tpct">${fmtPct(item.costPercent)}</td>
         <td class="tpct">${hasIdeal ? fmtPct(item.idealCostPercent) : "-"}</td>
         <td class="tpct ${over ? "neg" : ""}">${hasIdeal ? `${diffPp >= 0 ? "+" : ""}${diffPp.toFixed(1)} pp` : "-"}</td>
         <td class="tmoney ${over ? "neg" : ""}">${hasIdeal ? `<span>$</span><span>${fmtMoney(diffAmount)}</span>` : "<span></span><span>-</span>"}</td>
       </tr>`;
     }).join("");
+  let costDiffTotalRow = "";
+  if (costDiffPeriods.length > 1) {
+    const totalRevenue = costDiffPeriods.reduce((sum, item) => sum + (item.revenue || 0), 0);
+    const totalUsed = costDiffPeriods.reduce((sum, item) => sum + (item.usedCost || Math.round(((item.revenue || 0) * (item.costPercent || 0)) / 100)), 0);
+    const withIdeal = costDiffPeriods.filter((item) => (item.idealCostPercent || 0) > 0);
+    const idealRevenue = withIdeal.reduce((sum, item) => sum + (item.revenue || 0), 0);
+    const idealPct = idealRevenue
+      ? withIdeal.reduce((sum, item) => sum + (item.revenue || 0) * (item.idealCostPercent || 0), 0) / idealRevenue
+      : 0;
+    const realPct = totalRevenue ? (totalUsed / totalRevenue) * 100 : 0;
+    const totalDiffAmount = withIdeal.reduce((sum, item) => sum + diffCell(item).diffAmount, 0);
+    const totalPp = idealRevenue ? (totalDiffAmount / idealRevenue) * 100 : 0;
+    const overTotal = idealRevenue > 0 && totalDiffAmount > 0;
+    costDiffTotalRow = `<tr class="total">
+        <td class="tname">Total</td>
+        <td class="tmoney"><span>$</span><span>${fmtMoney(totalRevenue)}</span></td>
+        <td class="tmoney"><span>$</span><span>${fmtMoney(totalUsed)}</span></td>
+        <td class="tpct">${fmtPct(realPct)}</td>
+        <td class="tpct">${idealPct ? fmtPct(idealPct) : "-"}</td>
+        <td class="tpct ${overTotal ? "neg" : ""}">${idealRevenue ? `${totalPp >= 0 ? "+" : ""}${totalPp.toFixed(1)} pp` : "-"}</td>
+        <td class="tmoney ${overTotal ? "neg" : ""}">${idealRevenue ? `<span>$</span><span>${fmtMoney(totalDiffAmount)}</span>` : "<span></span><span>-</span>"}</td>
+      </tr>`;
+  }
   const costDiffTable = costDiffRows ? `<table class="bv-table bv-difftable">
       <thead>
-        <tr><th colspan="6" class="bv-table-title">Diferencia de costo: real vs ideal</th></tr>
+        <tr><th colspan="7" class="bv-table-title">Diferencia de costo: real vs ideal</th></tr>
         <tr>
-          <th>Periodo</th><th>Ingresos</th><th>% Costo Real</th><th>% Costo Ideal</th><th>Dif. (pp)</th><th>Dif. de costo ($)</th>
+          <th>Periodo</th><th>Ingresos</th><th>Costo usado ($)</th><th>% Costo Real</th><th>% Costo Ideal</th><th>Dif. (pp)</th><th>Dif. de costo ($)</th>
         </tr>
       </thead>
-      <tbody>${costDiffRows}</tbody>
+      <tbody>${costDiffRows}${costDiffTotalRow}</tbody>
     </table>` : "";
 
   const productRows = tableProducts.map((item, index) => {
@@ -4339,7 +4416,8 @@ function renderTwoPageReportHtml(store, report) {
     .bv-table tr.alt td { background: #dcecea; }
     .bv-table .tname { width: 32%; }
     .bv-difftable { margin-top: 8px; }
-    .bv-difftable .tname { width: 18%; }
+    .bv-difftable .tname { width: 15%; }
+    .bv-difftable tr.total td { background: #eef4f1; border-top: 2px solid #404040; font-weight: 700; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
     .tmoney span:first-child { float: left; }
     .tmoney.neg span:last-child { color: #e00000; }
@@ -4403,6 +4481,17 @@ function renderTwoPageReportHtml(store, report) {
 
   <main class="bv-page page-break">
     ${pageHeader}
+    ${isMonthlyReport ? `
+    <section class="bv-grid2">
+      <div class="bv-panel">
+        <h2>Compra Realizada vs Sugerida</h2>
+        ${purchaseAreaSvg()}
+      </div>
+      <div class="bv-panel">
+        <h2>Cobertura de inventario</h2>
+        ${coverageSvg()}
+      </div>
+    </section>` : `
     <section class="bv-grid2">
       <div class="bv-col">
         <div class="bv-panel">
@@ -4418,7 +4507,7 @@ function renderTwoPageReportHtml(store, report) {
         <h2>Compra Realizada vs Sugerida por familia</h2>
         ${familyPurchaseSvg()}
       </div>
-    </section>
+    </section>`}
     <section class="bv-comments">
       ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
@@ -5238,8 +5327,10 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
 
   const requestedIds = Array.isArray(periodIds) ? periodIds.filter(Boolean) : [];
   const monthPeriods = clientPeriods.filter((period) => periodMonthKey(period) === monthKey);
+  // Con seleccion explicita se aceptan semanas de meses vecinos: el "mes
+  // contable" del cliente puede cruzar el mes calendario.
   const chosen = requestedIds.length
-    ? monthPeriods.filter((period) => requestedIds.includes(period.id))
+    ? clientPeriods.filter((period) => requestedIds.includes(period.id))
     : monthPeriods;
 
   if (!chosen.length) {
@@ -5300,6 +5391,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
     summary: accumulated.summary,
     categoryVariances: accumulated.categoryVariances,
     topProducts: accumulated.topProducts,
+    topUsageProducts: accumulated.topUsageProducts,
     familyVariances: accumulated.familyVariances,
     familyPurchases: accumulated.familyPurchases,
     familySuggested: accumulated.familySuggested,
@@ -5445,7 +5537,9 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   }
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
-  await syncSculptureSources(store, report);
+  // Los mensuales son acumulados: no tienen periodo real en Sculpture y una
+  // sincronizacion pisaria los totales sumados con datos vacios.
+  if (!report.monthly) await syncSculptureSources(store, report);
 
   const templateSummary = generateReportSummary(store, report);
   const payloadForAI = buildReportPayload(store, report);
@@ -5457,11 +5551,11 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   report.emailDraft = aiResult?.emailDraft || [
     `Hola,`,
     "",
-    `Compartimos el reporte semanal de auditoría de ${client?.name || report.clientId}.`,
+    `Compartimos el reporte ${report.monthly ? "mensual" : "semanal"} de auditoría de ${client?.name || report.clientId}.`,
     "",
-    generatedSummary,
+    `El periodo cierra con un costo de ${report.summary?.costPercent || 0}% y una diferencia de inventario de ${moneyPlain(report.summary?.varianceAmount || 0)} (${report.summary?.variancePercent || 0}%).`,
     "",
-    "Quedamos atentos a cualquier duda o comentario.",
+    "El detalle completo, con gráficos y el desglose por producto, va adjunto en PDF. Quedamos atentos a cualquier duda o comentario.",
   ].join("\n");
   report.analysisSource = aiResult ? "openai" : "template";
   report.updatedAt = new Date().toISOString();

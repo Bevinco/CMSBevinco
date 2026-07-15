@@ -1490,10 +1490,21 @@ function App() {
     setEmailRecipientInput("");
   }, [selectedReport?.id]);
 
-  const monthlyPeriods = useMemo(
-    () => clientPeriods.filter((period) => monthFromPeriod(period) === monthlyMonth),
-    [clientPeriods, monthlyMonth],
-  );
+  // Ademas del mes elegido se muestran las semanas de los meses vecinos: el
+  // "mes contable" del cliente puede cruzar el mes calendario.
+  const monthlyPeriods = useMemo(() => {
+    if (!monthlyMonth) return [];
+    const [year, month] = monthlyMonth.split("-").map(Number);
+    const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
+    const visibleMonths = new Set([
+      month === 1 ? monthKey(year - 1, 12) : monthKey(year, month - 1),
+      monthlyMonth,
+      month === 12 ? monthKey(year + 1, 1) : monthKey(year, month + 1),
+    ]);
+    return clientPeriods
+      .filter((period) => visibleMonths.has(monthFromPeriod(period)))
+      .sort((left, right) => String(left.startsAt || "").localeCompare(String(right.startsAt || "")));
+  }, [clientPeriods, monthlyMonth]);
 
   useEffect(() => {
     if (!monthlyMonth && clientPeriods.length) {
@@ -1514,8 +1525,9 @@ function App() {
     if (monthlyInitRef.current === key) return; // ya inicializado: NUNCA pisar lo que marco el usuario
     monthlyInitRef.current = key;
     const today = new Date().toISOString().slice(0, 10);
-    const closed = monthlyPeriods.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id);
-    setMonthlySelectedIds(closed.length ? closed : monthlyPeriods.map((period) => period.id));
+    const ofMonth = monthlyPeriods.filter((period) => monthFromPeriod(period) === monthlyMonth);
+    const closed = ofMonth.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id);
+    setMonthlySelectedIds(closed.length ? closed : ofMonth.map((period) => period.id));
     setMonthlyReport(null);
   }, [monthlyMonth, monthlyPeriods, selectedSculptureUnitId, selectedClientId]);
 
@@ -2429,7 +2441,7 @@ function App() {
             </div>
             <div className="email-preview">
               <strong>Se enviará:</strong>
-              <span>el cuerpo del correo (editable en <a href="#comments">Resumen ejecutivo</a>) + el reporte visual con gráficos.</span>
+              <span>el cuerpo del correo (editable en <button className="inline-link" type="button" onClick={() => setReportTab("draft")}>Resumen y correo</button>) + el PDF del reporte adjunto.</span>
             </div>
             <div className="action-row wrap-actions">
               <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
@@ -2615,9 +2627,9 @@ function App() {
             </div>
             <div className="monthly-weeks">
               <strong>Semanas que componen el mes</strong>
-              <small>{clientPeriodsLoading ? "Cargando periodos del restaurante..." : `${monthlySelectedIds.length} de ${monthlyPeriods.length} seleccionadas — toca una semana para incluirla o quitarla.`}</small>
+              <small>{clientPeriodsLoading ? "Cargando periodos del restaurante..." : `${monthlySelectedIds.length} de ${monthlyPeriods.length} seleccionadas — toca una semana para incluirla o quitarla. También puedes sumar semanas de los meses vecinos.`}</small>
               <div className="monthly-week-actions">
-                <button type="button" onClick={() => setMonthlySelectedIds(monthlyPeriods.map((period) => period.id))}>Todas</button>
+                <button type="button" onClick={() => setMonthlySelectedIds(monthlyPeriods.filter((period) => monthFromPeriod(period) === monthlyMonth).map((period) => period.id))}>Todas</button>
                 <button type="button" onClick={() => setMonthlySelectedIds([])}>Ninguna</button>
               </div>
               <div className="monthly-week-chips">
