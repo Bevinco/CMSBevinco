@@ -2858,6 +2858,66 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
   throw error;
 }
 
+// Sugerencia de compra para cocina, replicando el Excel del equipo
+// ("Tambo - Analisis de compra + Sugerencia de compra cocina"):
+//   PAR             = techo(consumo diario x (dias de sugerencia + dias extra) x (1 + % cobertura))
+//   Compra sugerida = techo(max(PAR - existencia, 0))
+//   Inventario dias = redondeo(existencia / consumo x dias del periodo)
+//   Exceso $        = si el inventario supera 2.5x los dias de sugerencia,
+//                     los dias sobrantes x consumo diario x costo unitario.
+// Sculpture solo calcula Par/Orden/Costo Pedido para Beverage; las tablas de
+// cocina (Food) traen los insumos crudos y aca se completan esas columnas,
+// para que el resto del flujo (sugerencias, familias, resumen) funcione igual.
+const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0.25 };
+
+function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
+  const { suggestionDays, extraDays, coverage } = { ...KITCHEN_PURCHASE_DEFAULTS, ...params };
+  const hasNativeSuggestion = (rows || []).some((row) => {
+    const record = row.record || {};
+    return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
+  });
+  if (hasNativeSuggestion || !rows?.length) return false;
+
+  let pendingOrderCost = 0;
+  for (const row of rows) {
+    const record = row.record || (row.record = {});
+    const name = pickRecordValue(record, ["itemName", "item"], "") ||
+      pickRecordValueFuzzy(record, /nombreArt/i) ||
+      row.values?.[0] || "";
+    if (isTotalRow(name) || /:s*$/.test(name)) {
+      // Fila de total de la categoria: acumula el costo de pedido de sus
+      // productos para que la compra sugerida por familia salga del mismo
+      // lugar que en las tablas de barra.
+      record.costoPedido = pendingOrderCost ? `$${Math.round(pendingOrderCost)}` : "";
+      pendingOrderCost = 0;
+      continue;
+    }
+    const consumption = parseNumber(pickRecordValueFuzzy(record, /consumoHist/i) || record.consumo || "");
+    const onHand = parseNumber(record.existencia);
+    const unitCost = parseNumber(pickRecordValueFuzzy(record, /costoUnit/i));
+    if (!consumption && !onHand) continue;
+
+    const daily = consumption / Math.max(daysInPeriod, 1);
+    // El epsilon evita que el redondeo hacia arriba infle valores exactos por
+    // ruido de punto flotante (ej. 92.0000000001 -> 93 en vez de 92).
+    const roundUp = (value) => Math.ceil(value - 1e-9);
+    const par = roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
+    const suggested = Math.max(roundUp(par - onHand), 0);
+    const orderCost = suggested * unitCost;
+    const inventoryDays = consumption > 0 ? Math.round((onHand / consumption) * daysInPeriod) : 0;
+    const excessDays = inventoryDays - suggestionDays * 2.5;
+    const excessCost = consumption > 0 && excessDays > 0 ? Math.round(excessDays * daily * unitCost) : 0;
+
+    record.par = String(par);
+    record.orden = suggested ? String(suggested) : "";
+    record.costoPedido = orderCost ? `$${Math.round(orderCost)}` : "";
+    record.excesoDeInventario = excessCost ? `$${excessCost}` : "";
+    record.dAsRestantes = inventoryDays ? String(inventoryDays) : "";
+    pendingOrderCost += orderCost;
+  }
+  return true;
+}
+
 async function syncSculptureSources(store, report, requestBody = {}) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
@@ -2931,7 +2991,23 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       }
 
       if (type === "intelipar") {
-        const suggestions = data.rows.slice(0, 12).map((row) => {
+        const periodForDays = store.periods.find((candidate) => candidate.id === report.periodId);
+        const periodMs = periodForDays?.startsAt && periodForDays?.endsAt
+          ? Date.parse(periodForDays.endsAt) - Date.parse(periodForDays.startsAt)
+          : 0;
+        const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
+        enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
+
+        // Lo que hay que comprar primero: mayor costo de pedido o exceso.
+        const suggestionRows = [...data.rows]
+          .filter((row) => {
+            const name = pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "");
+            return name && !isTotalRow(name) && !/:\s*$/.test(name) && !/grand\s+total/i.test(name);
+          })
+          .sort((left, right) =>
+            (Math.abs(parseNumber(right.record?.costoPedido)) + Math.abs(parseNumber(right.record?.excesoDeInventario))) -
+            (Math.abs(parseNumber(left.record?.costoPedido)) + Math.abs(parseNumber(left.record?.excesoDeInventario))));
+        const suggestions = suggestionRows.slice(0, 12).map((row) => {
           const excessCost = parseNumber(pickRecordValue(row.record, ["excesoDeInventario", "excessInventory"], ""));
           const daysRemaining = parseNumber(pickRecordValue(row.record, ["dAsRestantes", "diasRestantes", "daysRemaining"], ""));
           const note = excessCost
