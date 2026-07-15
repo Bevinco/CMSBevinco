@@ -2868,6 +2868,56 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
 // Sculpture solo calcula Par/Orden/Costo Pedido para Beverage; las tablas de
 // cocina (Food) traen los insumos crudos y aca se completan esas columnas,
 // para que el resto del flujo (sugerencias, familias, resumen) funcione igual.
+// Stock por articulo segun el variance DETAILED. En cocina es la fuente
+// correcta de inventario: incluye los productos procesados por el local
+// ("PREP POLLO", porciones recongeladas), que el Intelipar ignora porque el
+// sistema gringo asume que lo descongelado no se reutiliza. Metodo del
+// equipo: PAR del Intelipar + inventario del detailed.
+function buildDetailedStockMap(rows) {
+  const stock = new Map();
+  for (const row of rows || []) {
+    const record = row.record || {};
+    const name = String(
+      pickRecordValue(record, ["itemName", "item"], "") ||
+      pickRecordValueFuzzy(record, /nombreArt/i) ||
+      row.values?.[0] || "",
+    ).trim();
+    if (!name || isTotalRow(name) || /:\s*$/.test(name)) continue;
+    const units = parseNumber(record.existencia);
+    if (units) stock.set(name.toLowerCase(), units);
+  }
+  return stock;
+}
+
+// Inventario efectivo de un producto comprable: su stock segun el detailed
+// (si aparece) mas el stock de sus formas procesadas convertido a equivalente
+// de materia prima (stock limpio / rendimiento). Los mapeos crudo<->procesado
+// se configuran por cliente en client.stateMappings:
+//   [{ comprable: "Pechuga Deshuesada", procesados: [{ nombre: "PREP POLLO", rendimiento: 0.8 }] }]
+function applyEffectiveInventory(rows, detailedStock, client) {
+  if (!detailedStock?.size) return;
+  const mappings = Array.isArray(client?.stateMappings) ? client.stateMappings : [];
+  for (const row of rows || []) {
+    const record = row.record || {};
+    const name = String(
+      pickRecordValue(record, ["itemName", "item"], "") ||
+      pickRecordValueFuzzy(record, /nombreArt/i) ||
+      row.values?.[0] || "",
+    ).trim();
+    if (!name || isTotalRow(name) || /:\s*$/.test(name)) continue;
+    const key = name.toLowerCase();
+    let stock = detailedStock.has(key) ? detailedStock.get(key) : parseNumber(record.existencia);
+    const mapping = mappings.find((item) => String(item.comprable || "").toLowerCase() === key);
+    for (const processed of mapping?.procesados || []) {
+      const processedStock = detailedStock.get(String(processed.nombre || processed.name || "").toLowerCase());
+      if (!processedStock) continue;
+      const yieldFactor = Number(processed.rendimiento ?? processed.factor);
+      stock += yieldFactor > 0 && yieldFactor <= 1 ? processedStock / yieldFactor : processedStock;
+    }
+    if (Number.isFinite(stock)) record.existencia = String(Number(stock.toFixed(2)));
+  }
+}
+
 const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0.25 };
 
 function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
@@ -2925,6 +2975,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   const area = client?.area || requestBody.area || "Food";
   const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
   const syncResults = {};
+  let detailedStockUnits = new Map();
 
   if (!cid || !pid) {
     const missing = !cid ? "cid" : "pid";
@@ -2975,6 +3026,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           if (metrics.topUsageProducts?.length) report.topUsageProducts = metrics.topUsageProducts;
         }
         if (type === "varianceDetailed") {
+          detailedStockUnits = buildDetailedStockMap(data.rows);
           const purchaseActuals = extractPurchaseActuals(data);
           if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
           if (!data.rows?.length) {
@@ -2996,6 +3048,11 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           ? Date.parse(periodForDays.endsAt) - Date.parse(periodForDays.startsAt)
           : 0;
         const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
+        const isKitchenTable = !(data.rows || []).some((row) => {
+          const record = row.record || {};
+          return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
+        });
+        if (isKitchenTable) applyEffectiveInventory(data.rows, detailedStockUnits, client);
         enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
 
         // Lo que hay que comprar primero: mayor costo de pedido o exceso.
@@ -5741,6 +5798,21 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
 
   const periodMs = period?.startsAt && period?.endsAt ? Date.parse(period.endsAt) - Date.parse(period.startsAt) : 0;
   const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
+  const isKitchenTable = !(data.rows || []).some((row) => {
+    const record = row.record || {};
+    return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
+  });
+  if (isKitchenTable) {
+    try {
+      const area = client?.area || "Food";
+      const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
+      const detailed = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl });
+      applyEffectiveInventory(data.rows, buildDetailedStockMap(detailed.rows), client);
+    } catch (detailedError) {
+      // Sin detailed se usa el stock del Intelipar tal cual.
+      console.error("[sugerencia-csv] detailed no disponible:", detailedError.message);
+    }
+  }
   enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
 
   const items = data.rows
