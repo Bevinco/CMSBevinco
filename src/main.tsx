@@ -560,8 +560,6 @@ function App() {
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
   const [sculptureDirectoryLoaded, setSculptureDirectoryLoaded] = useState(false);
-  const [fromMonth, setFromMonth] = useState("");
-  const [toMonth, setToMonth] = useState("");
   const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
   const [clientPeriods, setClientPeriods] = useState<SculpturePeriod[]>([]);
   const [clientPeriodsLoading, setClientPeriodsLoading] = useState(false);
@@ -956,11 +954,6 @@ function App() {
       setSculpturePeriods(periodsFromSculpture);
       setSelectedSculptureUnitId((current) => current || units[0]?.id || "");
       setSculptureDirectoryLoaded(true);
-      const firstMonth = monthFromPeriod(periodsFromSculpture[0]);
-      if (firstMonth) {
-        setFromMonth((current) => current || firstMonth);
-        setToMonth((current) => current || firstMonth);
-      }
       if (!quiet || !units.length) {
         setError(
           units.length
@@ -1041,11 +1034,6 @@ function App() {
       const periods = payload.periods || [];
       setClientPeriods(periods);
       setSelectedPeriodId("");
-      const latestMonth = monthFromPeriod(periods[0]);
-      if (latestMonth) {
-        setFromMonth(latestMonth);
-        setToMonth(latestMonth);
-      }
       if (!periods.length) {
         setError("Este restaurante no tiene periodos de auditoría disponibles en Sculpture.");
       }
@@ -1083,8 +1071,6 @@ function App() {
             unit: selectedUnit,
             clientId: selectedUnit ? "" : selectedClientId,
             periodId: selectedPeriodId,
-            fromMonth,
-            toMonth,
             periodIds: selectedPeriodId ? [selectedPeriodId] : [],
             periods: clientPeriods.length ? clientPeriods : sculpturePeriods,
           }),
@@ -2060,7 +2046,7 @@ function App() {
                       {clientPeriodsLoading
                         ? "Cargando periodos del restaurante..."
                         : clientPeriods.length
-                          ? `Todos los del rango de meses (${clientPeriods.length} disponibles)`
+                          ? `Semana más reciente (${clientPeriods.length} disponibles)`
                           : "Selecciona un restaurante para ver sus periodos"}
                     </option>
                     {clientPeriods.map((period) => (
@@ -2069,14 +2055,6 @@ function App() {
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Desde mes
-                  <MonthPicker value={fromMonth} onChange={setFromMonth} />
-                </label>
-                <label>
-                  Hasta mes
-                  <MonthPicker value={toMonth} onChange={setToMonth} />
                 </label>
               </div>
               <div className="query-actions">
