@@ -2485,7 +2485,13 @@ function App() {
               <p className="eyebrow">Intelipar</p>
               <h2>Sugerencia de compra</h2>
             </div>
-            <ShoppingCart size={22} />
+            {selectedReport ? (
+              <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/purchase-suggestion`} target="_blank" rel="noreferrer">
+                <ShoppingCart size={17} /> Descargar para enviar (CSV)
+              </a>
+            ) : (
+              <ShoppingCart size={22} />
+            )}
           </div>
           <div className="purchase-grid">
             {selectedReport?.purchaseSuggestions.map((item) => (

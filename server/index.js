@@ -5701,6 +5701,114 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
   }
 });
 
+// "Sugerencia de compra" descargable: la hoja final que el equipo enviaba
+// desde Excel, generada directo desde el CMS. Trae el Intelipar fresco de
+// Sculpture, completa PAR/sugerencia si es cocina (mismas formulas del
+// equipo) y deja solo lo accionable: items con pedido sugerido o con exceso
+// de inventario, agrupados por proveedor y con fila de total.
+app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
+  const period = report.monthly
+    ? store.periods.find((candidate) => candidate.id === (report.includedPeriods || []).slice(-1)[0]?.id)
+    : store.periods.find((candidate) => candidate.id === report.periodId);
+  const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
+  if (!cid || !pid) {
+    response.status(400).json({ error: "Este reporte no tiene un periodo de Sculpture asociado para la sugerencia." });
+    return;
+  }
+
+  let data;
+  try {
+    const area = client?.area || "Food";
+    const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
+    data = await fetchSculptureInternalReport({ type: "intelipar", cid, pid, area, baseUrl });
+  } catch (error) {
+    console.error("[sugerencia-csv] fallo:", error.message);
+    response.status(502).json({ error: "Sculpture no respondió la sugerencia de compra. Intenta de nuevo en unos segundos." });
+    return;
+  }
+  if (!data.rows?.length) {
+    response.status(404).json({ error: "Sculpture no tiene datos de Intelipar para este periodo." });
+    return;
+  }
+
+  const periodMs = period?.startsAt && period?.endsAt ? Date.parse(period.endsAt) - Date.parse(period.startsAt) : 0;
+  const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
+  enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
+
+  const items = data.rows
+    .map((row) => {
+      const record = row.record || {};
+      const name = pickRecordValue(record, ["itemName", "item"], "") ||
+        pickRecordValueFuzzy(record, /nombreArt/i) ||
+        row.values?.[0] || "";
+      if (!name || isTotalRow(name) || /:\s*$/.test(name)) return null;
+      return {
+        provider: String(pickRecordValue(record, ["proveedor", "provider", "vendor"], "") || pickRecordValueFuzzy(record, /proveedor|vendor/i) || "Por validar").trim(),
+        name: String(name).trim(),
+        size: String(pickRecordValueFuzzy(record, /tama/i) || "").trim(),
+        unitCost: parseNumber(pickRecordValueFuzzy(record, /costoUnit/i)),
+        onHand: parseNumber(record.existencia),
+        onHandCost: parseNumber(record.existenciaCosto),
+        par: parseNumber(record.par),
+        suggested: parseNumber(record.orden),
+        orderCost: parseNumber(record.costoPedido),
+        inventoryDays: parseNumber(pickRecordValue(record, ["dAsRestantes", "diasRestantes", "daysRemaining"], "") || pickRecordValueFuzzy(record, /restantes|inventarioEnDias/i)),
+        excessCost: parseNumber(pickRecordValue(record, ["excesoDeInventario", "excessInventory"], "") || pickRecordValueFuzzy(record, /exceso/i)),
+      };
+    })
+    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0))
+    .sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
+
+  const escapeCsv = (value) => {
+    const text = String(value ?? "");
+    return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const money = (value) => (value ? Math.round(value) : 0);
+  const qty = (value) => (Number.isFinite(value) ? Number(value.toFixed(2)) : 0);
+
+  const lines = [
+    ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "Inventario al costo ($)", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Exceso de inventario ($)"].map(escapeCsv).join(";"),
+  ];
+  let lastProvider = "";
+  const totals = { onHandCost: 0, suggested: 0, orderCost: 0, excessCost: 0 };
+  for (const item of items) {
+    lines.push([
+      item.provider === lastProvider ? "" : item.provider,
+      item.name,
+      item.size,
+      money(item.unitCost),
+      qty(item.onHand),
+      money(item.onHandCost),
+      qty(item.par),
+      qty(item.suggested),
+      money(item.orderCost),
+      qty(item.inventoryDays),
+      money(item.excessCost),
+    ].map(escapeCsv).join(";"));
+    lastProvider = item.provider;
+    totals.onHandCost += item.onHandCost;
+    totals.suggested += item.suggested;
+    totals.orderCost += item.orderCost;
+    totals.excessCost += item.excessCost;
+  }
+  lines.push(["Total general", "", "", "", "", money(totals.onHandCost), "", qty(totals.suggested), money(totals.orderCost), "", money(totals.excessCost)].map(escapeCsv).join(";"));
+
+  const fileName = `Sugerencia de compra - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
+    .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")
+    .slice(0, 120);
+  response.setHeader("content-type", "text/csv; charset=utf-8");
+  response.setHeader("content-disposition", `attachment; filename="${fileName}.csv"`);
+  response.send(Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8"));
+});
+
 // Trae el variance detallado fresco desde Sculpture y lo convierte a CSV
 // (delimitado por ";" para que Excel en español lo abra en columnas y con BOM
 // para que respete tildes). En los mensuales concatena las semanas incluidas
