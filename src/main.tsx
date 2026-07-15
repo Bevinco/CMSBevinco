@@ -711,11 +711,6 @@ function App() {
     setSelectedPeriodId(report?.periodId || payload.periods[0]?.id || "");
     setCommentsDraft(report?.comments || "");
     setEmailDraft(report?.emailDraft || "");
-    const selectedMonth = monthFromPeriod(report?.period || payload.periods[0]);
-    if (selectedMonth) {
-      setFromMonth((current) => current || selectedMonth);
-      setToMonth((current) => current || selectedMonth);
-    }
   }
 
   async function loadModule() {
