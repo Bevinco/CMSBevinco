@@ -5598,6 +5598,57 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
   }
 });
 
+// Trae el variance detallado fresco desde Sculpture y lo convierte a CSV
+// (delimitado por ";" para que Excel en español lo abra en columnas y con BOM
+// para que respete tildes). En los mensuales concatena las semanas incluidas
+// con una columna "Semana". Devuelve null si Sculpture no entrega filas.
+async function buildVarianceCsvAttachment(store, report) {
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
+  if (!cid) return null;
+  const area = client?.area || "Food";
+  const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
+
+  const targetPeriods = report.monthly
+    ? (report.includedPeriods || []).map((item) => store.periods.find((period) => period.id === item.id)).filter(Boolean)
+    : [store.periods.find((period) => period.id === report.periodId)].filter(Boolean);
+  if (!targetPeriods.length) return null;
+
+  const escapeCsv = (value) => {
+    const text = String(value ?? "");
+    return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const lines = [];
+  let headersWritten = false;
+  for (const period of targetPeriods) {
+    const pid = configuredIdentifier(period.sculpturePid, period.pid);
+    if (!pid) continue;
+    let data;
+    try {
+      data = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl });
+    } catch (error) {
+      console.error(`[variance-csv] ${period.id}: ${error.message}`);
+      continue; // semana sin datos: el CSV sale con las que respondieron
+    }
+    if (!data.rows?.length) continue;
+    if (!headersWritten) {
+      lines.push([...(report.monthly ? ["Semana"] : []), ...(data.headers || [])].map(escapeCsv).join(";"));
+      headersWritten = true;
+    }
+    for (const row of data.rows) {
+      lines.push([...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])].map(escapeCsv).join(";"));
+    }
+  }
+  if (!lines.length) return null;
+
+  const period = store.periods.find((candidate) => candidate.id === report.periodId);
+  const filename = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
+    .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")
+    .slice(0, 120) + ".csv";
+  return { filename, buffer: Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8") };
+}
+
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);
@@ -5643,6 +5694,17 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     return;
   }
 
+  // Variance detallado fresco (pedido de Pedro): va como segundo adjunto.
+  // Si Sculpture no responde, el correo sale igual solo con el PDF.
+  let varianceCsv = null;
+  try {
+    varianceCsv = await buildVarianceCsvAttachment(store, report);
+  } catch (varianceError) {
+    console.error("[variance-csv] no se pudo adjuntar:", varianceError.message);
+  }
+
+  const pdfFilename = `${subject.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120)}.pdf`;
+
   if (gmailConfigured) {
     try {
       const transport = await getGmailTransport();
@@ -5653,11 +5715,8 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
         subject,
         html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
         attachments: [
-          {
-            filename: `${subject.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120)}.pdf`,
-            content: reportPdf,
-            contentType: "application/pdf",
-          },
+          { filename: pdfFilename, content: reportPdf, contentType: "application/pdf" },
+          ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer, contentType: "text/csv" }] : []),
         ],
       });
     } catch (gmailError) {
@@ -5694,10 +5753,8 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       subject,
       html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
       attachments: [
-        {
-          filename: `${subject.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120)}.pdf`,
-          content: reportPdf.toString("base64"),
-        },
+        { filename: pdfFilename, content: reportPdf.toString("base64") },
+        ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer.toString("base64") }] : []),
       ],
     }),
   });
