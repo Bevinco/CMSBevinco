@@ -2020,6 +2020,20 @@ function pickRecordValue(record, keys, fallback = "") {
   return fallback;
 }
 
+// Respaldo cuando el nombre exacto de la columna cambia entre locales de
+// Sculpture (ej. "Orden", "Pedido sugerido", "Cantidad sugerida"): busca la
+// primera columna con dato cuyo nombre matchee el patron, saltando las que
+// matcheen la exclusion (para no confundir cantidad con costo o dias).
+function pickRecordValueFuzzy(record, pattern, exclude = null) {
+  for (const [key, value] of Object.entries(record || {})) {
+    if (value === undefined || value === "") continue;
+    if (!pattern.test(key)) continue;
+    if (exclude && exclude.test(key)) continue;
+    return value;
+  }
+  return "";
+}
+
 function extractReportMetrics(parsedTable) {
   const rows = parsedTable.rows || [];
   const categoryMap = new Map();
@@ -2925,9 +2939,19 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             : "Validar proveedor y sugerencia antes del envío";
           return {
             item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
-            provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], row.values[11] || "Por validar"),
-            stock: cleanCellValue(pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], row.values[4] || "")),
-            suggested: cleanCellValue(pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], row.values[6] || "")),
+            provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], "") ||
+              pickRecordValueFuzzy(row.record, /proveedor|vendor|provider/i) ||
+              row.values[11] || "Por validar",
+            stock: cleanCellValue(
+              pickRecordValue(row.record, ["stock", "onHand", "stockActual", "existencia"], "") ||
+              pickRecordValueFuzzy(row.record, /stock|existenc|enMano|onHand/i, /costo|cost|d[ií]as|dAs|valor/i) ||
+              row.values[4] || "",
+            ),
+            suggested: cleanCellValue(
+              pickRecordValue(row.record, ["suggested", "order", "sugerido", "orden"], "") ||
+              pickRecordValueFuzzy(row.record, /sugerid|pedido|order/i, /costo|cost|d[ií]as|dAs|fecha|proveedor/i) ||
+              row.values[6] || "",
+            ),
             note,
           };
         }).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
@@ -2940,7 +2964,10 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           })
           .map((row) => ({
             category: cleanTotalName(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "")),
-            value: parseNumber(pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"])),
+            value: parseNumber(
+              pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
+              pickRecordValueFuzzy(row.record, /(costo|cost).*(pedido|sugerid|order)|(pedido|order).*(costo|cost)/i),
+            ),
           }));
         const familySuggested = aggregateReportGroups(suggestedEntries).map(({ family, value }) => ({ family, suggested: value }));
         if (familySuggested.some((item) => item.suggested)) {
