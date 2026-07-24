@@ -38,6 +38,16 @@ import {
 import "./styles.css";
 
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
+
+// Estados del flujo de trabajo del equipo (tablero del inicio, correo 17-jul).
+const WORKFLOW_STATES = [
+  "Falta Información",
+  "En Proceso",
+  "Comentarios Escritos",
+  "Gráficos Actualizados",
+  "Listo para el Reporte",
+] as const;
+const CLICKUP_CALENDAR_URL = "https://app.clickup.com/31025999/v/c/xjuuf-5994";
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
@@ -99,6 +109,7 @@ type Report = {
   clientId: string;
   periodId: string;
   status: ReportStatus;
+  workflowState?: string;
   updatedAt: string;
   client?: Client;
   period?: Period;
@@ -346,6 +357,18 @@ function shortDate(timestamp?: number | null) {
 
 function monthFromPeriod(period?: Period | SculpturePeriod | null) {
   return (period?.startsAt || period?.endsAt || "").slice(0, 7);
+}
+
+// Columna del tablero para un reporte: manda el estado manual si existe;
+// si no, se deriva del avance real del reporte.
+function workflowStateFor(report: Report): string {
+  if (report.workflowState && WORKFLOW_STATES.includes(report.workflowState as (typeof WORKFLOW_STATES)[number])) {
+    return report.workflowState;
+  }
+  if (!report.summary?.revenue) return "Falta Información";
+  if (report.status === "Listo para revisar") return "Listo para el Reporte";
+  if ((report.comments || "").trim()) return "Comentarios Escritos";
+  return "En Proceso";
 }
 
 function statusClass(status: ReportStatus) {
@@ -1266,6 +1289,22 @@ function App() {
     }
   }
 
+  async function setReportWorkflowState(report: Report, state: string) {
+    try {
+      const updated = await readJson<Report>(
+        await fetch(`/api/module1/reports/${report.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workflowState: state }),
+        }),
+      );
+      setReports((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (stateError) {
+      setError(stateError instanceof Error ? stateError.message : "No se pudo actualizar el estado.");
+      setWorkStatus("error");
+    }
+  }
+
   function openMonthlyReport() {
     if (!monthlyReport) return;
     setSelectedClientId(monthlyReport.clientId);
@@ -1859,117 +1898,92 @@ function App() {
               </button>
             </section>
 
-            <section className="dashboard-focus">
-              <div className="panel attention-panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Atención hoy</p>
-                    <h2>Próximas acciones</h2>
-                  </div>
-                  <Bot size={22} />
+            <section className="panel workflow-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Flujo de trabajo</p>
+                  <h2>Estado de los reportes de la semana</h2>
                 </div>
-                <div className="attention-list">
-                  {dashboardSummary.attentionItems.length ? dashboardSummary.attentionItems.map((item) => (
-                    <button key={item.id} onClick={item.onClick}>
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.meta}</small>
-                        <em>{item.detail}</em>
-                      </span>
-                      <b>{item.action}</b>
-                    </button>
-                  )) : (
-                    <div className="empty-state">
-                      <strong>Sin bloqueos visibles</strong>
-                      <small>Los reportes están al día, sin revisiones urgentes.</small>
+                <ListChecks size={22} />
+              </div>
+              <div className="workflow-board">
+                {WORKFLOW_STATES.map((state) => {
+                  const cards = visibleReports.filter((report) => report.status !== "Enviado" && workflowStateFor(report) === state);
+                  return (
+                    <div className="workflow-col" key={state}>
+                      <header>
+                        <strong>{state}</strong>
+                        <span>{cards.length}</span>
+                      </header>
+                      {cards.length ? cards.map((report) => (
+                        <article className="workflow-card" key={report.id}>
+                          <button
+                            className="workflow-card-open"
+                            type="button"
+                            onClick={() => {
+                              setSelectedClientId(report.clientId);
+                              setSelectedPeriodId(report.periodId);
+                              setSelectedReport(report);
+                              setCommentsDraft(report.comments || "");
+                              setEmailDraft(report.emailDraft || "");
+                              setActiveView("module1");
+                            }}
+                          >
+                            <strong>{report.client?.name || report.clientId}</strong>
+                            <small>{report.period?.label || report.periodId}</small>
+                          </button>
+                          <select
+                            aria-label={`Mover ${report.client?.name || report.clientId} de estado`}
+                            value={state}
+                            onChange={(event) => setReportWorkflowState(report, event.target.value)}
+                          >
+                            {WORKFLOW_STATES.map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        </article>
+                      )) : <p className="workflow-empty">Sin reportes aquí.</p>}
                     </div>
-                  )}
-                </div>
+                  );
+                })}
               </div>
             </section>
 
-            <section className="dashboard-grid dashboard-grid-bottom">
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Variaciones</p>
-                    <h2>Reportes con mayor impacto</h2>
-                  </div>
-                  <BarChart3 size={22} />
+            <section className="panel week-calendar-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Auditorías</p>
+                  <h2>Calendario de la semana</h2>
                 </div>
-                <div className="impact-list">
-                  {dashboardSummary.highVarianceReports.length ? dashboardSummary.highVarianceReports.map((report) => (
-                    <button
-                      key={report.id}
-                      onClick={() => {
-                        setSelectedClientId(report.clientId);
-                        setSelectedPeriodId(report.periodId);
-                        setSelectedReport(report);
-                        setCommentsDraft(report.comments || "");
-                        setEmailDraft(report.emailDraft || "");
-                        setActiveView("module1");
-                      }}
-                    >
-                      <span>
-                        <strong>{report.client?.name || report.clientId}</strong>
-                        <small>{report.period?.label || report.periodId}</small>
-                      </span>
-                      <b className={(report.summary?.varianceAmount || 0) < 0 ? "bad-text" : "ok-text"}>{money(report.summary?.varianceAmount || 0)}</b>
-                    </button>
-                  )) : <p className="muted-copy">Aún no hay variaciones relevantes en los reportes cargados.</p>}
-                </div>
+                <a className="button-link" href={CLICKUP_CALENDAR_URL} target="_blank" rel="noreferrer">
+                  <CalendarDays size={17} /> Abrir en ClickUp
+                </a>
               </div>
-
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Pendientes ClickUp</p>
-                    <h2>Fechas cercanas</h2>
-                  </div>
-                  <ListChecks size={22} />
-                </div>
-                <div className="due-list">
-                  {dashboardSummary.dueTasks.length ? dashboardSummary.dueTasks.map((task) => (
-                    <a href={task.url} key={task.id} target="_blank" rel="noreferrer">
-                      <span>
-                        <strong>{task.name}</strong>
-                        <small>{task.status}</small>
-                      </span>
-                      <b>{shortDate(task.dueDate)}</b>
-                    </a>
-                  )) : <p className="muted-copy">No hay tareas con fecha límite cargadas en esta vista.</p>}
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Últimos reportes</p>
-                    <h2>Bandeja reciente</h2>
-                  </div>
-                  <FileText size={22} />
-                </div>
-                <div className="recent-report-list">
-                  {reports.slice(0, 5).map((report) => (
-                    <button
-                      key={report.id}
-                      onClick={() => {
-                        setSelectedClientId(report.clientId);
-                        setSelectedPeriodId(report.periodId);
-                        setSelectedReport(report);
-                        setCommentsDraft(report.comments || "");
-                        setEmailDraft(report.emailDraft || "");
-                        setActiveView("module1");
-                      }}
-                    >
-                      <span>
-                        <strong>{report.client?.name || report.clientId}</strong>
-                        <small>{report.period?.label || report.periodId}</small>
-                      </span>
-                      <i className={statusClass(report.status)}>{report.status}</i>
-                    </button>
-                  ))}
-                </div>
+              <div className="week-calendar">
+                {(() => {
+                  const today = new Date();
+                  const monday = new Date(today);
+                  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+                  return ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"].map((label, index) => {
+                    const day = new Date(monday);
+                    day.setDate(monday.getDate() + index);
+                    const dayKey = day.toDateString();
+                    const dayTasks = clickupTasks.filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey);
+                    const isToday = dayKey === today.toDateString();
+                    return (
+                      <div className={`week-day ${isToday ? "is-today" : ""}`} key={label}>
+                        <header>
+                          <strong>{label}</strong>
+                          <span>{day.getDate()}/{day.getMonth() + 1}</span>
+                        </header>
+                        {dayTasks.length ? dayTasks.map((task) => (
+                          <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer">
+                            <strong>{task.name}</strong>
+                            <small>{task.status}</small>
+                          </a>
+                        )) : <p className="workflow-empty">—</p>}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </section>
           </section>

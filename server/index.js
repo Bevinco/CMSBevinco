@@ -5538,7 +5538,7 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
     return;
   }
 
-  const allowedFields = ["status", "comments", "emailDraft", "analysis", "summary", "categoryVariances", "topProducts", "purchaseSuggestions"];
+  const allowedFields = ["status", "workflowState", "comments", "emailDraft", "analysis", "summary", "categoryVariances", "topProducts", "purchaseSuggestions"];
   allowedFields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(request.body, field)) {
       report[field] = request.body[field];
