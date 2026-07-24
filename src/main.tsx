@@ -121,6 +121,7 @@ type Report = {
     varianceAmount: number;
   };
   categoryVariances: Array<{ category: string; amount: number; percent: number }>;
+  familyVariances?: Array<{ family: string; amount: number }>;
   topProducts: Array<{ name: string; category: string; varianceAmount: number; variancePercent: number }>;
   purchaseSuggestions: Array<{ item: string; provider: string; stock: string; suggested: string; note: string }>;
   analysis?: {
@@ -1769,7 +1770,15 @@ function App() {
   }, [reports, clickupTasks]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
   const maxAbsVariance = Math.max(...(selectedReport?.history.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
-  const maxCategoryVariance = Math.max(...(selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]), 1);
+  // Ahorro/faltante agrupado en las familias del reporte (Destilados, Vinos...),
+  // igual que el grafico del PDF; si el reporte no las trae, caen las categorias.
+  const familyVarianceRows = (selectedReport?.familyVariances || []).filter((item) => item.amount);
+  const maxFamilyVariance = Math.max(
+    ...(familyVarianceRows.length
+      ? familyVarianceRows.map((item) => Math.abs(item.amount))
+      : selectedReport?.categoryVariances.map((item) => Math.abs(item.amount)) || [1]),
+    1,
+  );
   const maxProductVariance = Math.max(...(selectedReport?.topProducts.map((item) => Math.abs(item.varianceAmount)) || [1]), 1);
   const selectedClient = clients.find((client) => client.id === selectedClientId) || selectedReport?.client || null;
   const selectedUnitInfo = sculptureUnits.find((item) => item.id === selectedSculptureUnitId) || null;
@@ -2506,20 +2515,23 @@ function App() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Variance</p>
-                <h2>Variaciones por categoría</h2>
+                <h2>Variaciones por familia</h2>
               </div>
             </div>
             <div className="variance-chart">
-              {selectedReport?.categoryVariances.map((item) => (
-                <article key={item.category}>
+              {(familyVarianceRows.length
+                ? familyVarianceRows
+                : (selectedReport?.categoryVariances || []).map((item) => ({ family: item.category, amount: item.amount }))
+              ).map((item) => (
+                <article key={item.family}>
                   <div>
-                    <strong>{item.category}</strong>
-                    <span className={item.amount < 0 ? "negative" : "positive"}>{money(item.amount)} - {item.percent}%</span>
+                    <strong>{item.family}</strong>
+                    <span className={item.amount < 0 ? "negative" : "positive"}>{money(item.amount)}</span>
                   </div>
                   <div className="chart-track">
                     <div
                       className={item.amount < 0 ? "negative-bar" : "positive-bar"}
-                      style={{ width: `${Math.max(8, (Math.abs(item.amount) / maxCategoryVariance) * 100)}%` }}
+                      style={{ width: `${Math.max(8, (Math.abs(item.amount) / maxFamilyVariance) * 100)}%` }}
                     />
                   </div>
                 </article>
