@@ -2167,134 +2167,6 @@ function App() {
           </section>
         ) : null}
 
-        {selectedReport?.analysis ? (
-          <section className="panel agent-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Análisis del agente</p>
-                <h2>Lectura ejecutiva del periodo</h2>
-              </div>
-              <Bot size={22} />
-            </div>
-            <div className="agent-analysis-grid">
-              {[
-                {
-                  key: "bestOfWeek",
-                  title: "Lo mejor de la semana",
-                  tone: "pos",
-                  icon: <TrendingUp size={17} />,
-                  items: selectedReport.analysis.bestOfWeek || [],
-                  empty: "Sin hallazgos positivos relevantes esta semana.",
-                },
-                {
-                  key: "weeklyChallenges",
-                  title: "Los desafíos de la semana",
-                  tone: "neg",
-                  icon: <TrendingDown size={17} />,
-                  items: selectedReport.analysis.weeklyChallenges || [],
-                  empty: "Sin desafíos relevantes esta semana.",
-                },
-                {
-                  key: "stockEfficiency",
-                  title: "Eficiencia de stock y compra",
-                  tone: "info",
-                  icon: <ShoppingCart size={17} />,
-                  items: selectedReport.analysis.stockEfficiency || [],
-                  empty: "Sin observaciones de stock y compra para este periodo.",
-                },
-                {
-                  key: "criteriaApplied",
-                  title: "Criterios aplicados",
-                  tone: "brand",
-                  icon: <BookOpenCheck size={17} />,
-                  items: selectedReport.analysis.criteriaApplied || [],
-                  empty: "",
-                },
-              ]
-                .filter((block) => block.items.length || block.empty)
-                .map((block) => (
-                  <article className={`analysis-card tone-${block.tone}`} key={block.key}>
-                    <header>
-                      <span className="analysis-icon">{block.icon}</span>
-                      <strong>{block.title}</strong>
-                      {block.items.length ? <span className="analysis-count">{block.items.length}</span> : null}
-                    </header>
-                    <div className="analysis-items">
-                      {(block.items.length ? block.items : [block.empty]).map((item) => (
-                        <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
-                          {highlightFigures(item)}
-                        </p>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-            </div>
-            {!selectedReport.analysis.criteriaApplied?.length ? (
-              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
-            ) : null}
-          </section>
-        ) : null}
-
-        {isAdminUser(currentUserInfo) ? (
-        <section className="module-grid" id="sources">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Diagnóstico (solo admin)</p>
-                <h2>Estado de los datos de la auditoría</h2>
-              </div>
-              <Cloud size={22} />
-            </div>
-            <div className="source-grid">
-              {Object.entries(sourceLabels).map(([key, label]) => (
-                <article key={key}>
-                  <strong>{label}</strong>
-                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
-                    {selectedReport?.sourceStatus[key] || "Por revisar"}
-                  </span>
-                </article>
-              ))}
-            </div>
-          </div>
-
-        </section>
-        ) : null}
-
-        {selectedReport ? (
-        <section className="panel actions-bar">
-          <div>
-            <p className="eyebrow">Acciones</p>
-            <h2>Revisión y envío</h2>
-          </div>
-          <div className="action-row wrap-actions">
-            <button className="secondary-button" onClick={() => saveReport({ status: "Borrador" })}>Marcar borrador</button>
-            <button className="secondary-button" onClick={() => saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
-            <a className="button-link" href="#workspace" onClick={() => setReportTab("send")}><Send size={17} /> Ir a envío por correo</a>
-          </div>
-        </section>
-        ) : null}
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Histórico</p>
-              <h2>Últimos 4 periodos</h2>
-            </div>
-            <BarChart3 size={22} />
-          </div>
-          <div className="history-chart">
-              {selectedReport?.history.map((point) => (
-                <article key={point.periodId}>
-                  <span>{point.label}</span>
-                  <div className="bar-track"><div style={{ width: `${Math.max(8, (point.revenue / maxRevenue) * 100)}%` }} /></div>
-                  <small>{money(point.revenue)} - {point.costPercent}% costo</small>
-                  <div className="bar-track variance"><div style={{ width: `${Math.max(8, (Math.abs(point.varianceAmount) / maxAbsVariance) * 100)}%` }} /></div>
-                  <small>{money(point.varianceAmount)} variance</small>
-                </article>
-              ))}
-            </div>
-        </section>
-
         <section className="panel workspace-panel" id="workspace">
           <div className="panel-header">
             <div>
@@ -2460,6 +2332,134 @@ function App() {
             </div>
             </div>
           ) : null}
+        </section>
+
+        {selectedReport?.analysis ? (
+          <section className="panel agent-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Análisis del agente</p>
+                <h2>Lectura ejecutiva del periodo</h2>
+              </div>
+              <Bot size={22} />
+            </div>
+            <div className="agent-analysis-grid">
+              {[
+                {
+                  key: "bestOfWeek",
+                  title: "Lo mejor de la semana",
+                  tone: "pos",
+                  icon: <TrendingUp size={17} />,
+                  items: selectedReport.analysis.bestOfWeek || [],
+                  empty: "Sin hallazgos positivos relevantes esta semana.",
+                },
+                {
+                  key: "weeklyChallenges",
+                  title: "Los desafíos de la semana",
+                  tone: "neg",
+                  icon: <TrendingDown size={17} />,
+                  items: selectedReport.analysis.weeklyChallenges || [],
+                  empty: "Sin desafíos relevantes esta semana.",
+                },
+                {
+                  key: "stockEfficiency",
+                  title: "Eficiencia de stock y compra",
+                  tone: "info",
+                  icon: <ShoppingCart size={17} />,
+                  items: selectedReport.analysis.stockEfficiency || [],
+                  empty: "Sin observaciones de stock y compra para este periodo.",
+                },
+                {
+                  key: "criteriaApplied",
+                  title: "Criterios aplicados",
+                  tone: "brand",
+                  icon: <BookOpenCheck size={17} />,
+                  items: selectedReport.analysis.criteriaApplied || [],
+                  empty: "",
+                },
+              ]
+                .filter((block) => block.items.length || block.empty)
+                .map((block) => (
+                  <article className={`analysis-card tone-${block.tone}`} key={block.key}>
+                    <header>
+                      <span className="analysis-icon">{block.icon}</span>
+                      <strong>{block.title}</strong>
+                      {block.items.length ? <span className="analysis-count">{block.items.length}</span> : null}
+                    </header>
+                    <div className="analysis-items">
+                      {(block.items.length ? block.items : [block.empty]).map((item) => (
+                        <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
+                          {highlightFigures(item)}
+                        </p>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+            </div>
+            {!selectedReport.analysis.criteriaApplied?.length ? (
+              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {isAdminUser(currentUserInfo) ? (
+        <section className="module-grid" id="sources">
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Diagnóstico (solo admin)</p>
+                <h2>Estado de los datos de la auditoría</h2>
+              </div>
+              <Cloud size={22} />
+            </div>
+            <div className="source-grid">
+              {Object.entries(sourceLabels).map(([key, label]) => (
+                <article key={key}>
+                  <strong>{label}</strong>
+                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
+                    {selectedReport?.sourceStatus[key] || "Por revisar"}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </div>
+
+        </section>
+        ) : null}
+
+        {selectedReport ? (
+        <section className="panel actions-bar">
+          <div>
+            <p className="eyebrow">Acciones</p>
+            <h2>Revisión y envío</h2>
+          </div>
+          <div className="action-row wrap-actions">
+            <button className="secondary-button" onClick={() => saveReport({ status: "Borrador" })}>Marcar borrador</button>
+            <button className="secondary-button" onClick={() => saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
+            <a className="button-link" href="#workspace" onClick={() => setReportTab("send")}><Send size={17} /> Ir a envío por correo</a>
+          </div>
+        </section>
+        ) : null}
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Histórico</p>
+              <h2>Últimos 4 periodos</h2>
+            </div>
+            <BarChart3 size={22} />
+          </div>
+          <div className="history-chart">
+              {selectedReport?.history.map((point) => (
+                <article key={point.periodId}>
+                  <span>{point.label}</span>
+                  <div className="bar-track"><div style={{ width: `${Math.max(8, (point.revenue / maxRevenue) * 100)}%` }} /></div>
+                  <small>{money(point.revenue)} - {point.costPercent}% costo</small>
+                  <div className="bar-track variance"><div style={{ width: `${Math.max(8, (Math.abs(point.varianceAmount) / maxAbsVariance) * 100)}%` }} /></div>
+                  <small>{money(point.varianceAmount)} variance</small>
+                </article>
+              ))}
+            </div>
         </section>
 
         <section className="module-grid">
