@@ -1239,6 +1239,56 @@ function App() {
     }
   }
 
+  // Si la respuesta del agente trae las secciones del reporte (LO MEJOR /
+  // DESAFIOS / EFICIENCIA / DIAGNOSTICO), se reparte cada bullet en la
+  // seccion correspondiente del analisis; el texto sin secciones va al
+  // resumen ejecutivo como antes.
+  function parseAnalysisFromText(text: string) {
+    const headings: Array<[RegExp, keyof NonNullable<Report["analysis"]>]> = [
+      [/LO MEJOR DE (LA SEMANA|EL MES|ESTE PERIODO)/i, "bestOfWeek"],
+      [/DESAF[ÍI]OS (DE LA SEMANA|DEL MES|DEL PERIODO)/i, "weeklyChallenges"],
+      [/EFICIENCIA DE STOCK/i, "stockEfficiency"],
+      [/DIAGN[ÓO]STICO/i, "agentNotes"],
+    ];
+    const sections: Partial<Record<keyof NonNullable<Report["analysis"]>, string[]>> = {};
+    let current: keyof NonNullable<Report["analysis"]> | null = null;
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const heading = headings.find(([pattern]) => pattern.test(line) && line.length < 70);
+      if (heading) {
+        current = heading[1];
+        if (!sections[current]) sections[current] = [];
+        continue;
+      }
+      if (!current) continue;
+      const bucket = sections[current]!;
+      if (/^[-•–*]\s*/.test(line)) bucket.push(line.replace(/^[-•–*]\s*/, ""));
+      else if (bucket.length) bucket[bucket.length - 1] += ` ${line}`;
+    }
+    const filled = Object.fromEntries(Object.entries(sections).filter(([, items]) => items && items.length));
+    return Object.keys(filled).length ? (filled as Partial<NonNullable<Report["analysis"]>>) : null;
+  }
+
+  async function applyChatAsSummary(content: string) {
+    const parsed = parseAnalysisFromText(content);
+    if (!parsed || !selectedReport) {
+      setCommentsDraft(content);
+      return;
+    }
+    try {
+      await saveReport({
+        comments: content,
+        analysis: { ...(selectedReport.analysis || {}), ...parsed },
+      });
+      setError("Resumen aplicado: las secciones del análisis de abajo quedaron actualizadas.");
+      setWorkStatus("ready");
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : "No se pudo aplicar el resumen.");
+      setWorkStatus("error");
+    }
+  }
+
   async function saveReport(patch: Partial<Report>) {
     if (!selectedReport) return;
 
@@ -2225,7 +2275,7 @@ function App() {
                     <div className="chat-bubble-content">{item.content}</div>
                     {item.role === "assistant" && !item.content.startsWith("⚠") ? (
                       <div className="chat-bubble-actions">
-                        <button type="button" onClick={() => setCommentsDraft(item.content)}>Usar como resumen</button>
+                        <button type="button" onClick={() => applyChatAsSummary(item.content)}>Usar como resumen</button>
                         <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
                       </div>
                     ) : null}
