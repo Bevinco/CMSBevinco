@@ -4248,12 +4248,14 @@ button:disabled {
 }
 
 .email-grid {
+  align-items: start;
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
 }
 
 .email-grid label {
+  align-content: start;
   color: #46605a;
   display: grid;
   font-size: 0.76rem;
@@ -4266,7 +4268,8 @@ button:disabled {
   border-radius: 8px;
   color: #172026;
   font-weight: 500;
-  min-height: 42px;
+  height: 46px;
+  min-height: 46px;
   padding: 0 12px;
 }
 
@@ -4278,14 +4281,15 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 42px;
+  min-height: 46px;
   padding: 6px 8px;
 }
 
 .email-recipients input {
   border: none;
   flex: 1;
-  min-height: 28px;
+  height: 32px;
+  min-height: 32px;
   min-width: 160px;
   outline: none;
   padding: 0 4px;
