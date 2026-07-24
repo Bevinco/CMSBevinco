@@ -1676,6 +1676,11 @@ REGLAS DE INTERPRETACION
 
 PRIORIZACION: ordena hallazgos por 1) impacto en $, 2) impacto en margen, 3) relevancia operativa, 4) recurrencia historica.
 
+ANALISIS ESTRATEGICO (OBLIGATORIO)
+- Parte SIEMPRE por los 2-3 hallazgos de mayor impacto economico del periodo y di que significan para el negocio; el resto solo si aporta.
+- Los criterios y ejemplos del cliente son la PLANTILLA OBLIGATORIA: replica su estructura, terminologia y estilo de redaccion. No inventes un formato propio.
+- PROHIBIDO: comentar desviaciones de bajo impacto, listar cifras sin interpretacion, repetir el resumen sin agregar analisis, y mencionar detalles tecnicos del sistema (fuentes, sincronizacion, nombres de columnas o reportes internos).
+
 FORMATO DE ENTREGA
 - DIAGNOSTICO (interno): 3 a 5 bullets breves y tecnicos.
 - LO MEJOR DE LA SEMANA: maximo 2-3 puntos, solo hallazgos positivos atribuibles a buena gestion (no resultados por error de registro o compensaciones). Directo, sin titulo por punto.
@@ -1714,6 +1719,12 @@ async function generateReportAnalysisAI(payload) {
     periodo: periodLabel,
     tipo: isMonthly ? "mensual (acumulado de las semanas incluidas)" : "semanal",
     semanasIncluidas: isMonthly ? (payload.includedPeriods || []).map((item) => item.label) : undefined,
+    eficienciaStock: isMonthly && payload.stockEfficiency
+      ? {
+          sinRotacion: (payload.stockEfficiency.slowMovers || []).slice(0, 10),
+          coberturaPorCategoria: (payload.stockEfficiency.categoryCoverage || []).slice(0, 12),
+        }
+      : undefined,
     resumen: {
       ingresos: summary.revenue || 0,
       costoPorcentaje: summary.costPercent || 0,
@@ -2918,6 +2929,43 @@ function applyEffectiveInventory(rows, detailedStock, client) {
   }
 }
 
+// Eficiencia de stock desde el variance detailed: productos con inventario y
+// sin rotacion en el periodo, y dias de cobertura por categoria (para la
+// seccion de stock del reporte mensual, reunion 17-jul).
+function buildStockEfficiency(rows, daysInPeriod = 7) {
+  const slowMovers = [];
+  const categories = [];
+  for (const row of rows || []) {
+    const record = row.record || {};
+    const name = String(
+      pickRecordValue(record, ["itemName", "item"], "") ||
+      pickRecordValueFuzzy(record, /nombreArt/i) ||
+      row.values?.[0] || "",
+    ).trim();
+    if (!name) continue;
+    const stockCost = parseNumber(record.existenciaCosto);
+    const usedCost = parseNumber(record.usadoCosto);
+    const usedUnits = parseNumber(record.usado);
+    if (isTotalRow(name)) {
+      if (stockCost || usedCost) {
+        categories.push({
+          category: cleanTotalName(name),
+          stockCost: Math.round(stockCost),
+          coverageDays: usedCost > 0 ? Math.round((stockCost / usedCost) * daysInPeriod) : null,
+        });
+      }
+      continue;
+    }
+    if (/:\s*$/.test(name)) continue;
+    if (stockCost > 0 && !usedUnits && !usedCost) slowMovers.push({ name, stockCost: Math.round(stockCost) });
+  }
+  slowMovers.sort((a, b) => b.stockCost - a.stockCost);
+  return {
+    slowMovers: slowMovers.slice(0, 10),
+    categoryCoverage: categories.sort((a, b) => (b.stockCost || 0) - (a.stockCost || 0)).slice(0, 12),
+  };
+}
+
 const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0.25 };
 
 function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
@@ -3027,6 +3075,13 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         }
         if (type === "varianceDetailed") {
           detailedStockUnits = buildDetailedStockMap(data.rows);
+          const syncPeriodMs = period?.startsAt && period?.endsAt
+            ? Date.parse(period.endsAt) - Date.parse(period.startsAt)
+            : 0;
+          report.stockEfficiency = buildStockEfficiency(
+            data.rows,
+            syncPeriodMs > 0 ? Math.round(syncPeriodMs / 86400000) + 1 : 7,
+          );
           const purchaseActuals = extractPurchaseActuals(data);
           if (purchaseActuals.length) report.purchaseActuals = purchaseActuals;
           if (!data.rows?.length) {
@@ -3199,6 +3254,11 @@ function accumulateReportPayloads(payloads = []) {
   let usedCost = 0;
   let soldCost = 0;
   let varianceAmount = 0;
+  // El ahorro del mes es la suma de los ahorros de CADA semana (positivos por
+  // semana), no el neto por familia: una familia +10 y -4 en semanas distintas
+  // aporta 10 al ahorro y -4 al faltante, no +6 al ahorro.
+  let savingsTotal = 0;
+  let shortagesTotal = 0;
   let wasteCost = 0;
   let purchasedCost = 0;
   let suggestedCost = 0;
@@ -3222,6 +3282,8 @@ function accumulateReportPayloads(payloads = []) {
 
     for (const family of payload.familyVariances || []) {
       familyMap.set(family.family, (familyMap.get(family.family) || 0) + (family.amount || 0));
+      if ((family.amount || 0) > 0) savingsTotal += family.amount;
+      else shortagesTotal += family.amount || 0;
     }
     for (const family of payload.familyPurchases || []) {
       familyPurchaseMap.set(family.family, (familyPurchaseMap.get(family.family) || 0) + (family.purchased || 0));
@@ -3343,6 +3405,8 @@ function accumulateReportPayloads(payloads = []) {
       costPercent: revenue ? round1((usedCost / revenue) * 100) : 0,
       variancePercent: soldCost ? round1((varianceAmount / soldCost) * 100) : 0,
       varianceAmount,
+      savingsTotal: Math.round(savingsTotal),
+      shortagesTotal: Math.round(shortagesTotal),
     },
     categoryVariances,
     topProducts,
@@ -3354,6 +3418,7 @@ function accumulateReportPayloads(payloads = []) {
     familySuggested: [...familySuggestedMap.entries()].map(([family, suggested]) => ({ family, suggested: Math.round(suggested) })),
     monthlyHistory,
     // Las existencias/stock son una foto: se toman del ultimo periodo, no se suman.
+    stockEfficiency: last.stockEfficiency || null,
     purchaseSuggestions: last.purchaseSuggestions || [],
     sourceStatus: last.sourceStatus || {},
   };
@@ -4163,8 +4228,12 @@ function renderTwoPageReportHtml(store, report) {
     }))
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
     .slice(0, 7);
-  const savings = familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
-  const shortages = familyVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
+  const savings = Number.isFinite(payload.summary?.savingsTotal)
+    ? payload.summary.savingsTotal
+    : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
+  const shortages = Number.isFinite(payload.summary?.shortagesTotal)
+    ? payload.summary.shortagesTotal
+    : familyVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
   const waste = Math.abs(payload.summary?.wasteCost || 0);
   const tableProducts = (payload.topUsageProducts && payload.topUsageProducts.length
     ? payload.topUsageProducts
@@ -4302,11 +4371,20 @@ function renderTwoPageReportHtml(store, report) {
     const grid = ticks.map((v) =>
       `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
       `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
-    const area = (key, color, opacity) => {
-      const pts = history.map((p, i) => `${xAt(i)},${yAt(p[key])}`).join(" ");
-      return `<polygon points="${xAt(0)},${B} ${pts} ${xAt(n - 1)},${B}" fill="${color}" opacity="${opacity}"/>` +
+    const area = (values, color, opacity, startIndex = 0) => {
+      const points = values
+        .map((value, i) => ({ value, i }))
+        .filter(({ i }) => i >= startIndex);
+      if (!points.length) return "";
+      const pts = points.map(({ value, i }) => `${xAt(i)},${yAt(value)}`).join(" ");
+      return `<polygon points="${xAt(points[0].i)},${B} ${pts} ${xAt(points[points.length - 1].i)},${B}" fill="${color}" opacity="${opacity}"/>` +
         `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
     };
+    // La sugerencia de la semana N se compra en la semana N+1: se desplaza la
+    // serie una semana hacia adelante para que la comparacion contra la compra
+    // realizada sea temporalmente coherente (pedido de Pedro, reunion 17-jul).
+    const purchasedSeries = history.map((p) => p.purchasedCost || 0);
+    const suggestedShifted = history.map((p, i) => (i > 0 ? history[i - 1].suggestedCost || 0 : 0));
     const xLabels = history.map((p, i) =>
       `<text x="${xAt(i)}" y="${B + 13}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
@@ -4316,7 +4394,7 @@ function renderTwoPageReportHtml(store, report) {
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${emptyNote}
-      ${rawMaxPurchase ? area("suggestedCost", GREEN, 0.5) + area("purchasedCost", NAVY, 0.42) : ""}
+      ${rawMaxPurchase ? area(suggestedShifted, GREEN, 0.5, 1) + area(purchasedSeries, NAVY, 0.42) : ""}
       ${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
@@ -4346,7 +4424,7 @@ function renderTwoPageReportHtml(store, report) {
     const ticksRight = [];
     for (let v = 0; v <= maxDays; v += 5) ticksRight.push(v);
     const rightAxis = ticksRight.map((v) =>
-      `<text x="${R + 6}" y="${yDays(v) + 3}" class="ax">${v.toFixed(1)}</text>`).join("");
+      `<text x="${R + 6}" y="${yDays(v) + 3}" class="ax">${Math.round(v)}</text>`).join("");
     const bars = history.map((p, i) => {
       const x = xAt(i);
       const yu = yAt(p.usedCost); const yi = yAt(p.inventoryCost);
@@ -4362,7 +4440,7 @@ function renderTwoPageReportHtml(store, report) {
     const chips = covered.map((item) => {
       const x = xAt(item.i); const y = Math.max(T + 12, yDays(item.days) - 16);
       return `<rect x="${x - 32}" y="${y - 10}" width="64" height="18" rx="2" fill="${TEAL}"/>` +
-        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${item.days.toFixed(1)} días</text>`;
+        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${Math.round(item.days)} días</text>`;
     }).join("");
     const covEmptyNote = rawMaxCov
       ? ""
@@ -4518,6 +4596,36 @@ function renderTwoPageReportHtml(store, report) {
       <tbody>${costDiffRows}${costDiffTotalRow}</tbody>
     </table>` : "";
 
+  // Seccion de eficiencia de stock del reporte mensual: top sin rotacion y
+  // dias de cobertura por categoria (foto de la ultima semana del mes).
+  const stockEff = payload.stockEfficiency || {};
+  const slowRows = (stockEff.slowMovers || []).map((item, index) => `<tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">${escapeHtml(item.name)}</td>
+      <td class="tmoney"><span>$</span><span>${fmtMoney(item.stockCost)}</span></td>
+    </tr>`).join("");
+  const coverageRows = (stockEff.categoryCoverage || []).map((item, index) => `<tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">${escapeHtml(item.category)}</td>
+      <td class="tmoney"><span>$</span><span>${fmtMoney(item.stockCost)}</span></td>
+      <td class="tpct">${item.coverageDays === null ? "Sin rotación" : `${item.coverageDays} días`}</td>
+    </tr>`).join("");
+  const stockEfficiencySection = (slowRows || coverageRows) ? `
+    <section class="bv-grid2 bv-stockeff">
+      <table class="bv-table">
+        <thead>
+          <tr><th colspan="2" class="bv-table-title">Top 10 sin rotación en el mes</th></tr>
+          <tr><th>Producto</th><th>Stock al costo</th></tr>
+        </thead>
+        <tbody>${slowRows || '<tr><td class="tname" colspan="2">Sin productos detenidos: todo el inventario rotó.</td></tr>'}</tbody>
+      </table>
+      <table class="bv-table">
+        <thead>
+          <tr><th colspan="3" class="bv-table-title">Cobertura de inventario por categoría</th></tr>
+          <tr><th>Categoría</th><th>Stock al costo</th><th>Cobertura</th></tr>
+        </thead>
+        <tbody>${coverageRows || '<tr><td class="tname" colspan="3">Sin datos de inventario por categoría.</td></tr>'}</tbody>
+      </table>
+    </section>` : "";
+
   const productRows = tableProducts.map((item, index) => {
     const neg = (item.varianceAmount || 0) < 0;
     return `<tr class="${index % 2 ? "alt" : ""}">
@@ -4578,6 +4686,7 @@ function renderTwoPageReportHtml(store, report) {
     .bv-difftable { margin-top: 8px; }
     .bv-difftable .tname { width: 15%; }
     .bv-difftable tr.total td { background: #eef4f1; border-top: 2px solid #404040; font-weight: 700; }
+    .bv-stockeff { align-items: start; margin-top: 10px; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
     .tmoney span:first-child { float: left; }
     .tmoney.neg span:last-child { color: #e00000; }
@@ -4609,7 +4718,7 @@ function renderTwoPageReportHtml(store, report) {
     <section class="bv-panel">
       <h2>Costo real vs Costo Ideal</h2>
       ${costComboSvg()}
-      ${costDiffTable}
+      ${isMonthlyReport ? costDiffTable : ""}
     </section>
     <section class="bv-row">
       <div class="bv-panel">
@@ -4668,6 +4777,7 @@ function renderTwoPageReportHtml(store, report) {
         ${familyPurchaseSvg()}
       </div>
     </section>`}
+    ${isMonthlyReport ? stockEfficiencySection : ""}
     <section class="bv-comments">
       ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
@@ -5557,6 +5667,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
     familySuggested: accumulated.familySuggested,
     purchaseSuggestions: accumulated.purchaseSuggestions,
     monthlyHistory: accumulated.monthlyHistory,
+    stockEfficiency: accumulated.stockEfficiency,
     includedPeriods: accumulated.includedPeriods,
     sourceStatus: accumulated.sourceStatus,
     analysis: null,

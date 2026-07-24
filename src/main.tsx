@@ -1619,7 +1619,7 @@ function App() {
         id: `sources-${item.report.id}`,
         title: item.report.client?.name || item.report.clientId,
         meta: item.report.period?.label || item.report.periodId,
-        detail: `Falta revisar: ${item.missingSources.map((key) => sourceLabels[key]).join(", ")}.`,
+        detail: "Faltan datos de la auditoría para completar este reporte.",
         action: "Abrir reporte",
         onClick: () => {
           setSelectedClientId(item.report.clientId);
@@ -1647,6 +1647,23 @@ function App() {
       })),
     ].slice(0, 5);
 
+    // Resumen operativo de la ultima semana de cada restaurante: ventas y %
+    // de costo ponderado, para que el inicio muestre negocio y no estados
+    // tecnicos de sincronizacion (reunion 17-jul).
+    const latestByClient = new Map<string, Report>();
+    for (const report of reports) {
+      if (report.monthly || !report.summary?.revenue) continue;
+      const sortKey = (item: Report) => String(item.period?.endsAt || item.updatedAt || "");
+      const previous = latestByClient.get(report.clientId);
+      if (!previous || sortKey(report) > sortKey(previous)) latestByClient.set(report.clientId, report);
+    }
+    const latestReports = [...latestByClient.values()];
+    const latestRevenue = latestReports.reduce((sum, report) => sum + (report.summary?.revenue || 0), 0);
+    const latestUsedCost = latestReports.reduce(
+      (sum, report) => sum + ((report.summary?.costPercent || 0) / 100) * (report.summary?.revenue || 0),
+      0,
+    );
+
     return {
       reportsWithSources,
       blockedReports,
@@ -1656,6 +1673,9 @@ function App() {
       highVarianceReports,
       dueTasks,
       attentionItems,
+      latestRevenue,
+      latestCostPercent: latestRevenue ? (latestUsedCost / latestRevenue) * 100 : 0,
+      latestCount: latestReports.length,
     };
   }, [reports, clickupTasks]);
   const maxRevenue = Math.max(...(selectedReport?.history.map((item) => item.revenue) || [1]), 1);
@@ -1814,19 +1834,19 @@ function App() {
                 </span>
               </button>
               <button className="kpi-card" onClick={() => navigateTo("module1")}>
-                <span className="kpi-icon kpi-icon-warn"><Cloud size={18} /></span>
+                <span className="kpi-icon kpi-icon-info"><BarChart3 size={18} /></span>
                 <span className="kpi-body">
-                  <small className="kpi-label">Datos por revisar</small>
-                  <strong>{dashboardSummary.blockedReports.length}</strong>
-                  <small className="kpi-sub">Faltan datos de la auditoría</small>
+                  <small className="kpi-label">Ventas última semana</small>
+                  <strong>{money(dashboardSummary.latestRevenue || 0)}</strong>
+                  <small className="kpi-sub">{dashboardSummary.latestCount} restaurante(s)</small>
                 </span>
               </button>
-              <button className="kpi-card" onClick={() => { setReportStatusFilter("Listo para revisar"); navigateTo("reports"); }}>
-                <span className="kpi-icon kpi-icon-info"><PencilLine size={18} /></span>
+              <button className="kpi-card" onClick={() => navigateTo("module1")}>
+                <span className="kpi-icon kpi-icon-warn"><PencilLine size={18} /></span>
                 <span className="kpi-body">
-                  <small className="kpi-label">En revisión</small>
-                  <strong>{dashboardSummary.readyReports.length}</strong>
-                  <small className="kpi-sub">{dashboardSummary.draftReports.length} borradores</small>
+                  <small className="kpi-label">% costo promedio</small>
+                  <strong>{(dashboardSummary.latestCostPercent || 0).toFixed(1)}%</strong>
+                  <small className="kpi-sub">Ponderado por ventas</small>
                 </span>
               </button>
               <button className="kpi-card" onClick={() => navigateTo("tasks")}>
@@ -2226,17 +2246,19 @@ function App() {
         </section>
         ) : null}
 
+        {selectedReport ? (
         <section className="panel actions-bar">
           <div>
             <p className="eyebrow">Acciones</p>
             <h2>Revisión y envío</h2>
           </div>
           <div className="action-row wrap-actions">
-            <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Borrador" })}>Marcar borrador</button>
-            <button className="secondary-button" onClick={() => selectedReport && saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
+            <button className="secondary-button" onClick={() => saveReport({ status: "Borrador" })}>Marcar borrador</button>
+            <button className="secondary-button" onClick={() => saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
             <a className="button-link" href="#workspace" onClick={() => setReportTab("send")}><Send size={17} /> Ir a envío por correo</a>
           </div>
         </section>
+        ) : null}
 
         <section className="panel">
           <div className="panel-header">
