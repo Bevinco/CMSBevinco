@@ -119,6 +119,8 @@ type Report = {
     costPercent: number;
     variancePercent: number;
     varianceAmount: number;
+    usedCost?: number;
+    idealCostPercent?: number;
   };
   categoryVariances: Array<{ category: string; amount: number; percent: number }>;
   familyVariances?: Array<{ family: string; amount: number }>;
@@ -2065,25 +2067,24 @@ function App() {
                 <strong>{selectedUnitInfo?.accountName || clientAccountLabel(selectedClient)}</strong>
               </article>
               <article>
-                <span>Unidad / módulo</span>
-                <strong>{selectedUnitInfo?.moduleName || clientUnitLabel(selectedClient)}</strong>
-              </article>
-              {isAdminUser(currentUserInfo) ? (
-                <article>
-                  <span>Sculpture CID</span>
-                  <strong>{selectedUnitInfo?.sculptureCid || selectedClient?.sculptureCid || selectedClient?.cid || "Por configurar"}</strong>
-                </article>
-              ) : null}
-              <article>
                 <span>Área</span>
                 <strong>{selectedUnitInfo?.area || selectedClient?.area || "Food"}</strong>
               </article>
-              {isAdminUser(currentUserInfo) ? (
-                <article>
-                  <span>Origen</span>
-                  <strong>{(selectedUnitInfo?.baseUrl || selectedClient?.sculptureBaseUrl || "").includes("beverage") ? "Beverage" : "Food"}</strong>
-                </article>
-              ) : null}
+              <article>
+                <span>Estado</span>
+                {selectedReport ? (
+                  <select
+                    className="unit-state-select"
+                    aria-label="Estado del flujo de trabajo"
+                    value={workflowStateFor(selectedReport)}
+                    onChange={(event) => setReportWorkflowState(selectedReport, event.target.value)}
+                  >
+                    {WORKFLOW_STATES.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                ) : (
+                  <strong>Sin reporte</strong>
+                )}
+              </article>
             </div>
 
             <div className="unit-form">
@@ -2161,26 +2162,35 @@ function App() {
         </section>
 
 
-        <section className="metrics" aria-label="Resumen">
+        <section className="metrics metrics-five" aria-label="Resumen">
           <article>
             <span><FileSpreadsheet size={18} /> Ingresos</span>
             <strong>{workStatus === "loading" ? <span className="skeleton" /> : money(selectedReport?.summary.revenue || 0)}</strong>
             <small>{selectedReport?.period?.label || "Sin periodo"}</small>
           </article>
           <article>
-            <span><BarChart3 size={18} /> % costo</span>
+            <span><BarChart3 size={18} /> Costo</span>
+            <strong>
+              {workStatus === "loading"
+                ? <span className="skeleton" />
+                : money(selectedReport?.summary.usedCost || ((selectedReport?.summary.costPercent || 0) / 100) * (selectedReport?.summary.revenue || 0))}
+            </strong>
+            <small>Usado al costo</small>
+          </article>
+          <article>
+            <span><FileText size={18} /> Diferencia costo</span>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : money(selectedReport?.summary.varianceAmount || 0)}</strong>
+            <small>{workStatus === "loading" ? "Actualizando..." : `${selectedReport?.summary.variancePercent || 0}% del vendido`}</small>
+          </article>
+          <article>
+            <span><TrendingUp size={18} /> % Costo Real</span>
             <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.costPercent || 0}%`}</strong>
             <small>Food cost / pour cost</small>
           </article>
           <article>
-            <span><FileText size={18} /> Variance</span>
-            <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.variancePercent || 0}%`}</strong>
-            <small>{workStatus === "loading" ? "Actualizando..." : money(selectedReport?.summary.varianceAmount || 0)}</small>
-          </article>
-          <article>
-            <span><ListChecks size={18} /> Estado</span>
-            <strong className="metric-status">{selectedReport?.status || "Borrador"}</strong>
-            <small>{workStatus === "loading" ? "Actualizando" : "Operativo"}</small>
+            <span><TrendingDown size={18} /> % Costo Ideal</span>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.idealCostPercent || 0}%`}</strong>
+            <small>Según recetas y ventas</small>
           </article>
         </section>
 

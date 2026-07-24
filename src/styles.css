@@ -503,6 +503,12 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.metrics-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .metrics-five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.unit-state-select { border: 1px solid #cfdad7; border-radius: 8px; color: #172026; font: inherit; font-size: 0.86rem; font-weight: 700; min-height: 36px; padding: 0 8px; width: 100%; }
+:root[data-theme="dark"] .unit-state-select { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+
 .metrics article,
 .panel,
 .reservation-card {
