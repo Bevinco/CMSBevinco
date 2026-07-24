@@ -576,7 +576,7 @@ function App() {
   const [emailRecipientInput, setEmailRecipientInput] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailSending, setEmailSending] = useState(false);
-  const [reportTab, setReportTab] = useState<"draft" | "chat" | "send">("draft");
+  const [reportTab, setReportTab] = useState<"chat" | "send">("chat");
   const [chatFiles, setChatFiles] = useState<File[]>([]);
   const [selectedCriteriaFiles, setSelectedCriteriaFiles] = useState<File[]>([]);
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
@@ -2223,12 +2223,12 @@ function App() {
               <p className="eyebrow">Reporte generado</p>
               <h2>Trabajar el reporte</h2>
             </div>
-            <Bot size={22} />
+            <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
+              {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
+              {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
+            </button>
           </div>
           <div className="report-tabs" role="tablist">
-            <button className={reportTab === "draft" ? "active" : ""} role="tab" onClick={() => setReportTab("draft")}>
-              <PencilLine size={15} /> Resumen y correo
-            </button>
             <button className={reportTab === "chat" ? "active" : ""} role="tab" onClick={() => setReportTab("chat")}>
               <Bot size={15} /> Chat con el agente
             </button>
@@ -2236,26 +2236,6 @@ function App() {
               <Send size={15} /> Enviar{selectedReport?.emailLog ? " ✓" : ""}
             </button>
           </div>
-
-          {reportTab === "draft" ? (
-            <div className="report-tab-body" id="comments">
-              <div className="summary-help">
-                <strong>Generador de reporte</strong>
-                <small>Arma el resumen ejecutivo y el correo con los datos de la semana, y guarda el reporte en la bandeja del Historial.</small>
-              </div>
-              <textarea aria-label="Resumen ejecutivo" value={commentsDraft} onChange={(event) => setCommentsDraft(event.target.value)} />
-              <textarea aria-label="Cuerpo del email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} />
-              <div className="action-row wrap-actions">
-                <button className="secondary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
-                  {workStatus === "loading" ? <span className="btn-spinner btn-spinner-dark" /> : <Bot size={17} />}
-                  {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
-                </button>
-                <button className="primary-button" onClick={() => saveReport({ comments: commentsDraft, emailDraft })}>
-                  <PencilLine size={17} /> Guardar cambios
-                </button>
-              </div>
-            </div>
-          ) : null}
 
           {reportTab === "chat" ? (
             <div className="report-tab-body">
@@ -2370,9 +2350,18 @@ function App() {
                 <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
               </label>
             </div>
+            <label className="email-body-field">
+              Cuerpo del correo
+              <textarea
+                aria-label="Cuerpo del email"
+                placeholder="Resumen ejecutivo breve para el cliente. Usa 'Redactar con IA' o pídeselo al chat y aplica 'Usar como correo'."
+                value={emailDraft}
+                onChange={(event) => setEmailDraft(event.target.value)}
+              />
+            </label>
             <div className="email-preview">
               <strong>Se enviará:</strong>
-              <span>el cuerpo del correo (editable en <button className="inline-link" type="button" onClick={() => setReportTab("draft")}>Resumen y correo</button>) + el PDF del reporte adjunto.</span>
+              <span>este cuerpo + el PDF del reporte y el variance detallado adjuntos.</span>
             </div>
             <div className="action-row wrap-actions">
               <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
