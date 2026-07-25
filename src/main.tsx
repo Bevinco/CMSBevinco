@@ -2460,45 +2460,6 @@ function App() {
           </section>
         ) : null}
 
-        {isAdminUser(currentUserInfo) ? (
-        <section className="module-grid" id="sources">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Diagnóstico (solo admin)</p>
-                <h2>Estado de los datos de la auditoría</h2>
-              </div>
-              <Cloud size={22} />
-            </div>
-            <div className="source-grid">
-              {Object.entries(sourceLabels).map(([key, label]) => (
-                <article key={key}>
-                  <strong>{label}</strong>
-                  <span className={["Sincronizado", "Datos cargados"].includes(selectedReport?.sourceStatus[key] || "") ? "pill success" : "pill neutral"}>
-                    {selectedReport?.sourceStatus[key] || "Por revisar"}
-                  </span>
-                </article>
-              ))}
-            </div>
-          </div>
-
-        </section>
-        ) : null}
-
-        {selectedReport ? (
-        <section className="panel actions-bar">
-          <div>
-            <p className="eyebrow">Acciones</p>
-            <h2>Revisión y envío</h2>
-          </div>
-          <div className="action-row wrap-actions">
-            <button className="secondary-button" onClick={() => saveReport({ status: "Borrador" })}>Marcar borrador</button>
-            <button className="secondary-button" onClick={() => saveReport({ status: "Listo para revisar" })}>Listo para revisar</button>
-            <a className="button-link" href="#workspace" onClick={() => setReportTab("send")}><Send size={17} /> Ir a envío por correo</a>
-          </div>
-        </section>
-        ) : null}
-
         <section className="panel">
           <div className="panel-header">
             <div>
