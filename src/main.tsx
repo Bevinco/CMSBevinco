@@ -234,6 +234,7 @@ type ClickupTask = {
   assignees: Array<{ id?: string; username?: string; email?: string; initials?: string; color?: string }>;
   dueDate?: number | null;
   tags: string[];
+  tagDetails?: Array<{ name: string; bg?: string; fg?: string }>;
   subtasks: number;
   dateUpdated?: number | null;
 };
@@ -562,6 +563,7 @@ function App() {
   const [reportPage, setReportPage] = useState(0);
   const [workflowPages, setWorkflowPages] = useState<Record<string, number>>({});
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
+  const [calendarTasks, setCalendarTasks] = useState<ClickupTask[]>([]);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -784,6 +786,19 @@ function App() {
     } catch (metaError) {
       setClickupMeta({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
       setError(metaError instanceof Error ? metaError.message : "No se pudo cargar la configuracion de ClickUp.");
+    }
+  }
+
+  // El calendario necesita TODAS las tareas con fecha (cualquier estado),
+  // no solo las del filtro del tablero de pendientes.
+  async function loadCalendarTasks() {
+    try {
+      const payload = await readJson<{ tasks: ClickupTask[] }>(
+        await fetch("/api/clickup/tasks?status=all"),
+      );
+      setCalendarTasks((payload.tasks || []).filter((task) => task.dueDate));
+    } catch {
+      // Sin ClickUp el calendario simplemente queda vacio.
     }
   }
 
@@ -1643,6 +1658,7 @@ function App() {
       loadClickupStatus();
       loadClickupMeta();
       loadClickupTasks(0, clickupStatusFilter);
+      loadCalendarTasks();
     }
   }, [authStatus, activeView]);
 
@@ -2079,7 +2095,8 @@ function App() {
                     const day = new Date(monday);
                     day.setDate(monday.getDate() + index);
                     const dayKey = day.toDateString();
-                    const dayTasks = clickupTasks.filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey);
+                    const sourceTasks = calendarTasks.length ? calendarTasks : clickupTasks;
+                    const dayTasks = sourceTasks.filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey);
                     const isToday = dayKey === today.toDateString();
                     return (
                       <div className={`week-day ${isToday ? "is-today" : ""}`} key={label}>
@@ -2087,12 +2104,32 @@ function App() {
                           <strong>{label}</strong>
                           <span>{day.getDate()}/{day.getMonth() + 1}</span>
                         </header>
-                        {dayTasks.length ? dayTasks.map((task) => (
-                          <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer">
-                            <strong>{task.name}</strong>
-                            <small>{task.status}</small>
-                          </a>
-                        )) : <p className="workflow-empty">—</p>}
+                        {dayTasks.length ? dayTasks.map((task) => {
+                          const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
+                          return (
+                            <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer" style={{ borderLeftColor: accent }}>
+                              <strong>{task.name}</strong>
+                              <span className="week-task-tags">
+                                {(task.tagDetails || []).slice(0, 3).map((tag) => (
+                                  <i className="week-tag" key={tag.name} style={{ backgroundColor: tag.bg ? `${tag.bg}22` : undefined, color: tag.bg || undefined }}>
+                                    {tag.name}
+                                  </i>
+                                ))}
+                              </span>
+                              <span className="week-task-foot">
+                                <i className="week-status-dot" style={{ backgroundColor: task.statusColor || "#9db0aa" }} />
+                                <small>{task.status}</small>
+                                <span className="week-avatars">
+                                  {(task.assignees || []).slice(0, 3).map((person) => (
+                                    <b key={person.id || person.initials} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
+                                      {(person.initials || person.username || "?").slice(0, 2).toUpperCase()}
+                                    </b>
+                                  ))}
+                                </span>
+                              </span>
+                            </a>
+                          );
+                        }) : <p className="workflow-empty">—</p>}
                       </div>
                     );
                   });

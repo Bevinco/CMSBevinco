@@ -2622,6 +2622,10 @@ function mapClickupTask(task) {
     })),
     dueDate: task.due_date ? Number(task.due_date) : null,
     tags: (task.tags || []).map((tag) => tag.name || tag.tag_fg || "").filter(Boolean),
+    // Colores reales de los tags de ClickUp, para pintar las tarjetas del CMS.
+    tagDetails: (task.tags || [])
+      .map((tag) => ({ name: tag.name || "", bg: tag.tag_bg || "", fg: tag.tag_fg || "" }))
+      .filter((tag) => tag.name),
     subtasks: Array.isArray(task.subtasks) ? task.subtasks.length : Number(task.subtasks || 0),
     dateUpdated: task.date_updated ? Number(task.date_updated) : null,
   };

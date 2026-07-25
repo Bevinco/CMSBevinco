@@ -4370,10 +4370,17 @@ button:disabled {
 .week-day > header { align-items: baseline; display: flex; justify-content: space-between; padding: 0 4px; }
 .week-day > header strong { color: #33534b; font-size: 12.5px; }
 .week-day > header span { color: #8ba39c; font-size: 11.5px; }
-.week-task { background: #fff; border: 1px solid #e2eae7; border-radius: 10px; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; text-decoration: none; }
-.week-task strong { color: #16332c; font-size: 12.5px; }
-.week-task small { color: #7d938d; font-size: 11px; text-transform: capitalize; }
-.week-task:hover { border-color: #90bf4f; }
+.week-task { background: #fff; border: 1px solid #e2eae7; border-left: 4px solid #8bc6c1; border-radius: 10px; box-shadow: 0 1px 2px rgba(16, 40, 33, 0.05); display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; text-decoration: none; transition: box-shadow 0.15s ease, transform 0.15s ease; }
+.week-task strong { color: #16332c; font-size: 12.5px; line-height: 1.3; }
+.week-task small { color: #7d938d; font-size: 10.5px; text-transform: capitalize; }
+.week-task:hover { box-shadow: 0 6px 16px rgba(16, 40, 33, 0.12); transform: translateY(-1px); }
+.week-task-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.week-tag { background: #eef3f1; border-radius: 999px; color: #52685f; font-size: 10px; font-style: normal; font-weight: 700; letter-spacing: 0.2px; padding: 2px 8px; text-transform: lowercase; }
+.week-task-foot { align-items: center; display: flex; gap: 6px; }
+.week-status-dot { border-radius: 999px; flex: none; height: 7px; width: 7px; }
+.week-avatars { display: flex; margin-left: auto; }
+.week-avatars b { align-items: center; border: 2px solid #fff; border-radius: 999px; color: #fff; display: inline-flex; font-size: 8.5px; font-weight: 800; height: 20px; justify-content: center; margin-left: -6px; width: 20px; }
+.week-avatars b:first-child { margin-left: 0; }
 
 @media (max-width: 1100px) {
   .workflow-board, .week-calendar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -4383,6 +4390,8 @@ button:disabled {
 :root[data-theme="dark"] .week-day { background: var(--surface-soft); border-color: var(--line); }
 :root[data-theme="dark"] .workflow-card,
 :root[data-theme="dark"] .week-task { background: var(--surface); border-color: var(--line); box-shadow: none; }
+:root[data-theme="dark"] .week-tag { background: var(--surface-soft); color: var(--text-muted); }
+:root[data-theme="dark"] .week-avatars b { border-color: var(--surface); }
 :root[data-theme="dark"] .workflow-card-open strong,
 :root[data-theme="dark"] .week-task strong { color: var(--text); }
 :root[data-theme="dark"] .workflow-col > header strong,
