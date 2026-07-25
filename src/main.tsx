@@ -2971,22 +2971,32 @@ function App() {
                             (clickupColumnPages[status] || 0) * tasksPerColumn,
                             ((clickupColumnPages[status] || 0) + 1) * tasksPerColumn,
                           )
-                          .map((task) => (
-                          <a className="clickup-task-card" href={task.url} key={task.id} target="_blank" rel="noreferrer">
-                            <div className="clickup-task-main">
-                              <strong>{task.name}</strong>
-                              <small>{shortDate(task.dueDate)}</small>
-                            </div>
-                            <div className="clickup-task-meta">
-                              {task.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}
-                              {task.assignees.slice(0, 3).map((assignee) => (
-                                <i key={`${task.id}-${assignee.id || assignee.initials || assignee.email}`}>
-                                  {assignee.initials || assignee.username?.slice(0, 2) || "CU"}
+                          .map((task) => {
+                          const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
+                          return (
+                          <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer" style={{ borderLeftColor: accent }}>
+                            <strong>{task.name}</strong>
+                            <span className="week-task-tags">
+                              {(task.tagDetails || []).slice(0, 3).map((tag) => (
+                                <i className="week-tag" key={tag.name} style={{ backgroundColor: tag.bg ? `${tag.bg}22` : undefined, color: tag.bg || undefined }}>
+                                  {tag.name}
                                 </i>
                               ))}
-                            </div>
+                            </span>
+                            <span className="week-task-foot">
+                              <i className="week-status-dot" style={{ backgroundColor: task.statusColor || "#9db0aa" }} />
+                              <small>{task.dueDate ? shortDate(task.dueDate) : task.status}</small>
+                              <span className="week-avatars">
+                                {(task.assignees || []).slice(0, 3).map((person) => (
+                                  <b key={`${task.id}-${person.id || person.initials || person.email}`} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
+                                    {(person.initials || person.username || "?").slice(0, 2).toUpperCase()}
+                                  </b>
+                                ))}
+                              </span>
+                            </span>
                           </a>
-                        ))}
+                          );
+                        })}
                       </div>
                       {tasks.length > tasksPerColumn ? (
                         <div className="column-pager">

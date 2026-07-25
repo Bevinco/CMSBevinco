@@ -981,9 +981,9 @@ button:disabled {
 
 .clickup-board {
   display: grid;
-  gap: 10px;
+  gap: 14px;
   grid-template-columns: repeat(3, minmax(240px, 1fr));
-  margin-top: 14px;
+  margin-top: 20px;
 }
 
 .clickup-column {
@@ -1002,6 +1002,8 @@ button:disabled {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 2px 4px 0;
 }
 
 .clickup-column-header span {
@@ -1036,9 +1038,10 @@ button:disabled {
 }
 
 .column-pager button {
-  font-size: 0.7rem;
+  border-radius: 7px;
+  font-size: 0.72rem;
   min-height: 28px;
-  padding: 0 8px;
+  padding: 0 10px;
 }
 
 .column-pager span {
@@ -4343,6 +4346,12 @@ button:disabled {
 .inline-link { background: none; border: 0; color: #054372; cursor: pointer; font: inherit; font-weight: 700; padding: 0; text-decoration: underline; }
 
 /* Tablero de flujo de trabajo (Inicio) */
+.workflow-panel .panel-header,
+.week-calendar-panel .panel-header { align-items: center; margin-bottom: 18px; }
+.week-nav { align-items: center; gap: 8px; }
+.week-nav .secondary-button { font-size: 0.78rem; min-height: 34px; padding: 0 12px; }
+.week-nav .button-link { font-size: 0.78rem; min-height: 34px; padding: 0 12px; }
+
 .workflow-board { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .workflow-col { background: #f4f7f6; border: 1px solid #e2eae7; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 160px; padding: 10px; }
 .workflow-col > header { align-items: center; display: flex; justify-content: space-between; padding: 2px 4px 6px; }
