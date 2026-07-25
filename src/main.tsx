@@ -48,6 +48,7 @@ const WORKFLOW_STATES = [
   "Listo para el Reporte",
 ] as const;
 const CLICKUP_CALENDAR_URL = "https://app.clickup.com/31025999/v/c/xjuuf-5994";
+const WORKFLOW_CARDS_PER_PAGE = 4;
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
@@ -554,6 +555,7 @@ function App() {
   const [reportSearch, setReportSearch] = useState("");
   const [reportStatusFilter, setReportStatusFilter] = useState("Todos");
   const [reportPage, setReportPage] = useState(0);
+  const [workflowPages, setWorkflowPages] = useState<Record<string, number>>({});
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -1970,13 +1972,16 @@ function App() {
               <div className="workflow-board">
                 {WORKFLOW_STATES.map((state) => {
                   const cards = visibleReports.filter((report) => report.status !== "Enviado" && workflowStateFor(report) === state);
+                  const totalPages = Math.max(1, Math.ceil(cards.length / WORKFLOW_CARDS_PER_PAGE));
+                  const page = Math.min(workflowPages[state] || 0, totalPages - 1);
+                  const pageCards = cards.slice(page * WORKFLOW_CARDS_PER_PAGE, (page + 1) * WORKFLOW_CARDS_PER_PAGE);
                   return (
                     <div className="workflow-col" key={state}>
                       <header>
                         <strong>{state}</strong>
                         <span>{cards.length}</span>
                       </header>
-                      {cards.length ? cards.map((report) => (
+                      {cards.length ? pageCards.map((report) => (
                         <article className="workflow-card" key={report.id}>
                           <button
                             className="workflow-card-open"
@@ -2002,6 +2007,23 @@ function App() {
                           </select>
                         </article>
                       )) : <p className="workflow-empty">Sin reportes aquí.</p>}
+                      {totalPages > 1 ? (
+                        <footer className="workflow-pager">
+                          <button
+                            aria-label="Página anterior"
+                            disabled={page === 0}
+                            type="button"
+                            onClick={() => setWorkflowPages((current) => ({ ...current, [state]: page - 1 }))}
+                          >‹</button>
+                          <span>{page + 1} / {totalPages}</span>
+                          <button
+                            aria-label="Página siguiente"
+                            disabled={page >= totalPages - 1}
+                            type="button"
+                            onClick={() => setWorkflowPages((current) => ({ ...current, [state]: page + 1 }))}
+                          >›</button>
+                        </footer>
+                      ) : null}
                     </div>
                   );
                 })}
