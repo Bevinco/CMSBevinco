@@ -556,6 +556,7 @@ function App() {
   const [reportStatusFilter, setReportStatusFilter] = useState("Todos");
   const [reportPage, setReportPage] = useState(0);
   const [workflowPages, setWorkflowPages] = useState<Record<string, number>>({});
+  const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -2034,17 +2035,32 @@ function App() {
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Auditorías</p>
-                  <h2>Calendario de la semana</h2>
+                  <h2>
+                    {calendarWeekOffset === 0
+                      ? "Calendario de la semana"
+                      : calendarWeekOffset === 1
+                        ? "Próxima semana"
+                        : calendarWeekOffset === -1
+                          ? "Semana pasada"
+                          : `Semana ${calendarWeekOffset > 0 ? "+" : ""}${calendarWeekOffset}`}
+                  </h2>
                 </div>
-                <a className="button-link" href={CLICKUP_CALENDAR_URL} target="_blank" rel="noreferrer">
-                  <CalendarDays size={17} /> Abrir en ClickUp
-                </a>
+                <div className="action-row wrap-actions week-nav">
+                  <button className="secondary-button" type="button" onClick={() => setCalendarWeekOffset((current) => current - 1)}>‹ Anterior</button>
+                  {calendarWeekOffset !== 0 ? (
+                    <button className="secondary-button" type="button" onClick={() => setCalendarWeekOffset(0)}>Hoy</button>
+                  ) : null}
+                  <button className="secondary-button" type="button" onClick={() => setCalendarWeekOffset((current) => current + 1)}>Siguiente ›</button>
+                  <a className="button-link" href={CLICKUP_CALENDAR_URL} target="_blank" rel="noreferrer">
+                    <CalendarDays size={17} /> Abrir en ClickUp
+                  </a>
+                </div>
               </div>
               <div className="week-calendar">
                 {(() => {
                   const today = new Date();
                   const monday = new Date(today);
-                  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+                  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7) + calendarWeekOffset * 7);
                   return ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"].map((label, index) => {
                     const day = new Date(monday);
                     day.setDate(monday.getDate() + index);

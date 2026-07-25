@@ -389,11 +389,13 @@ function signPayload(payload) {
   return crypto.createHmac("sha256", sessionSecret).update(payload).digest("base64url");
 }
 
+const SESSION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 7; // 7 dias
+
 function createSessionToken(username) {
   const payload = Buffer.from(
     JSON.stringify({
       ...(typeof username === "string" ? { username } : username),
-      expiresAt: Date.now() + 1000 * 60 * 60 * 12,
+      expiresAt: Date.now() + SESSION_LIFETIME_MS,
     }),
   ).toString("base64url");
 
@@ -470,7 +472,7 @@ function readSession(request) {
 
 function sessionCookie(token) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${sessionCookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure}`;
+  return `${sessionCookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_LIFETIME_MS / 1000)}${secure}`;
 }
 
 function clearSessionCookie() {
@@ -481,8 +483,23 @@ function clearSessionCookie() {
 function requireAuth(request, response, next) {
   const session = readSession(request);
   if (!session) {
+    // Los links que se abren en otra pestaña (PDF, export, CSV) llegan como
+    // navegacion del browser: con la sesion vencida se redirige al login en
+    // vez de mostrar el JSON crudo de error.
+    if (request.method === "GET" && String(request.headers.accept || "").includes("text/html")) {
+      response.redirect(302, "/");
+      return;
+    }
     response.status(401).json({ error: "Authentication required." });
     return;
+  }
+
+  // Renovacion deslizante: si la sesion ya consumio mas de un dia, se
+  // reemite la cookie para que el equipo no vuelva a encontrarse con
+  // "Authentication required" a mitad de semana.
+  if ((session.expiresAt || 0) - Date.now() < SESSION_LIFETIME_MS - 1000 * 60 * 60 * 24) {
+    const { expiresAt, ...user } = session;
+    response.setHeader("Set-Cookie", sessionCookie(createSessionToken(user)));
   }
 
   request.session = session;
