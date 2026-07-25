@@ -382,6 +382,11 @@ function statusClass(status: ReportStatus) {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
+  // Sesion vencida: avisar a la app para volver al login en vez de dejar la
+  // pantalla muda (periodos que no cargan, PDFs que no abren, etc.).
+  if (response.status === 401) {
+    window.dispatchEvent(new Event("bevinco:unauthorized"));
+  }
   const rawPayload = await response.text();
   let payload: { error?: string; message?: string } = {};
 
@@ -1543,6 +1548,15 @@ function App() {
 
   useEffect(() => {
     checkSession();
+  }, []);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setAuthStatus("anonymous");
+      setError("Tu sesión expiró. Vuelve a ingresar para continuar.");
+    };
+    window.addEventListener("bevinco:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("bevinco:unauthorized", onUnauthorized);
   }, []);
 
   useEffect(() => {
