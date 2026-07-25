@@ -1341,8 +1341,12 @@ function dropParentTotals(entries) {
   return kept;
 }
 
-function aggregateReportGroups(rawEntries) {
-  const entries = dropParentTotals(rawEntries);
+function aggregateReportGroups(rawEntries, { dropParents = true } = {}) {
+  // dropParents solo tiene sentido cuando las entradas vienen de filas de
+  // TOTALES (donde un total "padre" duplicaria a sus hijos). Con entradas de
+  // productos individuales borraba por error cualquier producto cuyo monto
+  // coincidiera con la suma de los anteriores, descuadrando las familias.
+  const entries = dropParents ? dropParentTotals(rawEntries) : rawEntries;
   const familyRows = aggregateByFamily(entries);
   const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
   const otherAbs = Math.abs(familyRows.find((row) => row.family === "Otros")?.value || 0);
@@ -2196,8 +2200,8 @@ function extractReportMetrics(parsedTable) {
           varianceAmount: varianceTotal,
         },
     categoryVariances: categoryVariances.slice(0, 8),
-    familyVariances: aggregateReportGroups(productEntries).map(({ family, value }) => ({ family, amount: value })),
-    familyPurchases: aggregateReportGroups(purchaseEntries).map(({ family, value }) => ({ family, purchased: value })),
+    familyVariances: aggregateReportGroups(productEntries, { dropParents: false }).map(({ family, value }) => ({ family, amount: value })),
+    familyPurchases: aggregateReportGroups(purchaseEntries, { dropParents: false }).map(({ family, value }) => ({ family, purchased: value })),
     topUsageProducts: products
       .filter((product) => product.usedCost > 0)
       .sort((left, right) => right.usedCost - left.usedCost)
@@ -4501,22 +4505,27 @@ function renderTwoPageReportHtml(store, report) {
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra por familia para este periodo.</text>`;
     const groupH = plotH / rows.length;
+    // La LONGITUD de la barra es la unica codificacion del valor: la cifra va
+    // fuera de la barra (o dentro solo si cabe), nunca como una caja de ancho
+    // fijo que enmascare barras chicas. Los ceros se marcan explicitos.
     const bars = rows.map((row, i) => {
       const yc = T + (i + 0.5) * groupH;
       const bar = (v, y, color) => {
-        if (!v) return "";
-        const bw = Math.max(3, xAt(v) - L);
-        const chipX = Math.max(L + 2, xAt(v) - 58);
+        if (!v) {
+          return `<text x="${L + 5}" y="${y + 12}" class="vzero">0</text>`;
+        }
+        const bw = Math.max(2, xAt(v) - L);
+        const fitsInside = bw > 58;
+        const textX = fitsInside ? L + bw - 5 : L + bw + 5;
         return `<rect x="${L}" y="${y}" width="${bw}" height="15" fill="${color}"/>` +
-          `<rect x="${chipX}" y="${y - 1.5}" width="56" height="18" rx="2" fill="${color}" stroke="#fff" stroke-width="0.8"/>` +
-          `<text x="${chipX + 28}" y="${y + 12}" text-anchor="middle" class="chip">${fmtK(v)}</text>`;
+          `<text x="${textX}" y="${y + 12}" text-anchor="${fitsInside ? "end" : "start"}" class="${fitsInside ? "vin" : "vout"}" ${fitsInside ? "" : `fill="${color}"`}>${fmtK(v)}</text>`;
       };
       return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(truncateLabel(row.family, 16))}</text>` +
         (rawMaxFam ? bar(row.purchased, yc - 18, NAVY) + bar(row.suggested, yc + 3, GREEN) : "");
     }).join("");
     const legendY = H - 10;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.fam{font:700 12px Calibri,Arial;fill:${GRAY_TXT}}.chip{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.fam{font:700 12px Calibri,Arial;fill:${GRAY_TXT}}.vin{font:700 11px Calibri,Arial;fill:#fff}.vout{font:700 11px Calibri,Arial}.vzero{font:700 10.5px Calibri,Arial;fill:#b3bdb9}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${bars}${famEmptyNote}
       <rect x="${W / 2 - 112}" y="${legendY - 8}" width="9" height="9" fill="${NAVY}"/><text x="${W / 2 - 100}" y="${legendY}" class="leg">Compra Realizada</text>
       <rect x="${W / 2 + 8}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 + 20}" y="${legendY}" class="leg">Compra Sugerida</text>
