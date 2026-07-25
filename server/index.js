@@ -4359,21 +4359,22 @@ function renderTwoPageReportHtml(store, report) {
       `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e6e6e6"/>` +
       `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v === 0 ? "K" : fmtK(v)}</text>`).join("");
     const rowH = plotH / Math.max(rows.length, 1);
+    // La longitud de la barra codifica el valor; la cifra va como texto plano
+    // justo despues del extremo (sin cajas de ancho fijo que confundan escala).
     const bars = rows.map((item, i) => {
       const color = paletteFor(item.family, i);
       const yc = T + (i + 0.5) * rowH;
       const x0 = xAt(0); const x1 = xAt(item.amount);
       const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
-      const chipX = item.amount >= 0 ? x1 + 2 : x1 - 64;
+      const positive = item.amount >= 0;
       return `<rect x="${bx}" y="${yc - 9}" width="${bw}" height="18" fill="${color}"/>` +
-        `<rect x="${chipX}" y="${yc - 10}" width="62" height="19" rx="2" fill="${color}"/>` +
-        `<text x="${chipX + 31}" y="${yc + 4.5}" text-anchor="middle" class="chip">${fmtK(item.amount)}</text>`;
+        `<text x="${positive ? x1 + 5 : x1 - 5}" y="${yc + 4.5}" text-anchor="${positive ? "start" : "end"}" class="vlab" fill="${color}">${fmtK(item.amount)}</text>`;
     }).join("");
     const legend = rows.map((item, i) =>
       `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${paletteFor(item.family, i)}"/>` +
       `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:12px Calibri,Arial;fill:#808080}.chip{font:700 12px Calibri,Arial;fill:#fff}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
+      <style>.ax{font:12px Calibri,Arial;fill:#808080}.vlab{font:700 12px Calibri,Arial}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
       ${grid}
       <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#9a9a9a"/>
       ${bars}${legend}
