@@ -339,7 +339,10 @@ const sampleDefinitions = [
       accountName: "Bardot",
       moduleName: "Barra",
       cid: "bardot-barra",
-      sculptureCid: defaultCid,
+      // Semilla de demostracion construida desde los CSV de server/public/.
+      // NO tiene cid real en Sculpture: antes heredaba defaultCid (29088), que
+      // es el cid de Azotea cocina, y apuntaba a otro restaurante.
+      sculptureCid: "",
       area: "Beverage",
       recipients: ["operaciones@bardot.cl"],
     },
@@ -353,7 +356,8 @@ const sampleDefinitions = [
       accountName: "Bardot",
       moduleName: "Cocina",
       cid: "bardot-cocina",
-      sculptureCid: defaultCid,
+      // Semilla de demostracion: ver nota en bardot-barra.
+      sculptureCid: "",
       area: "Food",
       recipients: ["operaciones@bardot.cl"],
     },
@@ -1057,19 +1061,25 @@ async function discoverSculptureUnits() {
 }
 
 function resolveSculptureContext({ client, period, requestBody = {} }) {
+  // SIN defaults al final de la cadena. defaultCid es 29088 (el cid real de
+  // Azotea cocina) y defaultPid es 36 ("Jun 4 to Jun 10 2026"): cuando caian
+  // ahi, un cliente o un periodo mal configurado sincronizaba OTRO restaurante
+  // u OTRA semana y quedaba rotulado "Sincronizado". Ahora devuelve cadena
+  // vacia y syncSculptureSources corta con el error explicito que ya tiene
+  // escrito. Medido: 0 de 22 clientes pierden sync, 118 de 123 reportes siguen
+  // sincronizables; los 5 que fallan son los 5 mensuales, que HOY "funcionan"
+  // trayendo la semana equivocada.
   const cid = configuredIdentifier(
     requestBody.cid,
     requestBody.sculptureCid,
     client?.sculptureCid,
     client?.cid,
-    defaultCid,
   );
   const pid = configuredIdentifier(
     requestBody.pid,
     requestBody.sculpturePid,
     period?.sculpturePid,
     period?.pid,
-    defaultPid,
   );
 
   return {
@@ -2993,6 +3003,20 @@ function buildStockEfficiency(rows, daysInPeriod = 7) {
 
 const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0.25 };
 
+// Cordura de costos unitarios. Sculpture no valida su maestro de articulos: hay
+// fichas cargadas con el precio por tonelada o con ceros de mas. Medido (cid
+// 26223, pid 119): "Champiñon Ostra" y "Champiñon Portobello" llegan con Costo
+// Unitario 9500000.00 por kilo cuando el "Champiñon Paris" de la misma
+// categoria vale 7143. Ese costo entra al pedido sugerido y lo infla en
+// millones (19.050.001 sugeridos contra 64.287 de compra real).
+// Techo robusto por tabla = 50x la mediana de costos unitarios de ESA tabla.
+// Calibrado sobre tablas reales: Bardot barra 18,6x (195.375 vs mediana 10.481,
+// n=254) es el maximo legitimo observado; Bardot cocina 2,9x; Tio Tomate cocina
+// 2,6x sin los champiñones. Los champiñones corruptos estan a 905x. 50 deja
+// 2,7x de margen sobre lo legitimo y 18x bajo el defecto.
+const UNIT_COST_OUTLIER_FACTOR = 50;
+const UNIT_COST_SAMPLE_MIN = 8;
+
 function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
   const { suggestionDays, extraDays, coverage } = { ...KITCHEN_PURCHASE_DEFAULTS, ...params };
   const hasNativeSuggestion = (rows || []).some((row) => {
@@ -3000,6 +3024,32 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
     return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
   });
   if (hasNativeSuggestion || !rows?.length) return false;
+
+  // Mediana de costos unitarios de ESTA tabla (solo filas de producto). Se usa
+  // la mediana y no el promedio porque el outlier que buscamos arrastraria el
+  // promedio: con los dos champiñones de 9.500.000 adentro el promedio de la
+  // tabla es 454.000 y el techo queda inservible; la mediana se queda en 10.500
+  // y el techo en 525.000.
+  const unitCostSamples = rows
+    .filter((row) => {
+      const name = pickRecordValue(row.record, ["itemName", "item"], "") ||
+        pickRecordValueFuzzy(row.record, /nombreArt/i) ||
+        row.values?.[0] || "";
+      return name && !isTotalRow(name) && !/:\s*$/.test(name);
+    })
+    .map((row) => parseNumber(pickRecordValueFuzzy(row.record, /costoUnit/i)))
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right);
+  const medianUnitCost = unitCostSamples.length
+    ? (unitCostSamples.length % 2
+      ? unitCostSamples[(unitCostSamples.length - 1) / 2]
+      : (unitCostSamples[unitCostSamples.length / 2 - 1] + unitCostSamples[unitCostSamples.length / 2]) / 2)
+    : 0;
+  // Con pocas filas la mediana no significa nada: mejor no filtrar que filtrar
+  // mal, el guard queda inactivo (techo infinito).
+  const unitCostCeiling = unitCostSamples.length >= UNIT_COST_SAMPLE_MIN && medianUnitCost > 0
+    ? medianUnitCost * UNIT_COST_OUTLIER_FACTOR
+    : Infinity;
 
   let pendingOrderCost = 0;
   for (const row of rows) {
@@ -3026,16 +3076,33 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
     const roundUp = (value) => Math.ceil(value - 1e-9);
     const par = roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
     const suggested = Math.max(roundUp(par - onHand), 0);
-    const orderCost = suggested * unitCost;
+    // Si el costo unitario es un outlier de la propia tabla, el dato viene mal
+    // desde Sculpture: se conservan las CANTIDADES (par, orden, dias), que no
+    // dependen del precio y siguen siendo utiles, pero no se valoriza nada.
+    // Valorizar aca es lo que metia 9.500.000 por unidad en el pedido y
+    // 3.503.125 en el exceso de UN producto del que se compraron 0 kilos.
+    const suspectUnitCost = unitCost > unitCostCeiling;
+    const orderCost = suspectUnitCost ? 0 : suggested * unitCost;
     const inventoryDays = consumption > 0 ? Math.round((onHand / consumption) * daysInPeriod) : 0;
     const excessDays = inventoryDays - suggestionDays * 2.5;
-    const excessCost = consumption > 0 && excessDays > 0 ? Math.round(excessDays * daily * unitCost) : 0;
+    const excessCost = !suspectUnitCost && consumption > 0 && excessDays > 0
+      ? Math.round(excessDays * daily * unitCost)
+      : 0;
 
     record.par = String(par);
     record.orden = suggested ? String(suggested) : "";
     record.costoPedido = orderCost ? `$${Math.round(orderCost)}` : "";
     record.excesoDeInventario = excessCost ? `$${excessCost}` : "";
     record.dAsRestantes = inventoryDays ? String(inventoryDays) : "";
+    // La fila NO se descarta: se marca, para que la auditora vea el producto y
+    // corrija la ficha en Sculpture. Descartarla en silencio seria repetir el
+    // problema de los truncados que borran plata sin dejar rastro.
+    // El nombre de clave se eligio para no colisionar con ningun accesor fuzzy
+    // existente: NO matchea /costoUnit/i, /stock|existenc/i, /sugerid|pedido/i
+    // ni /nombreArt/i.
+    record.alertaCosto = suspectUnitCost
+      ? `Costo unitario atípico en Sculpture (${Math.round(unitCost)}): no se valoriza el pedido`
+      : "";
     pendingOrderCost += orderCost;
   }
   return true;
@@ -3141,15 +3208,33 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             const name = pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "");
             return name && !isTotalRow(name) && !/:\s*$/.test(name) && !/grand\s+total/i.test(name);
           })
-          .sort((left, right) =>
-            (Math.abs(parseNumber(right.record?.costoPedido)) + Math.abs(parseNumber(right.record?.excesoDeInventario))) -
-            (Math.abs(parseNumber(left.record?.costoPedido)) + Math.abs(parseNumber(left.record?.excesoDeInventario))));
+          // Tres niveles, en este orden:
+          // (1) Los productos con costo unitario atipico van PRIMERO: son los
+          //     que la auditora tiene que corregir en Sculpture antes de
+          //     enviar. Sin esto quedarian con costoPedido y exceso en cero, se
+          //     caerian del top-12 y el guard los OCULTARIA en vez de
+          //     exponerlos, que es exactamente lo contrario de lo que se busca.
+          // (2) Costo de pedido: es la lista de compra.
+          // (3) Exceso de inventario como desempate. NO se elimina del ranking:
+          //     `slowMovers` exige !usedUnits && !usedCost y `excessCost` exige
+          //     consumption > 0, o sea son conjuntos disjuntos y el exceso no
+          //     tiene ninguna otra seccion donde aparecer.
+          .sort((left, right) => {
+            const alertRank = (row) => (pickRecordValue(row.record, ["alertaCosto"], "") ? 1 : 0);
+            if (alertRank(right) !== alertRank(left)) return alertRank(right) - alertRank(left);
+            const byOrder = parseNumber(right.record?.costoPedido) - parseNumber(left.record?.costoPedido);
+            if (byOrder) return byOrder;
+            return Math.abs(parseNumber(right.record?.excesoDeInventario)) - Math.abs(parseNumber(left.record?.excesoDeInventario));
+          });
         const suggestions = suggestionRows.slice(0, 12).map((row) => {
           const excessCost = parseNumber(pickRecordValue(row.record, ["excesoDeInventario", "excessInventory"], ""));
           const daysRemaining = parseNumber(pickRecordValue(row.record, ["dAsRestantes", "diasRestantes", "daysRemaining"], ""));
-          const note = excessCost
-            ? `Exceso ${moneyPlain(excessCost)}${daysRemaining ? `, ${daysRemaining.toFixed(1)} días restantes` : ""}`
-            : "Validar proveedor y sugerencia antes del envío";
+          const costAlert = pickRecordValue(row.record, ["alertaCosto"], "");
+          const note = costAlert
+            ? `${costAlert}${daysRemaining ? `, ${daysRemaining.toFixed(1)} días restantes` : ""}`
+            : excessCost
+              ? `Exceso ${moneyPlain(excessCost)}${daysRemaining ? `, ${daysRemaining.toFixed(1)} días restantes` : ""}`
+              : "Validar proveedor y sugerencia antes del envío";
           return {
             item: pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || ""),
             provider: pickRecordValue(row.record, ["provider", "vendor", "proveedor"], "") ||
@@ -3222,7 +3307,7 @@ function periodMonthKey(period) {
   return String(date).slice(0, 7);
 }
 
-function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", fromMonth = "", toMonth = "" } = {}) {
+function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", fromMonth = "", toMonth = "", cid = "" } = {}) {
   const incomingPeriods = Array.isArray(periods)
     ? periods.map((period) => ensurePeriod(store, period)).filter(Boolean)
     : [];
@@ -3241,19 +3326,38 @@ function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", f
     if (filtered.length) return filtered;
   }
 
+  // Los ids de periodo estan namespaced por cliente (`sculpture-<cid>-<pid>`) y
+  // el mismo pid existe para varios cid (18 periodos comparten el pid 41).
+  // Buscar primero en store.periods (GLOBAL) hacia que el periodo de otro
+  // restaurante ganara: asi 28711-barra (Bardot) quedo con `sculpture-29087-41`
+  // (Azotea) y sincronizo su propio pid 41 = FEBRERO con etiqueta de julio.
+  const belongsToClient = (period) => {
+    const namespaced = /^sculpture-(\d+)-/.exec(String(period?.id || ""));
+    if (!namespaced) return true; // periodo legacy/manual, sin namespace
+    return !cid || namespaced[1] === String(cid);
+  };
   // Sin periodo explicito: usar la ultima semana CERRADA. Sculpture tambien
   // lista el periodo abierto en curso (ej. "Jul 23 to Jul 24"), que aun no
-  // tiene auditoria y generaba reportes vacios o a medias.
+  // tiene auditoria y generaba reportes vacios o a medias. Va con la misma
+  // guarda por cliente: sin ella, la "ultima semana cerrada" podia ser la de
+  // otro restaurante.
   const today = new Date().toISOString().slice(0, 10);
-  const latestClosed = availablePeriods.find((period) => period.endsAt && period.endsAt < today);
+  const latestClosed = availablePeriods.find((period) =>
+    period.endsAt && period.endsAt < today && belongsToClient(period));
 
-  const selected = store.periods.find((period) => period.id === periodId) ||
-    availablePeriods.find((period) => period.id === periodId) ||
+  // OJO: el fallback tambien lleva guarda. Cuando Sculpture no devuelve periodos
+  // del cliente, `availablePeriods` ES `store.periods`, asi que
+  // `availablePeriods[0]` no es "la semana mas reciente del cliente": es
+  // store.periods[0] para cualquiera. Sin filtrar aca, el defecto vuelve a
+  // entrar por esa puerta.
+  const selected = availablePeriods.find((period) => period.id === periodId && belongsToClient(period)) ||
+    store.periods.find((period) => period.id === periodId && belongsToClient(period)) ||
     latestClosed ||
-    availablePeriods[0] ||
-    store.periods[0];
+    availablePeriods.filter(belongsToClient)[0] ||
+    null;
+  if (!selected) return [];
 
-  return selected ? [selected] : [];
+  return [selected];
 }
 
 function periodSortKey(payload) {
@@ -5347,6 +5451,9 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     periodId,
     fromMonth,
     toMonth,
+    // Sin el cid, belongsToClient() queda inerte y un periodId de otro
+    // restaurante vuelve a ganar.
+    cid: sculptureCid,
   });
 
   // Si el usuario eligio periodos semanales puntuales, respetamos esa seleccion.
@@ -5355,7 +5462,12 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     const poolPeriods = (sculptureClientPeriods.length ? sculptureClientPeriods : incomingPeriods)
       .map((period) => ensurePeriod(store, period))
       .filter(Boolean);
-    const pool = poolPeriods.length ? poolPeriods : store.periods;
+    // El filtro de la linea siguiente matchea por pid CRUDO, que no es unico.
+    // Si poolPeriods queda vacio, un pid "41" matchea de golpe los periodos 41
+    // de los 20 cid del store: la misma fuga por otra puerta.
+    const pool = poolPeriods.length
+      ? poolPeriods
+      : store.periods.filter((period) => !/^sculpture-\d+-/.test(period.id) || period.id.startsWith(`sculpture-${sculptureCid}-`));
     const matched = pool.filter((period) => requestedPeriodIds.includes(period.id) || requestedPeriodIds.includes(period.pid) || requestedPeriodIds.includes(period.sculpturePid));
     if (matched.length) selectedPeriods = matched;
   }
@@ -6003,6 +6115,10 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
         orderCost: parseNumber(record.costoPedido),
         inventoryDays: parseNumber(pickRecordValue(record, ["dAsRestantes", "diasRestantes", "daysRemaining"], "") || pickRecordValueFuzzy(record, /restantes|inventarioEnDias/i)),
         excessCost: parseNumber(pickRecordValue(record, ["excesoDeInventario", "excessInventory"], "") || pickRecordValueFuzzy(record, /exceso/i)),
+        // Mismo dato marcado que ve la auditora en el reporte: sin esto el CSV
+        // que se manda al proveedor lista "Champiñon Ostra / PAR 1 / Compra
+        // Sugerida 1 / Costo de la compra 0" sin ninguna explicacion.
+        alerta: pickRecordValue(record, ["alertaCosto"], ""),
       };
     })
     .filter((item) => item && (item.suggested > 0 || item.excessCost > 0))
@@ -6016,7 +6132,7 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
   const qty = (value) => (Number.isFinite(value) ? Number(value.toFixed(2)) : 0);
 
   const lines = [
-    ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "Inventario al costo ($)", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Exceso de inventario ($)"].map(escapeCsv).join(";"),
+    ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "Inventario al costo ($)", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Exceso de inventario ($)", "Alerta"].map(escapeCsv).join(";"),
   ];
   let lastProvider = "";
   const totals = { onHandCost: 0, suggested: 0, orderCost: 0, excessCost: 0 };
@@ -6033,6 +6149,7 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
       money(item.orderCost),
       qty(item.inventoryDays),
       money(item.excessCost),
+      item.alerta,
     ].map(escapeCsv).join(";"));
     lastProvider = item.provider;
     totals.onHandCost += item.onHandCost;
@@ -6040,7 +6157,7 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
     totals.orderCost += item.orderCost;
     totals.excessCost += item.excessCost;
   }
-  lines.push(["Total general", "", "", "", "", money(totals.onHandCost), "", qty(totals.suggested), money(totals.orderCost), "", money(totals.excessCost)].map(escapeCsv).join(";"));
+  lines.push(["Total general", "", "", "", "", money(totals.onHandCost), "", qty(totals.suggested), money(totals.orderCost), "", money(totals.excessCost), ""].map(escapeCsv).join(";"));
 
   const fileName = `Sugerencia de compra - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
     .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")

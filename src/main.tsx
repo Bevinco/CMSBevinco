@@ -51,14 +51,28 @@ const CLICKUP_CALENDAR_URL = "https://app.clickup.com/31025999/v/c/xjuuf-5994";
 const WORKFLOW_CARDS_PER_PAGE = 4;
 // Columnas del tablero del inicio: cada una matchea el estado REAL de la
 // tarea en ClickUp (con o sin tildes), que es la fuente de verdad del equipo.
-const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp }> = [
+// La lista "Auditorias Chile" tiene NUEVE estados, no cinco. El orden sigue el
+// orderindex de ClickUp. La ultima columna no tiene regex: es el catch-all, y
+// ahi cae cualquier estado que el equipo agregue sin avisar.
+const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp | null }> = [
+  { title: "Sin Iniciar", match: /inactiv/i },
   { title: "Falta Información", match: /falta.*inf/i },
   { title: "En Proceso", match: /proceso|en curso/i },
-  { title: "Comentarios Escritos", match: /comentario/i },
   { title: "Gráficos Actualizados", match: /gr[aá]fico/i },
+  { title: "Comentarios Escritos", match: /comentario/i },
   // "listo"/"lista para reporte": el nombre exacto varia en la lista de ClickUp.
   { title: "Listo para el Reporte", match: /list[oa]/i },
+  { title: "Reporte Enviado", match: /enviad/i },
+  { title: "Otros", match: null },
 ];
+// `cerrada` es type "closed" en ClickUp: archivo, no un paso del flujo. Darle
+// columna serian decenas de paginas tapando el trabajo real. Se oculta a
+// proposito y de forma explicita.
+const WORKFLOW_HIDDEN_STATUS = /^cerrad/i;
+// La lista arrastra 470 tareas `inactiva` vencidas entre abr-2025 y jun-2025;
+// sin ventana, "Sin Iniciar" saldria con 487 tarjetas. Con 30 dias quedan las
+// 17 reales y siguen entrando las activas mas viejas.
+const WORKFLOW_WINDOW_DAYS = 30;
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
@@ -1377,9 +1391,12 @@ function App() {
 
   async function moveClickupTask(task: ClickupTask, columnTitle: string) {
     const column = WORKFLOW_COLUMNS.find((item) => item.title === columnTitle);
-    if (!column) return;
+    // Sin regex es la columna catch-all: no es un destino valido.
+    if (!column?.match) return;
+    // La copia local conserva el estrechamiento de tipo dentro del callback.
+    const match = column.match;
     // El nombre exacto del estado lo define la lista de ClickUp.
-    const targetStatus = clickupStatusOptions.find((status) => column.match.test(status)) || columnTitle;
+    const targetStatus = clickupStatusOptions.find((status) => match.test(status)) || columnTitle;
     try {
       const payload = await readJson<{ task: ClickupTask }>(
         await fetch(`/api/clickup/tasks/${task.id}`, {
@@ -2003,8 +2020,18 @@ function App() {
               </div>
               <div className="workflow-board">
                 {WORKFLOW_COLUMNS.map((column) => {
-                  const boardTasks = calendarTasks.length ? calendarTasks : clickupTasks;
-                  const cards = boardTasks.filter((task) => column.match.test(task.status || ""));
+                  const windowStart = Date.now() - WORKFLOW_WINDOW_DAYS * 86400000;
+                  const boardTasks = (calendarTasks.length ? calendarTasks : clickupTasks)
+                    .filter((task) => !WORKFLOW_HIDDEN_STATUS.test(task.status || ""))
+                    .filter((task) => !task.dueDate || task.dueDate >= windowStart);
+                  // Cada tarea cae en UNA sola columna: la primera cuyo regex
+                  // matchea, y si ninguna matchea, en la columna sin regex.
+                  // Antes se filtraba columna por columna sin destino final, asi
+                  // que un estado no contemplado no aparecia en ninguna parte.
+                  const cards = boardTasks.filter((task) => {
+                    const owner = WORKFLOW_COLUMNS.find((item) => item.match && item.match.test(task.status || ""));
+                    return owner ? owner.title === column.title : !column.match;
+                  });
                   const totalPages = Math.max(1, Math.ceil(cards.length / WORKFLOW_CARDS_PER_PAGE));
                   const page = Math.min(workflowPages[column.title] || 0, totalPages - 1);
                   const pageCards = cards.slice(page * WORKFLOW_CARDS_PER_PAGE, (page + 1) * WORKFLOW_CARDS_PER_PAGE);
@@ -2022,10 +2049,14 @@ function App() {
                           </a>
                           <select
                             aria-label={`Mover ${task.name} de estado`}
-                            value={column.title}
+                            value={column.match ? column.title : ""}
                             onChange={(event) => moveClickupTask(task, event.target.value)}
                           >
-                            {WORKFLOW_COLUMNS.map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
+                            {/* "Otros" es el catch-all: no es un estado de ClickUp
+                                y por lo tanto no es un destino valido. Se muestra
+                                el estado crudo para que el equipo vea que aparecio. */}
+                            {column.match ? null : <option value="" disabled>{task.status || "Sin estado"}</option>}
+                            {WORKFLOW_COLUMNS.filter((option) => option.match).map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
                           </select>
                         </article>
                       )) : <p className="workflow-empty">Sin tareas aquí.</p>}
