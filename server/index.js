@@ -4287,12 +4287,19 @@ function renderTwoPageReportHtml(store, report) {
     const n = Math.max(history.length, 1);
     const revStep = niceStep(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15);
     const revMax = niceCeil(Math.max(...history.map((p) => p.revenue || 0), 1) * 1.15, revStep);
-    const pctMax = niceCeil(Math.max(...history.map((p) => Math.max(p.costPercent || 0, p.idealCostPercent || 0)), 1) * 1.1, 5);
+    // Eje de % acotado al rango real de los datos (con margen): con la escala
+    // 0..45 las curvas de costo (22-28%) se veian como lineas planas
+    // indistinguibles (pedido de Pedro, reunion 27-jul).
+    const pctValues = history.flatMap((p) => [p.costPercent || 0, p.idealCostPercent || 0]).filter((value) => value > 0);
+    const pctHigh = Math.max(...(pctValues.length ? pctValues : [1]));
+    const pctLow = pctValues.length ? Math.min(...pctValues) : 0;
+    const pctMax = niceCeil(pctHigh + 3, 5);
+    const pctMin = Math.max(0, Math.floor((pctLow - 3) / 5) * 5);
     const xAt = (i) => L + ((i + 0.5) * plotW) / n;
-    const yPct = (v) => B - ((v || 0) / pctMax) * plotH;
+    const yPct = (v) => B - (((v || 0) - pctMin) / Math.max(pctMax - pctMin, 1)) * plotH;
     const yRev = (v) => B - ((v || 0) / revMax) * plotH;
     const ticks = [];
-    for (let v = 0; v <= pctMax; v += 5) ticks.push(v);
+    for (let v = pctMin; v <= pctMax; v += 5) ticks.push(v);
     const grid = ticks.map((v) =>
       `<line x1="${L}" y1="${yPct(v)}" x2="${R}" y2="${yPct(v)}" stroke="#e3e3e3" stroke-width="1"/>` +
       `<text x="${L - 6}" y="${yPct(v) + 3}" text-anchor="end" class="ax">${v.toFixed(1)}%</text>`).join("");

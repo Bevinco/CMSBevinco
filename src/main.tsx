@@ -53,10 +53,11 @@ const WORKFLOW_CARDS_PER_PAGE = 4;
 // tarea en ClickUp (con o sin tildes), que es la fuente de verdad del equipo.
 const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp }> = [
   { title: "Falta Información", match: /falta.*inf/i },
-  { title: "En Proceso", match: /proceso/i },
+  { title: "En Proceso", match: /proceso|en curso/i },
   { title: "Comentarios Escritos", match: /comentario/i },
   { title: "Gráficos Actualizados", match: /gr[aá]fico/i },
-  { title: "Listo para el Reporte", match: /listo/i },
+  // "listo"/"lista para reporte": el nombre exacto varia en la lista de ClickUp.
+  { title: "Listo para el Reporte", match: /list[oa]/i },
 ];
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
@@ -1981,48 +1982,15 @@ function App() {
           <section className="dashboard-view">
             <section className="dashboard-hero">
               <div>
-                <p className="eyebrow">Operacion semanal</p>
-                <h2>Prioriza reportes, datos faltantes y envíos desde una sola vista.</h2>
+                <p className="eyebrow">Accesos rápidos</p>
+                <h2>¿Qué necesitas hacer hoy?</h2>
               </div>
               <div className="dashboard-hero-actions">
-                <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Generar reporte</button>
-                <button className="secondary-button" onClick={() => setActiveView("tasks")}><ListChecks size={17} /> Ver pendientes</button>
+                <button className="primary-button" onClick={() => setActiveView("module1")}><ClipboardList size={17} /> Reportes semanales</button>
+                <button className="secondary-button" onClick={() => setActiveView("monthly")}><CalendarDays size={17} /> Reportes mensuales</button>
+                <button className="secondary-button" onClick={() => setActiveView("tasks")}><ListChecks size={17} /> Pendientes</button>
+                <button className="secondary-button" onClick={() => { setReportStatusFilter("Todos"); navigateTo("reports"); }}><FileText size={17} /> Historial</button>
               </div>
-            </section>
-
-            <section className="dashboard-kpis" aria-label="Resumen operativo">
-              <button className="kpi-card" onClick={() => { setReportStatusFilter("Todos"); navigateTo("reports"); }}>
-                <span className="kpi-icon"><FileText size={18} /></span>
-                <span className="kpi-body">
-                  <small className="kpi-label">Reportes</small>
-                  <strong>{reports.length}</strong>
-                  <small className="kpi-sub">{dashboardSummary.sentReports.length} enviados</small>
-                </span>
-              </button>
-              <button className="kpi-card" onClick={() => navigateTo("module1")}>
-                <span className="kpi-icon kpi-icon-info"><BarChart3 size={18} /></span>
-                <span className="kpi-body">
-                  <small className="kpi-label">Ventas última semana</small>
-                  <strong>{money(dashboardSummary.latestRevenue || 0)}</strong>
-                  <small className="kpi-sub">{dashboardSummary.latestCount} restaurante(s)</small>
-                </span>
-              </button>
-              <button className="kpi-card" onClick={() => navigateTo("module1")}>
-                <span className="kpi-icon kpi-icon-warn"><PencilLine size={18} /></span>
-                <span className="kpi-body">
-                  <small className="kpi-label">% costo promedio</small>
-                  <strong>{(dashboardSummary.latestCostPercent || 0).toFixed(1)}%</strong>
-                  <small className="kpi-sub">Ponderado por ventas</small>
-                </span>
-              </button>
-              <button className="kpi-card" onClick={() => navigateTo("tasks")}>
-                <span className="kpi-icon kpi-icon-teal"><ListChecks size={18} /></span>
-                <span className="kpi-body">
-                  <small className="kpi-label">ClickUp</small>
-                  <strong>{clickupTasks.length}</strong>
-                  <small className="kpi-sub">{clickupStatus?.connected ? "Conectado" : "Sin conexión"}</small>
-                </span>
-              </button>
             </section>
 
             <section className="panel workflow-panel">
@@ -2306,52 +2274,10 @@ function App() {
           </article>
         </section>
 
-        {accumulatedReport ? (
-          <section className="panel accumulated-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Acumulado mensual</p>
-                <h2>{accumulatedReport.period?.label || "Acumulado de periodos"}</h2>
-              </div>
-              <FileSpreadsheet size={22} />
-            </div>
-            <p className="query-note accumulated-note">
-              Ingresos, ventas y variación se suman entre periodos; las existencias/stock toman el último periodo, como en Sculpture.
-            </p>
-            <div className="metrics accumulated-metrics">
-              <article>
-                <span><FileSpreadsheet size={18} /> Ingresos (suma)</span>
-                <strong>{money(accumulatedReport.summary.revenue || 0)}</strong>
-                <small>{accumulatedReport.includedPeriods.length} periodo(s)</small>
-              </article>
-              <article>
-                <span><BarChart3 size={18} /> % costo</span>
-                <strong>{accumulatedReport.summary.costPercent || 0}%</strong>
-                <small>Sobre ingresos acumulados</small>
-              </article>
-              <article>
-                <span><FileText size={18} /> Variance (suma)</span>
-                <strong>{accumulatedReport.summary.variancePercent || 0}%</strong>
-                <small>{money(accumulatedReport.summary.varianceAmount || 0)}</small>
-              </article>
-              <article>
-                <span><ListChecks size={18} /> Stock</span>
-                <strong className="metric-status">Último periodo</strong>
-                <small>{accumulatedReport.purchaseSuggestions.length} artículo(s)</small>
-              </article>
-            </div>
-            <div className="accumulated-periods">
-              {accumulatedReport.includedPeriods.map((period) => (
-                <span key={period.id} className="accumulated-chip">{period.label}</span>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         <section className="panel workspace-panel" id="workspace">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Reporte generado</p>
+              <p className="eyebrow">Reporte generado{selectedReport?.period?.label ? ` · ${selectedReport.period.label}` : ""}</p>
               <h2>Trabajar el reporte</h2>
             </div>
             <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
