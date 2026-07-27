@@ -4416,8 +4416,21 @@ function renderTwoPageReportHtml(store, report) {
     // La sugerencia de la semana N se compra en la semana N+1: se desplaza la
     // serie una semana hacia adelante para que la comparacion contra la compra
     // realizada sea temporalmente coherente (pedido de Pedro, reunion 17-jul).
+    // Para la PRIMERA semana de la ventana, la sugerencia correspondiente es
+    // la generada la semana previa: se rescata de los reportes ya guardados
+    // del cliente para que el grafico no arranque vacio.
     const purchasedSeries = history.map((p) => p.purchasedCost || 0);
-    const suggestedShifted = history.map((p, i) => (i > 0 ? history[i - 1].suggestedCost || 0 : 0));
+    const firstEndsAt = String(history[0]?.endsAt || "");
+    let previousSuggested = 0;
+    if (firstEndsAt) {
+      const prior = (store.reports || [])
+        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && (candidate.summary?.suggestedCost || 0) > 0)
+        .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
+        .filter(({ period }) => period?.endsAt && String(period.endsAt) < firstEndsAt && !String(period.id || "").startsWith("mensual-"))
+        .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0];
+      previousSuggested = prior?.candidate.summary?.suggestedCost || 0;
+    }
+    const suggestedShifted = history.map((p, i) => (i > 0 ? history[i - 1].suggestedCost || 0 : previousSuggested));
     const xLabels = history.map((p, i) =>
       `<text x="${xAt(i)}" y="${B + 13}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
     const legendY = H - 8;
@@ -4427,7 +4440,7 @@ function renderTwoPageReportHtml(store, report) {
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${emptyNote}
-      ${rawMaxPurchase ? area(suggestedShifted, GREEN, 0.5, 1) + area(purchasedSeries, NAVY, 0.42) : ""}
+      ${rawMaxPurchase ? area(suggestedShifted, GREEN, 0.5, previousSuggested ? 0 : 1) + area(purchasedSeries, NAVY, 0.42) : ""}
       ${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
