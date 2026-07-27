@@ -49,6 +49,15 @@ const WORKFLOW_STATES = [
 ] as const;
 const CLICKUP_CALENDAR_URL = "https://app.clickup.com/31025999/v/c/xjuuf-5994";
 const WORKFLOW_CARDS_PER_PAGE = 4;
+// Columnas del tablero del inicio: cada una matchea el estado REAL de la
+// tarea en ClickUp (con o sin tildes), que es la fuente de verdad del equipo.
+const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp }> = [
+  { title: "Falta Información", match: /falta.*inf/i },
+  { title: "En Proceso", match: /proceso/i },
+  { title: "Comentarios Escritos", match: /comentario/i },
+  { title: "Gráficos Actualizados", match: /gr[aá]fico/i },
+  { title: "Listo para el Reporte", match: /listo/i },
+];
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
@@ -796,7 +805,7 @@ function App() {
       const payload = await readJson<{ tasks: ClickupTask[] }>(
         await fetch("/api/clickup/tasks?status=all"),
       );
-      setCalendarTasks((payload.tasks || []).filter((task) => task.dueDate));
+      setCalendarTasks(payload.tasks || []);
     } catch {
       // Sin ClickUp el calendario simplemente queda vacio.
     }
@@ -1362,6 +1371,30 @@ function App() {
       setWorkStatus("error");
     } finally {
       setMonthlyGenerating(false);
+    }
+  }
+
+  async function moveClickupTask(task: ClickupTask, columnTitle: string) {
+    const column = WORKFLOW_COLUMNS.find((item) => item.title === columnTitle);
+    if (!column) return;
+    // El nombre exacto del estado lo define la lista de ClickUp.
+    const targetStatus = clickupStatusOptions.find((status) => column.match.test(status)) || columnTitle;
+    try {
+      const payload = await readJson<{ task: ClickupTask }>(
+        await fetch(`/api/clickup/tasks/${task.id}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: targetStatus }),
+        }),
+      );
+      const updated = payload.task;
+      setCalendarTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setClickupTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setError(`"${task.name}" movida a ${targetStatus} en ClickUp.`);
+      setWorkStatus("ready");
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "No se pudo mover la tarea en ClickUp.");
+      setWorkStatus("error");
     }
   }
 
@@ -1995,63 +2028,53 @@ function App() {
             <section className="panel workflow-panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Flujo de trabajo</p>
-                  <h2>Estado de los reportes de la semana</h2>
+                  <p className="eyebrow">Flujo de trabajo · ClickUp</p>
+                  <h2>Estado de las auditorías</h2>
                 </div>
                 <ListChecks size={22} />
               </div>
               <div className="workflow-board">
-                {WORKFLOW_STATES.map((state) => {
-                  const cards = visibleReports.filter((report) => report.status !== "Enviado" && workflowStateFor(report) === state);
+                {WORKFLOW_COLUMNS.map((column) => {
+                  const boardTasks = calendarTasks.length ? calendarTasks : clickupTasks;
+                  const cards = boardTasks.filter((task) => column.match.test(task.status || ""));
                   const totalPages = Math.max(1, Math.ceil(cards.length / WORKFLOW_CARDS_PER_PAGE));
-                  const page = Math.min(workflowPages[state] || 0, totalPages - 1);
+                  const page = Math.min(workflowPages[column.title] || 0, totalPages - 1);
                   const pageCards = cards.slice(page * WORKFLOW_CARDS_PER_PAGE, (page + 1) * WORKFLOW_CARDS_PER_PAGE);
                   return (
-                    <div className="workflow-col" key={state}>
+                    <div className="workflow-col" key={column.title}>
                       <header>
-                        <strong>{state}</strong>
+                        <strong>{column.title}</strong>
                         <span>{cards.length}</span>
                       </header>
-                      {cards.length ? pageCards.map((report) => (
-                        <article className="workflow-card" key={report.id}>
-                          <button
-                            className="workflow-card-open"
-                            type="button"
-                            onClick={() => {
-                              setSelectedClientId(report.clientId);
-                              setSelectedPeriodId(report.periodId);
-                              setSelectedReport(report);
-                              setCommentsDraft(report.comments || "");
-                              setEmailDraft(report.emailDraft || "");
-                              setActiveView("module1");
-                            }}
-                          >
-                            <strong>{report.client?.name || report.clientId}</strong>
-                            <small>{report.period?.label || report.periodId}</small>
-                          </button>
+                      {cards.length ? pageCards.map((task) => (
+                        <article className="workflow-card" key={task.id}>
+                          <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer">
+                            <strong>{task.name}</strong>
+                            <small>{task.dueDate ? shortDate(task.dueDate) : task.status}</small>
+                          </a>
                           <select
-                            aria-label={`Mover ${report.client?.name || report.clientId} de estado`}
-                            value={state}
-                            onChange={(event) => setReportWorkflowState(report, event.target.value)}
+                            aria-label={`Mover ${task.name} de estado`}
+                            value={column.title}
+                            onChange={(event) => moveClickupTask(task, event.target.value)}
                           >
-                            {WORKFLOW_STATES.map((option) => <option key={option} value={option}>{option}</option>)}
+                            {WORKFLOW_COLUMNS.map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
                           </select>
                         </article>
-                      )) : <p className="workflow-empty">Sin reportes aquí.</p>}
+                      )) : <p className="workflow-empty">Sin tareas aquí.</p>}
                       {totalPages > 1 ? (
                         <footer className="workflow-pager">
                           <button
                             aria-label="Página anterior"
                             disabled={page === 0}
                             type="button"
-                            onClick={() => setWorkflowPages((current) => ({ ...current, [state]: page - 1 }))}
+                            onClick={() => setWorkflowPages((current) => ({ ...current, [column.title]: page - 1 }))}
                           >‹</button>
                           <span>{page + 1} / {totalPages}</span>
                           <button
                             aria-label="Página siguiente"
                             disabled={page >= totalPages - 1}
                             type="button"
-                            onClick={() => setWorkflowPages((current) => ({ ...current, [state]: page + 1 }))}
+                            onClick={() => setWorkflowPages((current) => ({ ...current, [column.title]: page + 1 }))}
                           >›</button>
                         </footer>
                       ) : null}

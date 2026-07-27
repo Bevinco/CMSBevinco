@@ -6282,6 +6282,27 @@ app.get("/api/clickup/meta", requireAuth, async (request, response) => {
   }
 });
 
+// Cambiar el estado de una tarea directamente en ClickUp (tablero del inicio).
+app.put("/api/clickup/tasks/:taskId", requireAuth, async (request, response) => {
+  try {
+    const status = String(request.body?.status || "").trim();
+    if (!status) {
+      response.status(400).json({ error: "Falta el estado de destino." });
+      return;
+    }
+    const { payload } = await clickupRequest(`/task/${encodeURIComponent(request.params.taskId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    });
+    response.json({ task: mapClickupTask(payload) });
+  } catch (error) {
+    response.status(error.status || 500).json({
+      error: error.message || "No se pudo actualizar la tarea en ClickUp.",
+      details: error.details,
+    });
+  }
+});
+
 app.post("/api/clickup/tasks", requireAuth, async (request, response) => {
   try {
     const task = await createClickupManualTask(request.body || {}, request.body?.listId || clickupListId);
