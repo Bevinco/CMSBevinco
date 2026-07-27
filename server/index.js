@@ -3241,8 +3241,15 @@ function resolvePeriodsForSculptureQuery(store, { periods = [], periodId = "", f
     if (filtered.length) return filtered;
   }
 
+  // Sin periodo explicito: usar la ultima semana CERRADA. Sculpture tambien
+  // lista el periodo abierto en curso (ej. "Jul 23 to Jul 24"), que aun no
+  // tiene auditoria y generaba reportes vacios o a medias.
+  const today = new Date().toISOString().slice(0, 10);
+  const latestClosed = availablePeriods.find((period) => period.endsAt && period.endsAt < today);
+
   const selected = store.periods.find((period) => period.id === periodId) ||
     availablePeriods.find((period) => period.id === periodId) ||
+    latestClosed ||
     availablePeriods[0] ||
     store.periods[0];
 

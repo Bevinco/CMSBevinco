@@ -2247,7 +2247,7 @@ function App() {
                       {clientPeriodsLoading
                         ? "Cargando periodos del restaurante..."
                         : clientPeriods.length
-                          ? `Semana más reciente (${clientPeriods.length} disponibles)`
+                          ? `Última semana cerrada (${clientPeriods.length} disponibles)`
                           : "Selecciona un restaurante para ver sus periodos"}
                     </option>
                     {clientPeriods.map((period) => (
