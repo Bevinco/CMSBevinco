@@ -1302,19 +1302,31 @@ function App() {
     ];
     const sections: Partial<Record<keyof NonNullable<Report["analysis"]>, string[]>> = {};
     let current: keyof NonNullable<Report["analysis"]> | null = null;
+    // El agente a veces responde con guiones y a veces con párrafos sueltos:
+    // una línea en blanco separa ítems; sin blanco de por medio es continuación.
+    let afterBlank = true;
     for (const rawLine of text.split(/\r?\n/)) {
       const line = rawLine.trim();
-      if (!line) continue;
+      if (!line) {
+        afterBlank = true;
+        continue;
+      }
       const heading = headings.find(([pattern]) => pattern.test(line) && line.length < 70);
       if (heading) {
         current = heading[1];
         if (!sections[current]) sections[current] = [];
+        afterBlank = true;
         continue;
       }
-      if (!current) continue;
+      if (!current) {
+        afterBlank = false;
+        continue;
+      }
       const bucket = sections[current]!;
-      if (/^[-•–*]\s*/.test(line)) bucket.push(line.replace(/^[-•–*]\s*/, ""));
-      else if (bucket.length) bucket[bucket.length - 1] += ` ${line}`;
+      if (/^[-•–*]\s+/.test(line)) bucket.push(line.replace(/^[-•–*]\s+/, ""));
+      else if (afterBlank || !bucket.length) bucket.push(line);
+      else bucket[bucket.length - 1] += ` ${line}`;
+      afterBlank = false;
     }
     const filled = Object.fromEntries(Object.entries(sections).filter(([, items]) => items && items.length));
     return Object.keys(filled).length ? (filled as Partial<NonNullable<Report["analysis"]>>) : null;
