@@ -173,6 +173,26 @@ let cachedLogoDataUri = "";
 // En Render (Linux) usa @sparticuz/chromium (binario liviano para servidores);
 // en desarrollo Windows usa el Chrome instalado.
 let pdfBrowserPromise = null;
+// Chromium consume ~300MB: mantenerlo vivo para siempre reventaba los 512MB
+// de la instancia de Render (OOM del 29-jul). Se cierra tras un minuto sin
+// uso; el siguiente PDF paga ~3s de arranque a cambio de liberar la memoria.
+let pdfBrowserIdleTimer = null;
+const PDF_BROWSER_IDLE_MS = 60_000;
+
+function schedulePdfBrowserClose() {
+  clearTimeout(pdfBrowserIdleTimer);
+  pdfBrowserIdleTimer = setTimeout(async () => {
+    const closingPromise = pdfBrowserPromise;
+    pdfBrowserPromise = null;
+    try {
+      const browser = await closingPromise;
+      await browser?.close();
+      console.log("[pdf] Chromium cerrado por inactividad");
+    } catch {
+      // Ya estaba muerto: nada que liberar.
+    }
+  }, PDF_BROWSER_IDLE_MS);
+}
 
 async function getPdfBrowser() {
   if (!pdfBrowserPromise) {
@@ -200,6 +220,8 @@ async function getPdfBrowser() {
 
 async function renderReportPdf(store, report, attempt = 0) {
   const html = renderTwoPageReportHtml(store, report);
+  // No cerrar el navegador mientras hay un PDF en curso.
+  clearTimeout(pdfBrowserIdleTimer);
   let browser;
   try {
     browser = await getPdfBrowser();
@@ -225,6 +247,7 @@ async function renderReportPdf(store, report, attempt = 0) {
     return Buffer.from(pdf);
   } finally {
     await page.close().catch(() => {});
+    schedulePdfBrowserClose();
   }
 }
 
