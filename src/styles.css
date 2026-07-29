@@ -4363,6 +4363,24 @@ button:disabled {
 .workflow-card-open small { color: #7d938d; font-size: 11.5px; }
 .workflow-card select { background: #f4f7f6; border: 1px solid #e2eae7; border-radius: 7px; color: #52685f; font-size: 11.5px; padding: 3px 6px; width: 100%; }
 .workflow-empty { color: #9db0aa; font-size: 12px; margin: 4px; text-align: center; }
+
+/* Edicion de criterios */
+.criteria-doc-actions { display: flex; flex-direction: column; gap: 6px; }
+.criteria-modal { max-height: 88vh; overflow-y: auto; width: min(760px, 94vw); }
+.criteria-modal label { display: grid; font-size: 0.78rem; font-weight: 700; gap: 6px; margin-top: 12px; }
+.criteria-modal input, .criteria-modal select { border: 1px solid #cfdad7; border-radius: 8px; font: inherit; min-height: 40px; padding: 0 10px; }
+.criteria-editor { border: 1px solid #cfdad7; border-radius: 8px; font: 500 12.5px/1.55 "JetBrains Mono", Consolas, monospace; min-height: 320px; padding: 10px 12px; resize: vertical; white-space: pre-wrap; }
+.bulk-block-box { border-top: 2px dashed #dce4e2; margin-top: 16px; padding-top: 16px; }
+.bulk-block-box > div:first-child { display: grid; gap: 5px; margin-bottom: 6px; }
+.bulk-block-box label { display: grid; font-size: 0.78rem; font-weight: 700; gap: 6px; }
+.bulk-block-box input, .bulk-block-box select { border: 1px solid #cfdad7; border-radius: 8px; font: inherit; min-height: 40px; padding: 0 10px; }
+.bulk-block-box textarea { border: 1px solid #cfdad7; border-radius: 8px; font: inherit; padding: 8px 10px; resize: vertical; }
+:root[data-theme="dark"] .criteria-editor,
+:root[data-theme="dark"] .criteria-modal input,
+:root[data-theme="dark"] .criteria-modal select,
+:root[data-theme="dark"] .bulk-block-box input,
+:root[data-theme="dark"] .bulk-block-box select,
+:root[data-theme="dark"] .bulk-block-box textarea { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
 .workflow-pager { align-items: center; display: flex; gap: 8px; justify-content: center; margin-top: auto; padding-top: 6px; }
 .workflow-pager button { background: #fff; border: 1px solid #e2eae7; border-radius: 7px; color: #52685f; cursor: pointer; font-size: 14px; font-weight: 700; height: 26px; line-height: 1; width: 28px; }
 .workflow-pager button:disabled { cursor: default; opacity: 0.35; }

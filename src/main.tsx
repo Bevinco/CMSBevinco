@@ -600,6 +600,9 @@ function App() {
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
+  const [editingCriteria, setEditingCriteria] = useState<CriteriaDocument | null>(null);
+  const [bulkBlock, setBulkBlock] = useState({ title: "", text: "", target: "all", clientId: "" });
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [criteriaClientId, setCriteriaClientId] = useState("");
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [chatInput, setChatInput] = useState("");
@@ -1218,6 +1221,56 @@ function App() {
     } catch (criteriaError) {
       setError(criteriaError instanceof Error ? criteriaError.message : "Error desconocido.");
       setWorkStatus("error");
+    }
+  }
+
+  async function saveCriteriaEdit() {
+    if (!editingCriteria) return;
+    setWorkStatus("loading");
+    try {
+      const payload = await readJson<{ document: CriteriaDocument; criteriaDocuments: CriteriaDocument[] }>(
+        await fetch(`/api/module1/criteria-documents/${editingCriteria.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: editingCriteria.name,
+            text: editingCriteria.text,
+            clientId: editingCriteria.clientId || "",
+            clientName: editingCriteria.clientName || "",
+          }),
+        }),
+      );
+      setCriteriaDocuments(payload.criteriaDocuments || []);
+      setEditingCriteria(null);
+      setError("Criterio actualizado. Los próximos análisis usarán la versión nueva.");
+      setWorkStatus("ready");
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : "No se pudo guardar el criterio.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function applyBulkBlock() {
+    if (!bulkBlock.title.trim() || !bulkBlock.text.trim() || bulkSaving) return;
+    setBulkSaving(true);
+    setWorkStatus("loading");
+    try {
+      const payload = await readJson<{ updated: number; criteriaDocuments: CriteriaDocument[] }>(
+        await fetch("/api/module1/criteria-documents/bulk-block", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(bulkBlock),
+        }),
+      );
+      setCriteriaDocuments(payload.criteriaDocuments || []);
+      setBulkBlock((current) => ({ ...current, title: "", text: "" }));
+      setError(`Bloque aplicado a ${payload.updated} criterio(s). Re-aplicarlo con el mismo título lo actualiza sin duplicar.`);
+      setWorkStatus("ready");
+    } catch (bulkError) {
+      setError(bulkError instanceof Error ? bulkError.message : "No se pudo aplicar el bloque.");
+      setWorkStatus("error");
+    } finally {
+      setBulkSaving(false);
     }
   }
 
@@ -3239,6 +3292,58 @@ function App() {
                 </div>
                 <small>Estos documentos quedan guardados en la biblioteca del CMS y el agente los usa al generar el resumen del reporte.</small>
               </div>
+
+              <div className="upload-box bulk-block-box">
+                <div>
+                  <p className="eyebrow">Actualización masiva</p>
+                  <strong>Aplicar un bloque a varios criterios de una vez</strong>
+                  <small>Se agrega al final de cada criterio como bloque con nombre. Re-aplicarlo con el mismo título lo reemplaza, sin duplicar.</small>
+                </div>
+                <label>
+                  Título del bloque
+                  <input
+                    placeholder="Ej. Formato de comentarios 2026"
+                    value={bulkBlock.title}
+                    onChange={(event) => setBulkBlock((current) => ({ ...current, title: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Contenido (instrucciones / prompt)
+                  <textarea
+                    placeholder="Las instrucciones que quieres que TODOS los criterios incluyan..."
+                    rows={5}
+                    value={bulkBlock.text}
+                    onChange={(event) => setBulkBlock((current) => ({ ...current, text: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Aplicar a
+                  <select
+                    value={bulkBlock.target === "client" ? `client:${bulkBlock.clientId}` : bulkBlock.target}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value.startsWith("client:")) setBulkBlock((current) => ({ ...current, target: "client", clientId: value.slice(7) }));
+                      else setBulkBlock((current) => ({ ...current, target: value, clientId: "" }));
+                    }}
+                  >
+                    <option value="all">Todos los criterios</option>
+                    <option value="general">Solo los generales</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={`client:${client.id}`}>Solo {clientDisplayName(client)}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="upload-actions">
+                  <button
+                    className="primary-button"
+                    disabled={!bulkBlock.title.trim() || !bulkBlock.text.trim() || bulkSaving}
+                    onClick={applyBulkBlock}
+                  >
+                    {bulkSaving ? <span className="btn-spinner" /> : <Upload size={17} />}
+                    {bulkSaving ? "Aplicando..." : "Aplicar a los criterios"}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="panel">
@@ -3271,14 +3376,24 @@ function App() {
                       </small>
                       <p>{document.text.slice(0, 240)}{document.text.length > 240 ? "..." : ""}</p>
                     </div>
-                    <button
-                      aria-label={`Eliminar ${document.name}`}
-                      className="icon-button"
-                      disabled={workStatus === "loading"}
-                      onClick={() => deleteCriteriaDocument(document.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="criteria-doc-actions">
+                      <button
+                        aria-label={`Editar ${document.name}`}
+                        className="icon-button"
+                        disabled={workStatus === "loading"}
+                        onClick={() => setEditingCriteria({ ...document })}
+                      >
+                        <PencilLine size={16} />
+                      </button>
+                      <button
+                        aria-label={`Eliminar ${document.name}`}
+                        className="icon-button"
+                        disabled={workStatus === "loading"}
+                        onClick={() => deleteCriteriaDocument(document.id)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </article>
                 )) : (
                   <p className="muted-copy">Aun no hay criterios cargados. Sube el primer archivo para que el agente empiece a usar esa informacion.</p>
@@ -3286,6 +3401,55 @@ function App() {
               </div>
             </div>
           </section>
+        ) : null}
+
+        {editingCriteria ? (
+          <div className="modal-backdrop" role="presentation">
+            <section className="user-modal criteria-modal" role="dialog" aria-modal="true" aria-labelledby="criteria-modal-title">
+              <button className="modal-close icon-button" aria-label="Cerrar" onClick={() => setEditingCriteria(null)}>
+                <X size={16} />
+              </button>
+              <h2 id="criteria-modal-title">Editar criterio</h2>
+              <label>
+                Nombre
+                <input
+                  value={editingCriteria.name}
+                  onChange={(event) => setEditingCriteria((current) => (current ? { ...current, name: event.target.value } : current))}
+                />
+              </label>
+              <label>
+                Cliente asignado
+                <select
+                  value={editingCriteria.clientId || ""}
+                  onChange={(event) => {
+                    const clientId = event.target.value;
+                    const client = clients.find((item) => item.id === clientId);
+                    setEditingCriteria((current) => (current ? { ...current, clientId, clientName: client ? clientDisplayName(client) : "" } : current));
+                  }}
+                >
+                  <option value="">General (todos los clientes)</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Conocimiento / prompt
+                <textarea
+                  className="criteria-editor"
+                  rows={16}
+                  value={editingCriteria.text}
+                  onChange={(event) => setEditingCriteria((current) => (current ? { ...current, text: event.target.value } : current))}
+                />
+              </label>
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" onClick={() => setEditingCriteria(null)}>Cancelar</button>
+                <button className="primary-button" disabled={workStatus === "loading"} type="button" onClick={saveCriteriaEdit}>
+                  {workStatus === "loading" ? <span className="btn-spinner" /> : <PencilLine size={17} />} Guardar cambios
+                </button>
+              </div>
+            </section>
+          </div>
         ) : null}
 
         {userModalOpen ? (

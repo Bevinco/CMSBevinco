@@ -5277,6 +5277,87 @@ app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (r
   }
 });
 
+// Editar un criterio existente desde el CMS (nombre, cliente, contenido).
+// Al cambiar el conocimiento se invalidan los analisis generados para que la
+// proxima redaccion use la version nueva.
+app.patch("/api/module1/criteria-documents/:documentId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const document = (store.criteriaDocuments || []).find((item) => item.id === request.params.documentId);
+  if (!document) {
+    response.status(404).json({ error: "No se encontró el criterio." });
+    return;
+  }
+
+  if (typeof request.body?.name === "string" && request.body.name.trim()) document.name = request.body.name.trim().slice(0, 160);
+  if (typeof request.body?.category === "string") document.category = request.body.category.trim().slice(0, 60) || document.category;
+  if (typeof request.body?.text === "string") {
+    document.text = request.body.text.replace(/\0/g, "").trim().slice(0, 30000);
+    document.size = document.text.length;
+  }
+  if (typeof request.body?.clientId === "string") {
+    document.clientId = request.body.clientId;
+    const assigned = store.clients.find((client) => client.id === request.body.clientId);
+    document.clientName = assigned?.name || String(request.body?.clientName || "").trim();
+  }
+  document.updatedAt = new Date().toISOString();
+
+  store.reports.forEach((report) => { report.analysis = null; });
+  await writeStore(store);
+  response.json({ document, criteriaDocuments: store.criteriaDocuments });
+});
+
+// Actualizacion MASIVA: aplica un bloque nombrado a muchos criterios de una
+// vez. Si el documento ya tiene un bloque con ese titulo, se reemplaza su
+// contenido (re-aplicable sin duplicar); si no, se agrega al final.
+app.post("/api/module1/criteria-documents/bulk-block", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const title = String(request.body?.title || "").trim().slice(0, 80);
+  const text = String(request.body?.text || "").replace(/\0/g, "").trim().slice(0, 12000);
+  const target = String(request.body?.target || "all"); // all | general | client
+  const clientId = String(request.body?.clientId || "");
+
+  if (!title || !text) {
+    response.status(400).json({ error: "El bloque necesita un título y un contenido." });
+    return;
+  }
+
+  const matches = (store.criteriaDocuments || []).filter((document) => {
+    if (target === "general") return !document.clientId;
+    if (target === "client") return document.clientId === clientId;
+    return true;
+  });
+  if (!matches.length) {
+    response.status(400).json({ error: "Ningún criterio coincide con el destino elegido." });
+    return;
+  }
+
+  const startMarker = `<<BLOQUE: ${title}>>`;
+  const endMarker = "<<FIN BLOQUE>>";
+  const block = `${startMarker}\n${text}\n${endMarker}`;
+
+  let updated = 0;
+  for (const document of matches) {
+    const current = String(document.text || "");
+    const startIndex = current.indexOf(startMarker);
+    let next;
+    if (startIndex >= 0) {
+      const endIndex = current.indexOf(endMarker, startIndex);
+      const tail = endIndex >= 0 ? current.slice(endIndex + endMarker.length) : "";
+      next = current.slice(0, startIndex) + block + tail;
+    } else {
+      next = `${current.trim()}\n\n${block}`;
+    }
+    document.text = next.slice(0, 30000);
+    document.size = document.text.length;
+    document.updatedAt = new Date().toISOString();
+    updated += 1;
+  }
+
+  store.reports.forEach((report) => { report.analysis = null; });
+  await writeStore(store);
+  response.json({ updated, criteriaDocuments: store.criteriaDocuments });
+});
+
 app.delete("/api/module1/criteria-documents/:documentId", requireAuth, async (request, response) => {
   const store = await readStore();
   store.criteriaDocuments = (store.criteriaDocuments || []).filter((document) => document.id !== request.params.documentId);
