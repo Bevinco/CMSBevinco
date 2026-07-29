@@ -6049,6 +6049,107 @@ ${String(file.content || "").slice(0, 12000)}`;
   }
 });
 
+// "Memoria" del agente: destila el chat de un reporte en reglas perdurables
+// y las consolida en un criterio del cliente ("Aprendizajes del chat"). La IA
+// separa las reglas permanentes (estilo, datos del negocio, correcciones a
+// recordar) de los pedidos puntuales de la semana, que se ignoran.
+app.post("/api/module1/reports/:reportId/chat/learn", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  if (!openaiApiKey) {
+    response.status(503).json({ error: "La IA no está configurada en el servidor (falta OPENAI_API_KEY)." });
+    return;
+  }
+  const chat = Array.isArray(report.chat) ? report.chat.slice(-30) : [];
+  if (!chat.length) {
+    response.status(400).json({ error: "Este reporte aún no tiene conversación con el agente." });
+    return;
+  }
+
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const clientName = client?.name || report.clientId;
+  const documentName = "Aprendizajes del chat";
+  let learningDoc = (store.criteriaDocuments || []).find(
+    (document) => document.clientId === report.clientId && document.name === documentName,
+  );
+  const existingRules = learningDoc ? String(learningDoc.text || "") : "";
+
+  const transcript = chat
+    .map((message) => `${message.role === "user" ? "EQUIPO" : "AGENTE"}: ${String(message.content || "").slice(0, 1200)}`)
+    .join("\n")
+    .slice(0, 12000);
+
+  const prompt = `
+Eres el curador de la memoria del agente de reportes Bevinco para el cliente "${clientName}".
+
+De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES que deban aplicarse en TODOS los futuros reportes de este cliente: reglas de estilo o formato, preferencias del equipo, datos permanentes del negocio u operacion, y correcciones que deban recordarse siempre.
+
+IGNORA: pedidos puntuales de este periodo (cifras, productos o hechos de esta semana), saludos, agradecimientos y todo lo que no sirva para el proximo reporte.
+
+Reglas ya guardadas (pueden estar vacias):
+${existingRules || "(ninguna todavia)"}
+
+CONVERSACION:
+${transcript}
+
+Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sigan vigentes + las nuevas, sin duplicados ni contradicciones; si una nueva corrige a una vieja, conserva la nueva). Una regla por linea, comenzando con "- ". Sin encabezados, sin comentarios, sin texto adicional.
+`.trim();
+
+  try {
+    const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 1500 }),
+    });
+    const responsePayload = await openaiResponse.json().catch(() => ({}));
+    if (!openaiResponse.ok) {
+      console.error("[openai] learn fallo:", responsePayload?.error?.message || openaiResponse.status);
+      response.status(502).json({ error: "La IA no pudo procesar la conversación. Intenta de nuevo." });
+      return;
+    }
+    const rules = String(extractOpenAiText(responsePayload) || "").trim().slice(0, 15000);
+    const ruleCount = (rules.match(/^- /gm) || []).length;
+    if (!rules || !ruleCount) {
+      response.json({ saved: false, message: "La conversación no aporta reglas perdurables nuevas." });
+      return;
+    }
+
+    if (!learningDoc) {
+      learningDoc = {
+        id: `${Date.now()}-${crypto.randomUUID()}`,
+        name: documentName,
+        type: "text/markdown",
+        source: "chat-learn",
+        category: "analysis_rules",
+        clientId: report.clientId,
+        clientName,
+        uploadedAt: new Date().toISOString(),
+      };
+      store.criteriaDocuments = [learningDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
+    }
+    learningDoc.text = rules;
+    learningDoc.size = rules.length;
+    learningDoc.updatedAt = new Date().toISOString();
+
+    store.reports.forEach((item) => { item.analysis = null; });
+    await writeStore(store);
+    response.json({
+      saved: true,
+      ruleCount,
+      documentName,
+      clientName,
+      criteriaDocuments: store.criteriaDocuments,
+    });
+  } catch (error) {
+    console.error("[openai] learn error:", error.message);
+    response.status(502).json({ error: "No se pudo guardar el aprendizaje. Intenta de nuevo en unos segundos." });
+  }
+});
+
 app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);

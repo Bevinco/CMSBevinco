@@ -1385,6 +1385,28 @@ function App() {
     return Object.keys(filled).length ? (filled as Partial<NonNullable<Report["analysis"]>>) : null;
   }
 
+  const [chatLearning, setChatLearning] = useState(false);
+  async function learnFromChat() {
+    if (!selectedReport || chatLearning || chatMessages.length < 2) return;
+    setChatLearning(true);
+    setWorkStatus("loading");
+    try {
+      const payload = await readJson<{ saved: boolean; ruleCount?: number; clientName?: string; message?: string; criteriaDocuments?: CriteriaDocument[] }>(
+        await fetch(`/api/module1/reports/${selectedReport.id}/chat/learn`, { method: "POST" }),
+      );
+      if (payload.criteriaDocuments) setCriteriaDocuments(payload.criteriaDocuments);
+      setError(payload.saved
+        ? `Memoria actualizada: ${payload.ruleCount} regla(s) guardadas en el criterio de ${payload.clientName}.`
+        : payload.message || "La conversación no aporta reglas nuevas.");
+      setWorkStatus("ready");
+    } catch (learnError) {
+      setError(learnError instanceof Error ? learnError.message : "No se pudo guardar el aprendizaje.");
+      setWorkStatus("error");
+    } finally {
+      setChatLearning(false);
+    }
+  }
+
   async function applyChatAsSummary(content: string) {
     const parsed = parseAnalysisFromText(content);
     if (!parsed || !selectedReport) {
@@ -2421,6 +2443,15 @@ function App() {
                 </div>
               ) : null}
             </div>
+            {chatMessages.length >= 2 ? (
+              <div className="chat-learn-bar">
+                <button className="secondary-button" disabled={chatLearning} type="button" onClick={learnFromChat}>
+                  {chatLearning ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                  {chatLearning ? "Guardando memoria..." : "Guardar aprendizajes en el criterio del cliente"}
+                </button>
+                <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales) y las suma a la skill de {selectedClient?.name || "este cliente"}.</small>
+              </div>
+            ) : null}
             {chatFiles.length ? (
               <div className="chat-attachments">
                 {chatFiles.map((file) => (
