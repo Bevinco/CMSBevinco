@@ -4372,6 +4372,9 @@ button:disabled {
 .criteria-editor { border: 1px solid #cfdad7; border-radius: 8px; font: 500 12.5px/1.55 "JetBrains Mono", Consolas, monospace; min-height: 320px; padding: 10px 12px; resize: vertical; white-space: pre-wrap; }
 .bulk-block-box { border-top: 2px dashed #dce4e2; margin-top: 16px; padding-top: 16px; }
 .chat-learn-bar { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; }
+.analysis-source { background: #fdf3e3; border: 1px solid #f0ddb8; border-radius: 999px; color: #8a6d1f; font-size: 11.5px; font-weight: 700; padding: 6px 12px; }
+.analysis-source.is-ai { background: #eaf4e4; border-color: #cfe5c2; color: #4a7a2c; }
+:root[data-theme="dark"] .analysis-source { background: var(--surface-soft); border-color: var(--line); }
 .chat-learn-bar small { color: #7d938d; flex: 1; font-size: 11.5px; min-width: 220px; }
 :root[data-theme="dark"] .chat-learn-bar small { color: var(--text-muted); }
 .bulk-block-box > div:first-child { display: grid; gap: 5px; margin-bottom: 6px; }

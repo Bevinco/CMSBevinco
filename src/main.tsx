@@ -135,6 +135,7 @@ type Report = {
   periodId: string;
   status: ReportStatus;
   workflowState?: string;
+  analysisSource?: string;
   updatedAt: string;
   client?: Client;
   period?: Period;
@@ -2609,7 +2610,11 @@ function App() {
                 <p className="eyebrow">Análisis del agente</p>
                 <h2>Lectura ejecutiva del periodo</h2>
               </div>
-              <Bot size={22} />
+              <span className={`analysis-source ${selectedReport.analysisSource === "openai" ? "is-ai" : ""}`}>
+                {selectedReport.analysisSource === "openai"
+                  ? "✦ Generado con IA y los criterios del cliente"
+                  : "Plantilla automática — usa Redactar con IA para aplicar los criterios"}
+              </span>
             </div>
             <div className="agent-analysis-grid">
               {[
