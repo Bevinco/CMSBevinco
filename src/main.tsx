@@ -622,6 +622,9 @@ function App() {
   const [sculptureUnits, setSculptureUnits] = useState<SculptureUnit[]>([]);
   const [sculpturePeriods, setSculpturePeriods] = useState<SculpturePeriod[]>([]);
   const [selectedSculptureUnitId, setSelectedSculptureUnitId] = useState("");
+  const selectedClientIdRef = useRef("");
+  const [bootstrapLoaded, setBootstrapLoaded] = useState(false);
+  const unitDefaultRef = useRef(false);
   const [sculptureDirectoryLoaded, setSculptureDirectoryLoaded] = useState(false);
   const [accumulatedReport, setAccumulatedReport] = useState<AccumulatedReport | null>(null);
   const [clientPeriods, setClientPeriods] = useState<SculpturePeriod[]>([]);
@@ -774,6 +777,7 @@ function App() {
     setSelectedPeriodId(report?.periodId || payload.periods[0]?.id || "");
     setCommentsDraft(report?.comments || "");
     setEmailDraft(report?.emailDraft || "");
+    setBootstrapLoaded(true);
   }
 
   async function loadModule() {
@@ -1023,7 +1027,8 @@ function App() {
       const periodsFromSculpture = payload.periods || [];
       setSculptureUnits(units);
       setSculpturePeriods(periodsFromSculpture);
-      setSelectedSculptureUnitId((current) => current || units[0]?.id || "");
+      // La seleccion por defecto se decide en el efecto de coherencia, cuando
+      // bootstrap y directorio ya llegaron (evita la carrera entre ambos).
       setSculptureDirectoryLoaded(true);
       if (!quiet || !units.length) {
         setError(
@@ -1082,6 +1087,18 @@ function App() {
       setError(unitError instanceof Error ? unitError.message : "No se pudo agregar la unidad de Sculpture.");
       setWorkStatus("error");
     }
+  }
+
+  // Al cambiar de restaurante, las métricas y el workspace muestran de
+  // inmediato el último reporte guardado de ESE cliente (o quedan vacíos),
+  // en vez de arrastrar el reporte del cliente anterior.
+  function showLatestReportFor(clientId: string) {
+    const own = reports
+      .filter((report) => report.clientId === clientId && !report.backfill && !report.monthly)
+      .sort((left, right) => String(right.period?.endsAt || right.updatedAt || "").localeCompare(String(left.period?.endsAt || left.updatedAt || "")))[0] || null;
+    setSelectedReport(own);
+    setCommentsDraft(own?.comments || "");
+    setEmailDraft(own?.emailDraft || "");
   }
 
   async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
@@ -1713,6 +1730,31 @@ function App() {
   }, []);
 
   useEffect(() => {
+    selectedClientIdRef.current = selectedClientId;
+  }, [selectedClientId]);
+
+  // Al abrir el CMS: cuando ya llegaron el bootstrap (reporte cargado) y el
+  // directorio de locales, el selector sigue al cliente del reporte; si ese
+  // cliente no esta en el directorio, cae al primer local PERO mostrando el
+  // ultimo reporte de ESE local (nunca datos de otro restaurante).
+  useEffect(() => {
+    if (!bootstrapLoaded || !sculptureDirectoryLoaded || unitDefaultRef.current) return;
+    if (selectedSculptureUnitId) { unitDefaultRef.current = true; return; }
+    const visible = sculptureUnits.filter((unit) => !unit.hidden);
+    if (!visible.length) return;
+    unitDefaultRef.current = true;
+    const matching = visible.find((unit) => unit.id === selectedClientId);
+    if (matching) {
+      setSelectedSculptureUnitId(matching.id);
+      return;
+    }
+    const first = visible[0];
+    setSelectedSculptureUnitId(first.id);
+    setSelectedClientId(first.id);
+    showLatestReportFor(first.id);
+  }, [bootstrapLoaded, sculptureDirectoryLoaded, sculptureUnits, selectedClientId, selectedSculptureUnitId]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
     localStorage.setItem("bevinco-theme", themeMode);
   }, [themeMode]);
@@ -2300,8 +2342,11 @@ function App() {
                       if (value.startsWith("cms:")) {
                         setSelectedClientId(value.slice(4));
                         setSelectedSculptureUnitId("");
+                        showLatestReportFor(value.slice(4));
                       } else {
                         setSelectedSculptureUnitId(value);
+                        setSelectedClientId(value);
+                        showLatestReportFor(value);
                       }
                     }}
                     onFocus={ensureSculptureDirectory}
