@@ -1626,7 +1626,7 @@ function generateReportAnalysis(payload) {
   const purchaseItems = (payload.purchaseSuggestions || [])
     .filter((item) => parseNumber(item.suggested) > 0 || /exceso|validar/i.test(`${item.note} ${item.provider}`))
     .slice(0, 4);
-  const criteriaApplied = criteriaForClient(payload.criteriaDocuments || [], payload.client?.name, payload.client?.id || payload.clientId || "")
+  const criteriaApplied = criteriaForClient(payload.criteriaDocuments || [], payload.client?.name, payload.client?.id || payload.clientId || "", payload.allClientNames || [])
     .slice(0, 4)
     .map((document) => summarizeCriteriaForDisplay(document));
 
@@ -1665,22 +1665,49 @@ function generateReportAnalysis(payload) {
 // activa solo al generar SU reporte. Prioridad: asignados al cliente >
 // generales que lo mencionan > generales. Los asignados a OTRO cliente nunca
 // se filtran hacia reportes ajenos.
-function criteriaForClient(criteriaDocuments = [], clientName = "", clientId = "") {
+// Selecciona el conocimiento que aplica a un reporte. Orden de prioridad:
+// 1) memoria aprendida del chat, 2) skills asignadas al cliente, 3) generales
+// que NOMBRAN a este cliente, 4) generales "de casa". Un general cuyo NOMBRE
+// corresponde a otro cliente se excluye: antes se filtraba a todos los
+// clientes sin skill y contaminaba sus analisis con reglas ajenas.
+function criteriaForClient(criteriaDocuments = [], clientName = "", clientId = "", allClientNames = []) {
+  // Comparaciones sin tildes: "Café Diario" (cliente) vs "Cafe Diario" (doc).
+  const normalize = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const clientKey = normalize(clientName);
+  const accountKey = clientKey.split(" - ")[0].trim();
+  const otherClientKeys = (allClientNames || [])
+    .map((name) => normalize(name).split(" - ")[0].trim())
+    .filter((key) => key && key.length > 3 && key !== accountKey && !accountKey.startsWith(key) && !key.startsWith(accountKey));
+
   const assigned = clientId
     ? criteriaDocuments.filter((document) => document.clientId === clientId)
     : [];
-  if (assigned.length) return assigned.slice(0, 6);
-
   const general = criteriaDocuments.filter((document) => !document.clientId);
-  const clientKey = String(clientName || "").toLowerCase().trim();
-  const accountKey = clientKey.split(" - ")[0].trim();
   const matched = clientKey
     ? general.filter((document) => {
-        const haystack = `${document.name} ${document.category} ${document.text}`.toLowerCase();
+        const haystack = normalize(`${document.name} ${document.category} ${document.text}`);
         return haystack.includes(clientKey) || (accountKey && haystack.includes(accountKey));
       })
     : [];
-  return (matched.length ? matched : general).slice(0, 6);
+  const shared = general.filter((document) => {
+    const nameKey = normalize(document.name);
+    // Los documentos con formato de skill ("X — Criterios de analisis") son de
+    // un cliente concreto aunque esten sin asignar (ej. clientes sin unidad en
+    // Sculpture): solo aplican por asignacion o porque nombran a este cliente.
+    if (/criterios de analisis/.test(nameKey) && !matched.includes(document)) return false;
+    return !otherClientKeys.some((key) => nameKey.includes(key));
+  });
+
+  const ordered = [];
+  const seen = new Set();
+  for (const document of [...assigned, ...matched, ...shared]) {
+    if (!document || seen.has(document.id)) continue;
+    seen.add(document.id);
+    ordered.push(document);
+  }
+  const learning = ordered.filter((document) => document.name === "Aprendizajes del chat");
+  const rest = ordered.filter((document) => document.name !== "Aprendizajes del chat");
+  return [...learning, ...rest].slice(0, 6);
 }
 
 // Metodologia estandar de analisis Bevinco (prompt maestro compartido por el
@@ -1736,7 +1763,7 @@ async function generateReportAnalysisAI(payload) {
   const CRITERIA_PER_DOC = 8000;
   const CRITERIA_TOTAL_BUDGET = 20000;
   let criteriaBudget = CRITERIA_TOTAL_BUDGET;
-  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "")
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "", payload.allClientNames || [])
     .map((document) => {
       if (criteriaBudget <= 0) return null;
       const contenido = String(document.text || "").trim().slice(0, Math.min(CRITERIA_PER_DOC, criteriaBudget));
@@ -3573,6 +3600,7 @@ function buildReportPayload(store, report) {
       ? report.monthlyHistory
       : historyForReport(store, report),
     criteriaDocuments: store.criteriaDocuments || [],
+    allClientNames: (store.clients || []).map((item) => item.name),
   };
   payload.analysis = report.analysis || generateReportAnalysis(payload);
 
@@ -5962,7 +5990,7 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
 
   const payload = buildReportPayload(store, report);
   const clientName = payload.client?.name || report.clientId;
-  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "")
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "", payload.allClientNames || [])
     .map((document) => ({
       nombre: document.name,
       contenido: String(document.text || "").trim().slice(0, 6000),
