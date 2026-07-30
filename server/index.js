@@ -4544,7 +4544,8 @@ function renderTwoPageReportHtml(store, report) {
     // Referencia del equipo: barras gruesas (llenan la fila) y la cifra en un
     // chip del color de la barra pegado a su EXTREMO, por fuera: el largo de
     // la barra sigue siendo la unica codificacion del valor.
-    const barH = Math.min(rowH * 0.78, 34);
+    // Sin espacio entre barras: cada una ocupa su fila completa, como la referencia.
+    const barH = rowH;
     const bars = rows.map((item, i) => {
       const color = paletteFor(item.family, i);
       const yc = T + (i + 0.5) * rowH;
