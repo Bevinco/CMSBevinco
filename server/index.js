@@ -3308,19 +3308,28 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         }).filter((row) => row.item && !/:\s*$/.test(row.item) && !/grand\s+total/i.test(row.item) && (row.stock || row.suggested));
         if (suggestions.length) report.purchaseSuggestions = suggestions;
 
-        const suggestedEntries = data.rows
-          .filter((row) => {
-            const name = pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "");
-            return isTotalRow(name) || /:\s*$/.test(name);
-          })
-          .map((row) => ({
-            category: cleanTotalName(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values[0] || "")),
-            value: parseNumber(
+        // Sugerencia por familia desde los PRODUCTOS acumulados a su total
+        // hoja: los totales de Sculpture vienen anidados (subcategoria ->
+        // familia -> grand total, con filas hasta duplicadas) y sumarlos
+        // directo duplicaba los montos (Destilados 1.79M vs 896K reales).
+        const suggestedEntries = [];
+        let pendingSuggested = 0;
+        for (const row of data.rows) {
+          const rowName = String(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values?.[0] || ""));
+          const isTotalName = isTotalRow(rowName) || /:\s*$/.test(rowName);
+          if (!isTotalName) {
+            pendingSuggested += parseNumber(
               pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
               pickRecordValueFuzzy(row.record, /(costo|cost).*(pedido|sugerid|order)|(pedido|order).*(costo|cost)/i),
-            ),
-          }));
-        const familySuggested = aggregateReportGroups(suggestedEntries).map(({ family, value }) => ({ family, suggested: value }));
+            );
+            continue;
+          }
+          // Solo el primer total tras los productos (la subcategoria hoja) se
+          // lleva el monto; los totales "padre" llegan con el acumulador en 0.
+          if (pendingSuggested > 0) suggestedEntries.push({ category: cleanTotalName(rowName), value: pendingSuggested });
+          pendingSuggested = 0;
+        }
+        const familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false }).map(({ family, value }) => ({ family, suggested: value }));
         if (familySuggested.some((item) => item.suggested)) {
           report.familySuggested = familySuggested;
           report.summary = report.summary || {};
@@ -4408,7 +4417,20 @@ function renderTwoPageReportHtml(store, report) {
     ? payload.familyVariances
     : REPORT_FAMILIES.map((family) => ({ family, amount: 0 })));
   const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
-  const suggestedMap = new Map((payload.familySuggested || []).map((item) => [item.family, item.suggested || 0]));
+  // La sugerencia comparable con la compra de ESTA semana es la emitida la
+  // semana ANTERIOR (misma regla del desfase pedida por Pedro): se busca en
+  // los reportes guardados del cliente; sin semana previa, cae a la actual.
+  const priorWeekly = (() => {
+    const currentEnd = String(payload.period?.endsAt || "");
+    if (!currentEnd) return null;
+    return (store.reports || [])
+      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
+      .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
+      .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
+      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]?.candidate || null;
+  })();
+  const suggestedSource = (priorWeekly?.familySuggested?.length ? priorWeekly.familySuggested : payload.familySuggested) || [];
+  const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
   const familyNames = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys(), ...REPORT_FAMILIES])];
   const familyPurchaseRows = familyNames
     .map((family) => ({
