@@ -147,6 +147,8 @@ type Report = {
     varianceAmount: number;
     usedCost?: number;
     idealCostPercent?: number;
+    purchasedCost?: number;
+    suggestedCost?: number;
   };
   categoryVariances: Array<{ category: string; amount: number; percent: number }>;
   familyVariances?: Array<{ family: string; amount: number }>;
@@ -1094,12 +1096,13 @@ function App() {
   // inmediato el último reporte guardado de ESE cliente (o quedan vacíos),
   // en vez de arrastrar el reporte del cliente anterior.
   function showLatestReportFor(clientId: string) {
-    const own = reports
-      .filter((report) => report.clientId === clientId && !report.backfill && !report.monthly)
-      .sort((left, right) => String(right.period?.endsAt || right.updatedAt || "").localeCompare(String(left.period?.endsAt || left.updatedAt || "")))[0] || null;
-    setSelectedReport(own);
-    setCommentsDraft(own?.comments || "");
-    setEmailDraft(own?.emailDraft || "");
+    void clientId;
+    // Pedido del equipo: al cambiar de restaurante, la vista queda EN BLANCO
+    // hasta generar (o abrir desde Historial) un reporte de ese cliente, para
+    // que nunca se lean datos de otro cliente/periodo por error.
+    setSelectedReport(null);
+    setCommentsDraft("");
+    setEmailDraft("");
   }
 
   async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
@@ -2312,6 +2315,10 @@ function App() {
                 <strong>{selectedUnitInfo?.area || selectedClient?.area || "Food"}</strong>
               </article>
               <article>
+                <span>Periodo analizado</span>
+                <strong>{selectedReport?.period?.label || "Sin reporte"}</strong>
+              </article>
+              <article>
                 <span>Estado</span>
                 {selectedReport ? (
                   <select
@@ -2435,6 +2442,16 @@ function App() {
             <span><TrendingDown size={18} /> % Costo Ideal</span>
             <strong>{workStatus === "loading" ? <span className="skeleton" /> : `${selectedReport?.summary.idealCostPercent || 0}%`}</strong>
             <small>Según recetas y ventas</small>
+          </article>
+          <article>
+            <span><ShoppingCart size={18} /> Compra realizada</span>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : money(selectedReport?.summary.purchasedCost || 0)}</strong>
+            <small>Último periodo</small>
+          </article>
+          <article>
+            <span><ShoppingCart size={18} /> Compra sugerida</span>
+            <strong>{workStatus === "loading" ? <span className="skeleton" /> : money(selectedReport?.summary.suggestedCost || 0)}</strong>
+            <small>Intelipar / PAR</small>
           </article>
         </section>
 

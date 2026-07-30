@@ -4523,7 +4523,10 @@ function renderTwoPageReportHtml(store, report) {
     const plotW = R - L; const plotH = B - T;
     const nonZero = familyVariances.filter((item) => item.amount);
     const rows = nonZero.length ? nonZero : familyVariances.slice(0, 6);
-    const maxAbs = niceCeil(Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.25, 5e4);
+    // Escala adaptativa: antes se redondeaba a multiplos de 50K y en locales
+    // chicos (max 12K) las barras quedaban aplastadas en el centro.
+    const rawAbs = Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.15;
+    const maxAbs = niceCeil(rawAbs, niceStep(rawAbs, 3));
     const xAt = (v) => L + ((v + maxAbs) / (2 * maxAbs)) * plotW;
     const ticks = [];
     for (let v = -maxAbs; v <= maxAbs; v += maxAbs / 3) ticks.push(v);
@@ -4569,14 +4572,25 @@ function renderTwoPageReportHtml(store, report) {
     const grid = ticks.map((v) =>
       `<line x1="${L}" y1="${yAt(v)}" x2="${R}" y2="${yAt(v)}" stroke="#e6e6e6"/>` +
       `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
-    const area = (values, color, opacity, startIndex = 0) => {
-      const points = values
-        .map((value, i) => ({ value, i }))
-        .filter(({ i }) => i >= startIndex);
-      if (!points.length) return "";
-      const pts = points.map(({ value, i }) => `${xAt(i)},${yAt(value)}`).join(" ");
-      return `<polygon points="${xAt(points[0].i)},${B} ${pts} ${xAt(points[points.length - 1].i)},${B}" fill="${color}" opacity="${opacity}"/>` +
-        `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
+    // Dibuja solo los tramos con dato real (>0). Las semanas sin reporte
+    // guardado no tienen sugerencia: antes se pintaban como caidas falsas a 0.
+    const drawSeries = (values, color, opacity) => {
+      const segments = [];
+      let segment = [];
+      values.forEach((value, i) => {
+        if (value > 0) segment.push({ value, i });
+        else { if (segment.length) segments.push(segment); segment = []; }
+      });
+      if (segment.length) segments.push(segment);
+      return segments.map((points) => {
+        if (points.length === 1) {
+          const { value, i } = points[0];
+          return `<circle cx="${xAt(i)}" cy="${yAt(value)}" r="3.4" fill="${color}"/>`;
+        }
+        const pts = points.map(({ value, i }) => `${xAt(i)},${yAt(value)}`).join(" ");
+        return `<polygon points="${xAt(points[0].i)},${B} ${pts} ${xAt(points[points.length - 1].i)},${B}" fill="${color}" opacity="${opacity}"/>` +
+          `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
+      }).join("");
     };
     // La sugerencia de la semana N se compra en la semana N+1: se desplaza la
     // serie una semana hacia adelante para que la comparacion contra la compra
@@ -4605,7 +4619,7 @@ function renderTwoPageReportHtml(store, report) {
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${emptyNote}
-      ${rawMaxPurchase ? area(suggestedShifted, GREEN, 0.5, previousSuggested ? 0 : 1) + area(purchasedSeries, NAVY, 0.42) : ""}
+      ${rawMaxPurchase ? drawSeries(suggestedShifted, GREEN, 0.5) + drawSeries(purchasedSeries, NAVY, 0.42) : ""}
       ${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
@@ -4891,22 +4905,24 @@ function renderTwoPageReportHtml(store, report) {
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
     .bv-citem span { color: #333; }
     .bv-citem p { color: #333; font-size: 13.5px; line-height: 1.4; margin: 0; text-align: justify; }
-    .bv-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    .bv-table-title { background: ${TEAL}; color: #fff; font-size: 16px; font-weight: 700; padding: 5px; text-align: center; }
-    .bv-table th { background: #404040; color: #fff; font-size: 12.5px; font-weight: 700; padding: 3px 6px; }
+    .bv-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; }
+    .bv-table th.bv-table-title { background: ${TEAL}; border-radius: 8px 8px 0 0; color: #fff; font-size: 15px; font-weight: 700; letter-spacing: 0.3px; padding: 8px 10px; text-align: center; }
+    .bv-table th { background: ${NAVY}; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.2px; padding: 7px 10px; vertical-align: middle; }
     .bv-table th:first-child { text-align: left; }
     .bv-table th:not(:first-child) { text-align: right; }
-    .bv-table td { border: 1px solid #7f7f7f; font-size: 13px; padding: 3px 7px; }
-    .bv-table tr.alt td { background: #dcecea; }
+    .bv-table td { border-bottom: 1px solid #e3ebe8; color: #2b3a36; font-size: 12.5px; padding: 7px 10px; vertical-align: middle; }
+    .bv-table tbody tr:last-child td { border-bottom: 0; }
+    .bv-table tr.alt td { background: #f5f9f8; }
     .bv-table .tname { width: 32%; }
     .bv-difftable { margin-top: 8px; }
     .bv-difftable .tname { width: 15%; }
-    .bv-difftable tr.total td { background: #eef4f1; border-top: 2px solid #404040; font-weight: 700; }
+    .bv-difftable tr.total td { background: #eef4f1; border-top: 2px solid ${NAVY}; font-weight: 700; }
     .bv-stockeff { align-items: start; margin-top: 10px; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
-    .tmoney span:first-child { float: left; }
-    .tmoney.neg span:last-child { color: #e00000; }
+    .tmoney span:first-child { color: #9ab0aa; float: left; }
+    .tmoney.neg span:last-child { color: #d23f31; font-weight: 700; }
     .tpct { text-align: right; width: 16%; }
+    .tpct.neg { color: #d23f31; font-weight: 700; }
     .bv-foot { display: flex; justify-content: center; margin-top: 10px; }
     .bv-grid2 { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
     .bv-col { display: flex; flex-direction: column; gap: 10px; }
