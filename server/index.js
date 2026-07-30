@@ -4530,26 +4530,41 @@ function renderTwoPageReportHtml(store, report) {
     const xAt = (v) => L + ((v + maxAbs) / (2 * maxAbs)) * plotW;
     const ticks = [];
     for (let v = -maxAbs; v <= maxAbs; v += maxAbs / 3) ticks.push(v);
+    // Ticks limpios sin decimales ("-15K", "K", "15K"), como la referencia.
+    const tickLabel = (v) => {
+      if (v === 0) return "K";
+      if (Math.abs(v) >= 1e6) return fmtK(v);
+      const thousands = v / 1000;
+      return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+    };
     const grid = ticks.map((v) =>
       `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e6e6e6"/>` +
-      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${v === 0 ? "K" : fmtK(v)}</text>`).join("");
+      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${tickLabel(v)}</text>`).join("");
     const rowH = plotH / Math.max(rows.length, 1);
-    // La longitud de la barra codifica el valor; la cifra va como texto plano
-    // justo despues del extremo (sin cajas de ancho fijo que confundan escala).
+    // Referencia del equipo: barras gruesas (llenan la fila) y la cifra en un
+    // chip del color de la barra pegado a su EXTREMO, por fuera: el largo de
+    // la barra sigue siendo la unica codificacion del valor.
+    const barH = Math.min(rowH * 0.78, 34);
     const bars = rows.map((item, i) => {
       const color = paletteFor(item.family, i);
       const yc = T + (i + 0.5) * rowH;
       const x0 = xAt(0); const x1 = xAt(item.amount);
       const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
       const positive = item.amount >= 0;
-      return `<rect x="${bx}" y="${yc - 9}" width="${bw}" height="18" fill="${color}"/>` +
-        `<text x="${positive ? x1 + 5 : x1 - 5}" y="${yc + 4.5}" text-anchor="${positive ? "start" : "end"}" class="vlab" fill="${color}">${fmtK(item.amount)}</text>`;
+      const label = fmtK(item.amount).replace(/([KM])$/, " $1");
+      const chipW = 12 + label.length * 7.2;
+      const chipX = positive
+        ? Math.min(x1 + 1, W - chipW - 2)
+        : Math.max(x1 - 1 - chipW, 2);
+      return `<rect x="${bx}" y="${yc - barH / 2}" width="${bw}" height="${barH}" fill="${color}"/>` +
+        `<rect x="${chipX}" y="${yc - barH / 2}" width="${chipW}" height="${barH}" fill="${color}"/>` +
+        `<text x="${chipX + chipW / 2}" y="${yc + 4.5}" text-anchor="middle" class="chip">${label}</text>`;
     }).join("");
     const legend = rows.map((item, i) =>
       `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${paletteFor(item.family, i)}"/>` +
       `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:12px Calibri,Arial;fill:#808080}.vlab{font:700 12px Calibri,Arial}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
+      <style>.ax{font:12px Calibri,Arial;fill:#808080}.chip{font:700 12px Calibri,Arial;fill:#fff}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
       ${grid}
       <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#9a9a9a"/>
       ${bars}${legend}
