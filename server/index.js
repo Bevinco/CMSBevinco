@@ -3227,6 +3227,12 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
   return true;
 }
 
+// Version de la logica de extraccion/clasificacion. Se estampa en cada
+// reporte al sincronizar: cuando corregimos formatos o calculos (doble
+// conteo, familias, PAR de cocina...), el historico guardado con versiones
+// anteriores se re-sincroniza SOLO la proxima vez que se genera un reporte.
+const EXTRACTOR_VERSION = 3;
+
 async function syncSculptureSources(store, report, requestBody = {}) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
@@ -3452,6 +3458,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   }
 
   report.updatedAt = new Date().toISOString();
+  report.extractorVersion = EXTRACTOR_VERSION;
   report.analysis = null;
   return syncResults;
 }
@@ -5836,7 +5843,9 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
       String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)),
     )[0];
     const selectedIndex = orderedPeriods.findIndex((period) => period.id === oldestSelected.id);
-    const previousPeriods = selectedIndex >= 0 ? orderedPeriods.slice(selectedIndex + 1, selectedIndex + 4) : [];
+    // 4 semanas previas: 3 para el historico + 1 extra porque la sugerencia
+    // se grafica desplazada una semana (el primer punto la necesita).
+    const previousPeriods = selectedIndex >= 0 ? orderedPeriods.slice(selectedIndex + 1, selectedIndex + 5) : [];
 
     for (const rawPeriod of previousPeriods) {
       const period = ensurePeriod(store, rawPeriod);
@@ -5844,7 +5853,10 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
       const existing = store.reports.find(
         (candidate) => candidate.clientId === client.id && candidate.periodId === period.id,
       );
-      if (existing?.summary?.revenue) continue;
+      // Version vieja del extractor = datos con formatos/bugs ya corregidos:
+      // se re-sincroniza aunque tenga datos, para que el historico no mezcle
+      // cifras de logicas distintas.
+      if (existing?.summary?.revenue && existing.extractorVersion === EXTRACTOR_VERSION) continue;
 
       try {
         const report = reportForClientPeriod(store, client.id, period.id);
