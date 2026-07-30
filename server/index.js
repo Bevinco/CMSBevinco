@@ -4935,7 +4935,7 @@ function renderTwoPageReportHtml(store, report) {
     .bv-difftable tr.total td { background: #eef4f1; border-top: 2px solid ${NAVY}; font-weight: 700; }
     .bv-stockeff { align-items: start; margin-top: 10px; }
     .tmoney { text-align: right; white-space: nowrap; width: 18%; }
-    .tmoney span:first-child { color: #9ab0aa; float: left; }
+    .tmoney span:first-child { color: #9ab0aa; margin-right: 3px; }
     .tmoney.neg span:last-child { color: #d23f31; font-weight: 700; }
     .tpct { text-align: right; width: 16%; }
     .tpct.neg { color: #d23f31; font-weight: 700; }
