@@ -4666,15 +4666,19 @@ function renderTwoPageReportHtml(store, report) {
     for (let v = 0; v <= maxDays; v += 5) ticksRight.push(v);
     const rightAxis = ticksRight.map((v) =>
       `<text x="${R + 6}" y="${yDays(v) + 3}" class="ax">${Math.round(v)}</text>`).join("");
+    // Barras del par pegadas (sin aire al medio) y ocupando el grueso del
+    // espacio de su semana, como la referencia del equipo.
+    const slotW = plotW / n;
+    const pairBarW = Math.min(slotW * 0.42, 34);
     const bars = history.map((p, i) => {
       const x = xAt(i);
       const yu = yAt(p.usedCost); const yi = yAt(p.inventoryCost);
       const rot = (bx, by, text) =>
         `<text x="${bx}" y="${by}" class="rotlab" transform="rotate(-90 ${bx} ${by})">${text}</text>`;
-      return (p.usedCost ? `<rect x="${x - 18}" y="${yu}" width="15" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` : "") +
-        (p.inventoryCost ? `<rect x="${x + 2}" y="${yi}" width="15" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` : "") +
-        (p.usedCost && B - yu > 40 ? rot(x - 7, B - 6, fmtK(p.usedCost)) : "") +
-        (p.inventoryCost && B - yi > 40 ? rot(x + 13, B - 6, fmtK(p.inventoryCost)) : "");
+      return (p.usedCost ? `<rect x="${x - pairBarW}" y="${yu}" width="${pairBarW}" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` : "") +
+        (p.inventoryCost ? `<rect x="${x}" y="${yi}" width="${pairBarW}" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` : "") +
+        (p.usedCost && B - yu > 40 ? rot(x - pairBarW / 2 + 4, B - 6, fmtK(p.usedCost)) : "") +
+        (p.inventoryCost && B - yi > 40 ? rot(x + pairBarW / 2 + 4, B - 6, fmtK(p.inventoryCost)) : "");
     }).join("");
     const covered = history.map((p, i) => ({ i, days: coverage[i] })).filter((item) => item.days > 0);
     const linePts = covered.map((item) => `${xAt(item.i)},${yDays(item.days)}`).join(" ");
@@ -4721,23 +4725,24 @@ function renderTwoPageReportHtml(store, report) {
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra por familia para este periodo.</text>`;
     const groupH = plotH / rows.length;
-    // La LONGITUD de la barra es la unica codificacion del valor: la cifra va
-    // fuera de la barra (o dentro solo si cabe), nunca como una caja de ancho
-    // fijo que enmascare barras chicas. Los ceros se marcan explicitos.
+    // Barras del par pegadas (sin aire al medio) y gruesas; la LONGITUD sigue
+    // siendo la unica codificacion del valor: la cifra va fuera de la barra
+    // (o dentro solo si cabe). Los ceros se marcan explicitos.
+    const pairBarH = Math.min(groupH * 0.42, 26);
     const bars = rows.map((row, i) => {
       const yc = T + (i + 0.5) * groupH;
       const bar = (v, y, color) => {
         if (!v) {
-          return `<text x="${L + 5}" y="${y + 12}" class="vzero">0</text>`;
+          return `<text x="${L + 5}" y="${y + pairBarH / 2 + 3.5}" class="vzero">0</text>`;
         }
         const bw = Math.max(2, xAt(v) - L);
         const fitsInside = bw > 58;
         const textX = fitsInside ? L + bw - 5 : L + bw + 5;
-        return `<rect x="${L}" y="${y}" width="${bw}" height="15" fill="${color}"/>` +
-          `<text x="${textX}" y="${y + 12}" text-anchor="${fitsInside ? "end" : "start"}" class="${fitsInside ? "vin" : "vout"}" ${fitsInside ? "" : `fill="${color}"`}>${fmtK(v)}</text>`;
+        return `<rect x="${L}" y="${y}" width="${bw}" height="${pairBarH}" fill="${color}"/>` +
+          `<text x="${textX}" y="${y + pairBarH / 2 + 3.5}" text-anchor="${fitsInside ? "end" : "start"}" class="${fitsInside ? "vin" : "vout"}" ${fitsInside ? "" : `fill="${color}"`}>${fmtK(v)}</text>`;
       };
       return `<text x="${L - 6}" y="${yc + 3}" text-anchor="end" class="fam">${escapeHtml(truncateLabel(row.family, 16))}</text>` +
-        (rawMaxFam ? bar(row.purchased, yc - 18, NAVY) + bar(row.suggested, yc + 3, GREEN) : "");
+        (rawMaxFam ? bar(row.purchased, yc - pairBarH, NAVY) + bar(row.suggested, yc, GREEN) : "");
     }).join("");
     const legendY = H - 10;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
