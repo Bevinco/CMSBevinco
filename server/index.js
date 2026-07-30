@@ -161,6 +161,9 @@ const cmsSuperadminEmail = (process.env.CMS_SUPERADMIN_EMAIL || "gerencia@bevinc
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const openaiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+// El chat es interactivo y de bajo volumen: usa el modelo completo, que sigue
+// instrucciones y ejemplos pegados con mucha mas fidelidad que el mini.
+const openaiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-4.1";
 const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
@@ -6021,11 +6024,17 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
 
   const summary = payload.summary || {};
   const contextText = [
-    BEVINCO_ANALYSIS_METHOD,
-    "",
     "Eres el asistente conversacional de este reporte. Responde SIEMPRE en español, breve, técnico y accionable.",
+    "",
+    "JERARQUÍA DE OBEDIENCIA (en este orden, sin excepciones):",
+    "1. LA INSTRUCCIÓN DEL EQUIPO EN ESTE CHAT MANDA SIEMPRE, por sobre el método y los criterios. Si piden un formato, tono, orden o contenido específico, cúmplelo al pie de la letra.",
+    "2. Si el equipo te pega comentarios o un reporte de ejemplo de lo que ESPERA, tu tarea es CALZAR ese resultado: misma estructura, mismo orden, mismo estilo de redacción, adaptando solo las cifras a los datos reales de este reporte. No lo 'mejores', no reordenes, no agregues secciones que no pidieron.",
+    "3. El método Bevinco y los criterios del cliente aplican en todo lo que el equipo no haya pedido distinto.",
+    "",
     "Cuando el usuario pida redactar o ajustar comentarios, entrégalos LISTOS para pegar (sin preámbulos como 'aquí tienes').",
     "Usa solo las cifras entregadas; nunca inventes datos.",
+    "",
+    BEVINCO_ANALYSIS_METHOD,
     "",
     `Criterios del cliente (${clientName}):`,
     criteria.length ? JSON.stringify(criteria) : "Sin criterios específicos; aplica la metodología estándar.",
@@ -6074,7 +6083,7 @@ ${String(file.content || "").slice(0, 12000)}`;
     const aiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: openaiModel, input, max_output_tokens: 1600 }),
+      body: JSON.stringify({ model: openaiChatModel, input, max_output_tokens: 1600 }),
     });
     const aiPayload = await aiResponse.json().catch(() => ({}));
     if (!aiResponse.ok) {
