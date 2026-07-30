@@ -1325,11 +1325,67 @@ function familyForCategory(name) {
   return "Otros";
 }
 
-function aggregateByFamily(entries) {
+// Deduce la jerarquia REAL de categorias desde los totales anidados de la
+// propia tabla de Sculpture: un total es "padre" cuando su monto calza con la
+// suma de un tramo contiguo de los totales anteriores. Devuelve hoja -> padre
+// (ej. "Carignan" -> "Vino"), para heredar la familia que Sculpture ya
+// definio sin depender de listas de nombres: cualquier subcategoria nueva
+// queda cubierta automaticamente.
+function inferParentMap(totalsSequence) {
+  const keyOf = (name) => String(name || "").toLowerCase().trim();
+  const tolerance = (value) => Math.max(2, Math.abs(value) * 0.01);
+  const parentOf = new Map();
+  let run = [];
+  for (const total of totalsSequence || []) {
+    const value = total.value || 0;
+    if (!value) { run.push(total); continue; }
+    // fila duplicada identica (Sculpture a veces repite un total): ignorar
+    const last = run[run.length - 1];
+    if (last && keyOf(last.category) === keyOf(total.category) && Math.abs((last.value || 0) - value) <= tolerance(value)) continue;
+    // buscar el sufijo contiguo cuya suma calce con este total
+    let accumulated = 0;
+    let start = -1;
+    for (let k = run.length - 1; k >= 0; k--) {
+      accumulated += run[k].value || 0;
+      if (Math.abs(value - accumulated) <= tolerance(value)) { start = k; break; }
+    }
+    if (start >= 0) {
+      for (let k = start; k < run.length; k++) {
+        if (keyOf(run[k].category) !== keyOf(total.category)) parentOf.set(keyOf(run[k].category), total.category);
+      }
+      run = [...run.slice(0, start), total];
+    } else {
+      run.push(total);
+    }
+  }
+  return parentOf;
+}
+
+// Familia de una categoria: primero por nombre; si no clasifica, hereda la
+// familia de su padre en la tabla (y del abuelo, hasta 4 niveles).
+function resolveFamily(category, parentOf) {
+  let current = category;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    const family = familyForCategory(current);
+    if (family !== "Otros") return family;
+    current = parentOf?.get(String(current).toLowerCase().trim());
+  }
+  return "Otros";
+}
+
+function aggregateByFamily(entries, parentOf, familyOf) {
   const map = new Map(REPORT_FAMILIES.map((family) => [family, 0]));
+  const unresolved = new Set();
   for (const { category, value } of entries) {
-    const family = familyForCategory(category);
+    const key = String(category || "").toLowerCase().trim();
+    const family = (familyOf && familyOf[key]) || resolveFamily(category, parentOf);
+    if (family === "Otros" && category) unresolved.add(category);
     map.set(family, (map.get(family) || 0) + (value || 0));
+  }
+  if (unresolved.size) {
+    // Visible en los logs del servidor: si Sculpture agrega una categoria que
+    // ni clasifica ni tiene padre reconocible, aparece aqui en vez de perderse.
+    console.warn("[familias] categorias sin familia (quedan en Otros):", [...unresolved].join(", "));
   }
   return [...map.entries()]
     .filter(([family, value]) => REPORT_FAMILIES.includes(family) || value)
@@ -1377,13 +1433,13 @@ function dropParentTotals(entries) {
   return kept;
 }
 
-function aggregateReportGroups(rawEntries, { dropParents = true } = {}) {
+function aggregateReportGroups(rawEntries, { dropParents = true, parentOf, familyOf } = {}) {
   // dropParents solo tiene sentido cuando las entradas vienen de filas de
   // TOTALES (donde un total "padre" duplicaria a sus hijos). Con entradas de
   // productos individuales borraba por error cualquier producto cuyo monto
   // coincidiera con la suma de los anteriores, descuadrando las familias.
   const entries = dropParents ? dropParentTotals(rawEntries) : rawEntries;
-  const familyRows = aggregateByFamily(entries);
+  const familyRows = aggregateByFamily(entries, parentOf, familyOf);
   const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
   const otherAbs = Math.abs(familyRows.find((row) => row.family === "Otros")?.value || 0);
 
@@ -2129,10 +2185,11 @@ function pickRecordValueFuzzy(record, pattern, exclude = null) {
   return "";
 }
 
-function extractReportMetrics(parsedTable) {
+function extractReportMetrics(parsedTable, familyOverrides) {
   const rows = parsedTable.rows || [];
   const categoryMap = new Map();
   const categoryPercentMap = new Map();
+  const totalsSequence = [];
   const products = [];
   const pendingProducts = [];
   let currentCategory = "";
@@ -2199,6 +2256,9 @@ function extractReportMetrics(parsedTable) {
         pendingProducts.length = 0;
         categoryMap.set(category, amount);
         categoryPercentMap.set(category, parseNumber(percentValue));
+        // Secuencia de totales (con un monto siempre positivo) para inferir
+        // la jerarquia subcategoria -> familia de la propia tabla.
+        totalsSequence.push({ category, inv: rowInventoryCost || 0, used: rowUsedCost || 0 });
         currentCategory = "";
       }
       return;
@@ -2243,6 +2303,12 @@ function extractReportMetrics(parsedTable) {
     .filter((product) => product.purchasedCost)
     .map((product) => ({ category: product.category || "Sin categoría", value: product.purchasedCost }));
 
+  // Jerarquia inferida por columna CONSISTENTE (existencia y usado por
+  // separado): un fallback mixto corrompia las sumas y perdia padres.
+  const parentByInv = inferParentMap(totalsSequence.map((t) => ({ category: t.category, value: t.inv })));
+  const parentByUsed = inferParentMap(totalsSequence.map((t) => ({ category: t.category, value: t.used })));
+  const varianceParentOf = new Map([...parentByUsed, ...parentByInv]);
+
   const extras = {
     usedCost,
     soldCost,
@@ -2263,8 +2329,8 @@ function extractReportMetrics(parsedTable) {
           varianceAmount: varianceTotal,
         },
     categoryVariances: categoryVariances.slice(0, 8),
-    familyVariances: aggregateReportGroups(productEntries, { dropParents: false }).map(({ family, value }) => ({ family, amount: value })),
-    familyPurchases: aggregateReportGroups(purchaseEntries, { dropParents: false }).map(({ family, value }) => ({ family, purchased: value })),
+    familyVariances: aggregateReportGroups(productEntries, { dropParents: false, parentOf: varianceParentOf, familyOf: familyOverrides }).map(({ family, value }) => ({ family, amount: value })),
+    familyPurchases: aggregateReportGroups(purchaseEntries, { dropParents: false, parentOf: varianceParentOf, familyOf: familyOverrides }).map(({ family, value }) => ({ family, purchased: value })),
     topUsageProducts: products
       .filter((product) => product.usedCost > 0)
       .sort((left, right) => right.usedCost - left.usedCost)
@@ -3169,6 +3235,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
   const syncResults = {};
   let detailedStockUnits = new Map();
+  let varianceData = null;
 
   if (!cid || !pid) {
     const missing = !cid ? "cid" : "pid";
@@ -3193,7 +3260,8 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       report.sourceStatus[type] = data.rows?.length ? "Sincronizado" : "Sin datos";
 
       if (type === "varianceDetailed" || type === "varianceSummary") {
-        const metrics = extractReportMetrics(data);
+        if (type === "varianceDetailed") varianceData = data;
+        const metrics = extractReportMetrics(data, client?.categoryFamilies);
         if (
           metrics.summary.revenue ||
           metrics.summary.costPercent ||
@@ -3313,10 +3381,11 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // familia -> grand total, con filas hasta duplicadas) y sumarlos
         // directo duplicaba los montos (Destilados 1.79M vs 896K reales).
         const suggestedEntries = [];
+        const suggestedTotalsSequence = [];
         let pendingSuggested = 0;
         for (const row of data.rows) {
           const rowName = String(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values?.[0] || ""));
-          const isTotalName = isTotalRow(rowName) || /:\s*$/.test(rowName);
+          const isTotalName = isTotalRow(rowName) || /:\s*$/.test(rowName) || /grand\s+total/i.test(rowName);
           if (!isTotalName) {
             pendingSuggested += parseNumber(
               pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
@@ -3328,8 +3397,21 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           // lleva el monto; los totales "padre" llegan con el acumulador en 0.
           if (pendingSuggested > 0) suggestedEntries.push({ category: cleanTotalName(rowName), value: pendingSuggested });
           pendingSuggested = 0;
+          // Jerarquia desde la existencia al costo (siempre positiva).
+          suggestedTotalsSequence.push({ category: cleanTotalName(rowName), value: parseNumber(row.record?.existenciaCosto) });
         }
-        const familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false }).map(({ family, value }) => ({ family, suggested: value }));
+        const suggestedParentOf = inferParentMap(suggestedTotalsSequence);
+        // El Intelipar trae la jerarquia completa (subcategoria -> familia):
+        // se aprende y se PERSISTE por cliente, para que el variance (que en
+        // barra viene plano, sin totales de familia) clasifique igual. Asi
+        // cualquier categoria nueva de Sculpture queda cubierta sola.
+        const learnedFamilies = { ...(client?.categoryFamilies || {}) };
+        for (const { category } of suggestedTotalsSequence) {
+          const family = resolveFamily(category, suggestedParentOf);
+          if (family !== "Otros") learnedFamilies[String(category).toLowerCase().trim()] = family;
+        }
+        if (client) client.categoryFamilies = learnedFamilies;
+        const familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
         if (familySuggested.some((item) => item.suggested)) {
           report.familySuggested = familySuggested;
           report.summary = report.summary || {};
@@ -3348,6 +3430,16 @@ async function syncSculptureSources(store, report, requestBody = {}) {
       };
       report.sourceStatus[type] = "Por revisar";
     }
+  }
+
+  // Con la taxonomia recien aprendida del Intelipar, se re-agrupan las
+  // familias del variance de este mismo sync (en barra el variance no trae
+  // totales de familia y sin esto una categoria nueva caeria a "Otros"
+  // hasta la sincronizacion siguiente).
+  if (varianceData && client?.categoryFamilies && Object.keys(client.categoryFamilies).length) {
+    const refreshed = extractReportMetrics(varianceData, client.categoryFamilies);
+    if (refreshed.familyVariances?.some((item) => item.amount)) report.familyVariances = refreshed.familyVariances;
+    if (refreshed.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = refreshed.familyPurchases;
   }
 
   if (!(report.summary?.revenue > 0)) {
