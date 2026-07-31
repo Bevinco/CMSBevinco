@@ -160,10 +160,16 @@ const authPassword = process.env.CMS_AUTH_PASSWORD;
 const cmsSuperadminEmail = (process.env.CMS_SUPERADMIN_EMAIL || "gerencia@bevinco.com").toLowerCase();
 const sessionSecret = process.env.CMS_SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const openaiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || "";
-const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
-// El chat es interactivo y de bajo volumen: usa el modelo completo, que sigue
-// instrucciones y ejemplos pegados con mucha mas fidelidad que el mini.
-const openaiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-4.1";
+// GPT-5: mejor y mas barato que la generacion 4.1 (verificado disponible en
+// la cuenta del equipo). mini para el volumen de reportes, completo para el
+// chat interactivo. Ambos ajustables por variable de entorno en Render.
+const openaiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
+const openaiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-5";
+// Los GPT-5 razonan antes de responder y ese razonamiento consume tokens de
+// salida: esfuerzo bajo (tareas de formato/redaccion, no matematicas) y topes
+// amplios para que el texto nunca llegue truncado. Para modelos no-razonadores
+// (si se vuelve a 4.1 por env) el parametro se omite.
+const reasoningFor = (model) => (/^(gpt-5|od)/.test(String(model)) ? { reasoning: { effort: "low" } } : {});
 const sessionCookieName = "bevinco_session";
 const dataDir = path.resolve(__dirname, "../data");
 const moduleStorePath = path.join(dataDir, "module1.json");
@@ -1925,7 +1931,8 @@ ${JSON.stringify(reportData, null, 2)}
       body: JSON.stringify({
         model: openaiModel,
         input: prompt,
-        max_output_tokens: 4000,
+        max_output_tokens: 6000,
+        ...reasoningFor(openaiModel),
       }),
     });
 
@@ -6246,7 +6253,7 @@ ${String(file.content || "").slice(0, 12000)}`;
     const aiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: openaiChatModel, input, max_output_tokens: 1600 }),
+      body: JSON.stringify({ model: openaiChatModel, input, max_output_tokens: 3000, ...reasoningFor(openaiChatModel) }),
     });
     const aiPayload = await aiResponse.json().catch(() => ({}));
     if (!aiResponse.ok) {
@@ -6326,7 +6333,7 @@ Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sig
     const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 1500 }),
+      body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 2500, ...reasoningFor(openaiModel) }),
     });
     const responsePayload = await openaiResponse.json().catch(() => ({}));
     if (!openaiResponse.ok) {
