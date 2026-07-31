@@ -164,7 +164,7 @@ const openaiApiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_K
 // la cuenta del equipo). mini para el volumen de reportes, completo para el
 // chat interactivo. Ambos ajustables por variable de entorno en Render.
 const openaiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
-const openaiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-5";
+const openaiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-5.2";
 // Los GPT-5 razonan antes de responder y ese razonamiento consume tokens de
 // salida: esfuerzo bajo (tareas de formato/redaccion, no matematicas) y topes
 // amplios para que el texto nunca llegue truncado. Para modelos no-razonadores
