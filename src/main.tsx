@@ -1628,10 +1628,38 @@ function App() {
     }
   }
 
-  async function applyChatAsSummary(content: string) {
-    const parsed = parseAnalysisFromText(content);
-    if (!parsed || !selectedReport) {
+  const ANALYSIS_SECTION_LABELS: Partial<Record<keyof NonNullable<Report["analysis"]>, string>> = {
+    bestOfWeek: "Lo mejor de la semana",
+    weeklyChallenges: "Los desafíos de la semana",
+    stockEfficiency: "Eficiencia de stock y compra",
+    agentNotes: "Diagnóstico",
+  };
+
+  async function applyChatAsSummary(content: string, messageIndex?: number) {
+    if (!selectedReport) return;
+    let parsed = parseAnalysisFromText(content);
+    // Sin encabezados en la respuesta (el agente contesta solo los bullets):
+    // la seccion destino se infiere del PEDIDO que el equipo le hizo al agente
+    // ("ajusta lo mejor de la semana..." -> card Lo mejor de la semana).
+    if (!parsed) {
+      const priorAsk = typeof messageIndex === "number"
+        ? [...chatMessages.slice(0, messageIndex)].reverse().find((message) => message.role === "user")?.content || ""
+        : "";
+      const hint = priorAsk.toLowerCase();
+      const syntheticHeading = /lo mejor/.test(hint)
+        ? "LO MEJOR DE LA SEMANA"
+        : /desaf/.test(hint)
+          ? "DESAFÍOS DE LA SEMANA"
+          : /eficiencia|stock|compra/.test(hint)
+            ? "EFICIENCIA DE STOCK"
+            : /diagn|lectura ejecutiva|resumen ejecutivo/.test(hint)
+              ? "DIAGNÓSTICO"
+              : null;
+      if (syntheticHeading) parsed = parseAnalysisFromText(`${syntheticHeading}\n\n${content}`);
+    }
+    if (!parsed) {
       setCommentsDraft(content);
+      setError("El mensaje no indica a qué sección corresponde: quedó en el borrador de comentarios. Pídele al agente la sección con su título (ej. \"Lo mejor de la semana\") o menciónala en tu pedido.");
       return;
     }
     try {
@@ -1639,7 +1667,10 @@ function App() {
         comments: content,
         analysis: { ...(selectedReport.analysis || {}), ...parsed },
       });
-      setError("Resumen aplicado: las secciones del análisis de abajo quedaron actualizadas.");
+      const touched = Object.keys(parsed)
+        .map((key) => ANALYSIS_SECTION_LABELS[key as keyof NonNullable<Report["analysis"]>] || key)
+        .join(", ");
+      setError(`Resumen aplicado en: ${touched}. Revisa las cards del análisis de abajo.`);
       setWorkStatus("ready");
     } catch (applyError) {
       setError(applyError instanceof Error ? applyError.message : "No se pudo aplicar el resumen.");
@@ -2685,7 +2716,7 @@ function App() {
                     </div>
                     {item.role === "assistant" && !item.content.startsWith("⚠") ? (
                       <div className="chat-bubble-actions">
-                        <button type="button" onClick={() => applyChatAsSummary(item.content)}>Usar como resumen</button>
+                        <button type="button" onClick={() => applyChatAsSummary(item.content, index)}>Usar como resumen</button>
                         <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
                       </div>
                     ) : null}
