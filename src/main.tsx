@@ -1241,6 +1241,27 @@ function App() {
     setEmailDraft("");
   }
 
+  const [distilling, setDistilling] = useState(false);
+  async function distillGeneralKnowledge() {
+    if (distilling) return;
+    setDistilling(true);
+    setWorkStatus("loading");
+    setError("Destilando el conocimiento base del negocio desde todos los criterios cargados...");
+    try {
+      const payload = await readJson<{ saved: boolean; sourceCount?: number; size?: number; criteriaDocuments?: CriteriaDocument[] }>(
+        await fetch("/api/module1/criteria-documents/distill-general", { method: "POST" }),
+      );
+      if (payload.criteriaDocuments) setCriteriaDocuments(payload.criteriaDocuments);
+      setError(`Conocimiento base actualizado a partir de ${payload.sourceCount} documento(s). Desde ahora aplica a todos los clientes, incluidos los nuevos.`);
+      setWorkStatus("ready");
+    } catch (distillError) {
+      setError(distillError instanceof Error ? distillError.message : "No se pudo destilar el conocimiento.");
+      setWorkStatus("error");
+    } finally {
+      setDistilling(false);
+    }
+  }
+
   async function shareWebReport(reportId: string) {
     try {
       const payload = await readJson<{ url: string }>(
@@ -3671,6 +3692,20 @@ function App() {
                   </button>
                 </div>
                 <small>Estos documentos quedan guardados en la biblioteca del CMS y el agente los usa al generar el resumen del reporte.</small>
+              </div>
+
+              <div className="upload-box bulk-block-box">
+                <div>
+                  <p className="eyebrow">Conocimiento base</p>
+                  <strong>Destilar el conocimiento del negocio desde todos los criterios</strong>
+                  <small>La IA lee todas las skills y aprendizajes cargados, y genera/actualiza el documento "Conocimiento base del negocio": lo transversal (metodología, interpretación, estilo) sin datos de clientes puntuales. Aplica a TODOS los clientes, incluidos los nuevos — así un cliente recién creado no parte de cero.</small>
+                </div>
+                <div className="upload-actions">
+                  <button className="primary-button" disabled={distilling || !criteriaDocuments.length} onClick={distillGeneralKnowledge} type="button">
+                    {distilling ? <span className="btn-spinner" /> : <BookOpenCheck size={17} />}
+                    {distilling ? "Destilando conocimiento..." : "Generar conocimiento base"}
+                  </button>
+                </div>
               </div>
 
               <div className="upload-box bulk-block-box">

@@ -1793,7 +1793,7 @@ function criteriaForClient(criteriaDocuments = [], clientName = "", clientId = "
     seen.add(document.id);
     ordered.push(document);
   }
-  const learningNames = new Set(["Aprendizajes del chat", "Aprendizajes generales"]);
+  const learningNames = new Set(["Aprendizajes del chat", "Aprendizajes generales", "Conocimiento base del negocio"]);
   const learning = ordered.filter((document) => learningNames.has(document.name));
   const rest = ordered.filter((document) => !learningNames.has(document.name));
   return [...learning, ...rest].slice(0, 6);
@@ -7121,6 +7121,91 @@ Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sig
   } catch (error) {
     console.error("[openai] learn error:", error.message);
     response.status(502).json({ error: "No se pudo guardar el aprendizaje. Intenta de nuevo en unos segundos." });
+  }
+});
+
+// Destila TODO el conocimiento cargado (skills por cliente, criterios
+// generales, aprendizajes) en un "Conocimiento base del negocio" que aplica
+// a CUALQUIER cliente, incluidos los nuevos. Asi un cliente recien creado no
+// parte de cero: hereda el entendimiento transversal del negocio sin datos
+// especificos de otros clientes (pedido de Paulina, 04-ago).
+app.post("/api/module1/criteria-documents/distill-general", requireAuth, async (_request, response) => {
+  const store = await readStore();
+  if (!openaiApiKey) {
+    response.status(503).json({ error: "La IA no está configurada en el servidor (falta OPENAI_API_KEY)." });
+    return;
+  }
+  const documentName = "Conocimiento base del negocio";
+  const sources = (store.criteriaDocuments || []).filter((document) => document.name !== documentName && String(document.text || "").trim());
+  if (!sources.length) {
+    response.status(400).json({ error: "No hay criterios cargados desde los cuales destilar." });
+    return;
+  }
+  const corpus = sources
+    .map((document) => `### ${document.name}${document.clientName ? ` (cliente: ${document.clientName})` : " (general)"}\n${String(document.text || "").slice(0, 6000)}`)
+    .join("\n\n")
+    .slice(0, 60000);
+
+  const prompt = `
+Eres el curador del conocimiento de Bevinco (auditoria de inventarios para restaurantes y bares, franquicia de Sculpture Hospitality en Chile).
+
+Abajo tienes TODOS los criterios y aprendizajes cargados en el sistema, muchos de clientes especificos. Destila de ellos el CONOCIMIENTO BASE DEL NEGOCIO: todo lo transversal que un analista necesita para entender y comentar bien la auditoria de CUALQUIER restaurante o bar, aunque sea un cliente nuevo.
+
+INCLUYE: como funciona el negocio y la auditoria (variance, mermas, PAR, cobertura, compras), reglas de interpretacion de desviaciones, estilo y formato de los comentarios, criterios de priorizacion, errores tipicos a evitar.
+EXCLUYE: nombres de clientes, cifras/productos/proveedores propios de un cliente, y cualquier regla que solo tenga sentido para un local en particular.
+
+CRITERIOS CARGADOS:
+${corpus}
+
+Devuelve UNICAMENTE el documento destilado en markdown, organizado en secciones cortas con vinetas ("- "). Sin encabezado inicial ni comentarios adicionales.
+`.trim();
+
+  try {
+    const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 5000, ...reasoningFor(openaiModel) }),
+    });
+    const responsePayload = await openaiResponse.json().catch(() => ({}));
+    if (!openaiResponse.ok) {
+      console.error("[openai] distill fallo:", responsePayload?.error?.message || openaiResponse.status);
+      response.status(502).json({ error: "La IA no pudo destilar el conocimiento. Intenta de nuevo." });
+      return;
+    }
+    const distilled = String(extractOpenAiText(responsePayload) || "").trim().slice(0, 20000);
+    if (!distilled) {
+      response.status(502).json({ error: "La IA devolvió un documento vacío. Intenta de nuevo." });
+      return;
+    }
+    let baseDoc = (store.criteriaDocuments || []).find((document) => !document.clientId && document.name === documentName);
+    if (!baseDoc) {
+      baseDoc = {
+        id: `${Date.now()}-${crypto.randomUUID()}`,
+        name: documentName,
+        type: "text/markdown",
+        source: "distill-general",
+        category: "analysis_rules",
+        clientId: null,
+        clientName: "Todos los clientes",
+        uploadedAt: new Date().toISOString(),
+      };
+      store.criteriaDocuments = [baseDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
+    }
+    baseDoc.text = distilled;
+    baseDoc.size = distilled.length;
+    baseDoc.updatedAt = new Date().toISOString();
+    store.reports.forEach((item) => { item.analysis = null; });
+    await writeStore(store);
+    response.json({
+      saved: true,
+      documentName,
+      sourceCount: sources.length,
+      size: distilled.length,
+      criteriaDocuments: store.criteriaDocuments,
+    });
+  } catch (error) {
+    console.error("[openai] distill error:", error.message);
+    response.status(502).json({ error: "No se pudo destilar el conocimiento. Intenta de nuevo en unos segundos." });
   }
 });
 
