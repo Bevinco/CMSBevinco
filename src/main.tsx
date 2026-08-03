@@ -600,6 +600,7 @@ function App() {
   const [aiModels, setAiModels] = useState<{ reports?: string; chat?: string } | null>(null);
   const [comprasClientId, setComprasClientId] = useState("");
   const [comprasLoading, setComprasLoading] = useState(false);
+  const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
   const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
@@ -2074,7 +2075,7 @@ function App() {
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}
-          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "compras" ? "active" : ""} onClick={() => navigateTo("compras")}><ShoppingCart size={18} /> Sugerencias de compra</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "compras" ? "active" : ""} onClick={() => navigateTo("compras")}><ShoppingCart size={18} /> Compras</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -3078,14 +3079,29 @@ function App() {
             <p className="muted-copy">Se calcula en vivo sobre la última semana cerrada de auditoría (PAR del equipo, inventario efectivo con productos procesados). Solo lista lo accionable: productos con pedido sugerido o con exceso de inventario.</p>
           </section>
 
-          {comprasData ? (
+          {comprasData ? (() => {
+            const toBuy = comprasData.items.filter((item) => item.suggested > 0);
+            const withExcess = comprasData.items.filter((item) => item.excessCost > 0);
+            const visibleItems = comprasFilter === "comprar" ? toBuy : comprasFilter === "exceso" ? withExcess : comprasData.items;
+            const orderTotal = toBuy.reduce((sum, item) => sum + (item.orderCost || 0), 0);
+            const excessTotal = withExcess.reduce((sum, item) => sum + (item.excessCost || 0), 0);
+            return (
             <section className="panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">{comprasData.period.label}</p>
-                  <h2>{comprasData.client.name} · {comprasData.items.length} producto(s)</h2>
+                  <h2>{comprasData.client.name}</h2>
                 </div>
-                <ShoppingCart size={22} />
+                <div className="compras-filters" role="tablist">
+                  <button className={comprasFilter === "comprar" ? "active" : ""} type="button" onClick={() => setComprasFilter("comprar")}>Por comprar ({toBuy.length})</button>
+                  <button className={comprasFilter === "exceso" ? "active" : ""} type="button" onClick={() => setComprasFilter("exceso")}>Con exceso ({withExcess.length})</button>
+                  <button className={comprasFilter === "todos" ? "active" : ""} type="button" onClick={() => setComprasFilter("todos")}>Todos ({comprasData.items.length})</button>
+                </div>
+              </div>
+              <div className="compras-summary">
+                <article><span>Total del pedido sugerido</span><strong>{money(orderTotal)}</strong></article>
+                <article><span>Capital inmovilizado (exceso)</span><strong className="is-excess">{money(excessTotal)}</strong></article>
+                <article><span>Proveedores involucrados</span><strong>{new Set(toBuy.map((item) => item.provider)).size}</strong></article>
               </div>
               <div className="compras-table-wrap">
                 <table className="compras-table">
@@ -3097,9 +3113,9 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {comprasData.items.map((item, index) => (
+                    {visibleItems.map((item, index) => (
                       <tr key={`${item.provider}-${item.name}-${index}`}>
-                        <td>{index > 0 && comprasData.items[index - 1].provider === item.provider ? "" : item.provider}</td>
+                        <td>{index > 0 && visibleItems[index - 1].provider === item.provider ? "" : item.provider}</td>
                         <td><strong>{item.name}</strong>{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
                         <td>{item.size}</td>
                         <td className="num">{item.onHand ? item.onHand.toFixed(2) : "0"}</td>
@@ -3114,7 +3130,8 @@ function App() {
                 </table>
               </div>
             </section>
-          ) : null}
+            );
+          })() : null}
           </>
         ) : null}
 

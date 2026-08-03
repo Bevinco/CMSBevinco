@@ -4375,7 +4375,21 @@ button:disabled {
 .workspace-header-side { align-items: center; display: flex; gap: 10px; }
 .ai-model-tag { background: #eef4f1; border: 1px solid #d6e4de; border-radius: 999px; color: #33534b; font-size: 11.5px; font-weight: 700; padding: 6px 12px; white-space: nowrap; }
 :root[data-theme="dark"] .ai-model-tag { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
-.compras-table-wrap { overflow-x: auto; }
+.compras-table-wrap { border: 1px solid #e6ecea; border-radius: 10px; max-height: 62vh; overflow: auto; }
+.compras-table thead th { position: sticky; top: 0; z-index: 2; }
+.compras-filters { display: flex; gap: 6px; }
+.compras-filters button { background: #f0f5f3; border: 1px solid #dde7e3; border-radius: 999px; color: #52685f; cursor: pointer; font-size: 0.76rem; font-weight: 700; padding: 7px 14px; }
+.compras-filters button.active { background: #0b2b4b; border-color: #0b2b4b; color: #fff; }
+.compras-summary { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; }
+.compras-summary article { background: #f6faf8; border: 1px solid #e2eae7; border-radius: 10px; display: grid; gap: 4px; padding: 12px 14px; }
+.compras-summary span { color: #7d938d; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2px; text-transform: uppercase; }
+.compras-summary strong { color: #16332c; font-size: 1.25rem; }
+.compras-summary strong.is-excess { color: #b4530a; }
+:root[data-theme="dark"] .compras-filters button { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
+:root[data-theme="dark"] .compras-filters button.active { background: #86b4dd; border-color: #86b4dd; color: #0b1f33; }
+:root[data-theme="dark"] .compras-summary article { background: var(--surface-soft); border-color: var(--line); }
+:root[data-theme="dark"] .compras-summary strong { color: var(--text); }
+:root[data-theme="dark"] .compras-table-wrap { border-color: var(--line); }
 .compras-table { border-collapse: separate; border-spacing: 0; width: 100%; }
 .compras-table th { background: #0b2b4b; color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2px; padding: 9px 10px; text-align: left; }
 .compras-table th.num { text-align: right; }
