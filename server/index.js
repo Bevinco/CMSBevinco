@@ -5824,6 +5824,7 @@ function renderDynamicReportHtml(store, report) {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 20 } },
         interaction: { mode: "index", intersect: false },
         plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
           tooltip: { callbacks: { label: function (ctx) {
