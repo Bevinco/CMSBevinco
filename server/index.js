@@ -4524,7 +4524,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const analysis = payload.analysis || generateReportAnalysis(payload);
 
   // ---- Paleta del reporte Bevinco (identica al modelo Excel) ----
-  const NAVY = "#16365d";
+  // En web se usa el navy corporativo de bevinco.cl; el PDF conserva el
+  // navy del modelo Excel validado con el equipo.
+  const NAVY = webMode ? "#001E43" : "#16365d";
   const GREEN = "#90bf4f";
   const TEAL = "#8bc6c1";
   const GRAY_TXT = "#595959";
@@ -5083,6 +5085,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reporte ${escapeHtml(clientTitle)}</title>
+  ${webMode ? `
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />` : ""}
   <style>
     @page { margin: 7mm; size: A4 portrait; }
     * { box-sizing: border-box; }
@@ -5139,13 +5145,33 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-col .bv-panel { margin-bottom: 0; }
     .page-break { break-before: page; page-break-before: always; }
     ${webMode ? `
-    body { padding: 0 14px 48px; }
-    .web-toolbar { align-items: center; background: ${NAVY}; color: #fff; display: flex; gap: 12px; justify-content: space-between; margin: 0 -14px 22px; padding: 13px 22px; position: sticky; top: 0; z-index: 5; }
-    .web-toolbar-brand { display: flex; flex-direction: column; line-height: 1.25; }
-    .web-toolbar-brand strong { font-size: 15px; letter-spacing: 1.2px; }
-    .web-toolbar-brand span { color: #bcd9d6; font-size: 12px; }
-    .web-toolbar button { background: ${GREEN}; border: 0; border-radius: 8px; color: ${NAVY}; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 18px; }
-    .bv-page { border-radius: 12px; box-shadow: 0 20px 44px rgba(9, 28, 24, 0.14); padding: 18px 26px 12px; }
+    /* ---- Identidad web bevinco.cl: crema + navy + verde, Inter black ---- */
+    body { background: #F9F6EF; counter-reset: bvsec; font-family: "Inter", "Segoe UI", Arial, sans-serif; padding: 0 14px 56px; }
+    .web-toolbar { align-items: center; background: ${NAVY}; color: #F9F6EF; display: flex; gap: 12px; justify-content: space-between; margin: 0 -14px 26px; padding: 14px 24px; position: sticky; top: 0; z-index: 5; }
+    .web-toolbar-brand { display: flex; flex-direction: column; line-height: 1.3; }
+    .web-toolbar-brand strong { color: ${GREEN}; font-size: 17px; font-weight: 900; letter-spacing: -0.02em; }
+    .web-toolbar-brand span { color: #b9c6d8; font-size: 12.5px; font-weight: 600; }
+    .web-toolbar button { background: ${GREEN}; border: 0; border-radius: 100px; color: ${NAVY}; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
+    .web-toolbar button:hover { filter: brightness(1.06); }
+    .bv-page { border-radius: 24px; box-shadow: 0 24px 60px rgba(0, 30, 67, 0.10); padding: 26px 30px 18px; }
+    .bv-title h1 { color: ${NAVY}; font-weight: 900; letter-spacing: -0.04em; }
+    .bv-underline { background: ${GREEN}; border-radius: 100px; }
+    .bv-brand-name { font-weight: 900; letter-spacing: -0.02em; }
+    .bv-brand-by { color: #6b8f2f; }
+    .bv-period { border: 2px solid ${GREEN}; border-radius: 12px; box-shadow: none; overflow: hidden; }
+    .bv-period-title { background: ${GREEN}; border-bottom: 0; color: ${NAVY}; font-weight: 800; }
+    .bv-panel { border: 1px solid #ece7da; border-radius: 18px; padding: 14px 16px 12px; }
+    .bv-panel h2 { color: ${NAVY}; font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
+    .bv-panel h2::before { color: ${GREEN}; content: counter(bvsec, decimal-leading-zero) " "; counter-increment: bvsec; font-weight: 900; }
+    .bv-kpi { border-radius: 14px; overflow: hidden; }
+    .bv-kpi-value { font-weight: 900; letter-spacing: -0.02em; }
+    .bv-comments { border: 1px solid #ece7da; border-radius: 18px; }
+    .bv-ctitle { color: #6b8f2f; font-weight: 800; letter-spacing: -0.01em; }
+    .bv-table th.bv-table-title { background: ${GREEN}; border-radius: 12px 12px 0 0; color: ${NAVY}; font-weight: 800; }
+    .bv-table tr.alt td { background: #faf8f2; }
+    .bv-difftable tr.total td { background: #f4f1e7; }
+    .web-footer { color: ${NAVY}; font-size: 14px; font-weight: 700; margin: 26px auto 0; max-width: 800px; text-align: center; }
+    .web-footer b { color: #6b8f2f; }
     @media (max-width: 760px) {
       .bv-row, .bv-grid2, .bv-stockeff { grid-template-columns: 1fr; }
       .bv-head { gap: 8px; grid-template-columns: 1fr; justify-items: center; }
@@ -5154,8 +5180,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       .bv-kpis { flex-direction: row; flex-wrap: wrap; }
       .bv-kpi { flex: 1 1 140px; }
       .bv-table { display: block; overflow-x: auto; }
+      .bv-page { padding: 18px 16px 12px; }
     }
-    @media print { .web-toolbar { display: none; } }
+    @media print { .web-toolbar, .web-footer { display: none; } }
     ` : ""}
     @media print {
       body { background: #fff; padding: 0; }
@@ -5251,6 +5278,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     </section>
     ${pageFooter}
   </main>
+  ${webMode ? `<footer class="web-footer">Tú te encargas del sabor. <b>Nosotros del margen.</b> — Bevinco · Sculpture Hospitality</footer>` : ""}
 </body>
 </html>`;
 }
