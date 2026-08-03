@@ -4352,9 +4352,12 @@ button:disabled {
 .week-nav .secondary-button { font-size: 0.78rem; min-height: 34px; padding: 0 12px; }
 .week-nav .button-link { font-size: 0.78rem; min-height: 34px; padding: 0 12px; }
 
-.workflow-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: thin; }
-.workflow-col { background: #f6f8f7; border: 1px solid #e2eae7; border-radius: 14px; display: flex; flex: 0 0 244px; flex-direction: column; max-height: 470px; min-width: 244px; }
-.workflow-col.is-empty { flex-basis: 168px; min-width: 168px; opacity: 0.72; }
+.workflow-board { display: flex; flex-direction: column; gap: 14px; }
+.workflow-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(226px, 1fr)); }
+.workflow-col { background: #f6f8f7; border: 1px solid #e2eae7; border-radius: 14px; display: flex; flex-direction: column; max-height: 470px; min-width: 0; }
+.workflow-empty-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.workflow-empty-label { color: #9db0aa; font-size: 11.5px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; }
+.workflow-empty-chip { align-items: center; background: #fff; border: 1px solid #e2eae7; border-radius: 999px; color: #64796f; display: inline-flex; font-size: 11.5px; font-weight: 700; gap: 7px; padding: 5px 12px; }
 .workflow-col > header { align-items: center; display: flex; gap: 8px; padding: 12px 12px 9px; }
 .workflow-dot { border-radius: 50%; flex: 0 0 9px; height: 9px; width: 9px; }
 .workflow-col > header strong { color: #33534b; flex: 1; font-size: 12.5px; letter-spacing: 0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4471,6 +4474,7 @@ button:disabled {
 :root[data-theme="dark"] .workflow-due { background: var(--surface-soft); color: var(--text-muted); }
 :root[data-theme="dark"] .workflow-due.soon { background: rgba(201, 143, 10, 0.16); color: #e0a92f; }
 :root[data-theme="dark"] .workflow-due.overdue { background: rgba(210, 63, 49, 0.16); color: #f08a7c; }
+:root[data-theme="dark"] .workflow-empty-chip { background: var(--surface-soft); border-color: var(--line); color: var(--text-muted); }
 :root[data-theme="dark"] .inline-link { color: #86b4dd; }
 
 @media (max-width: 900px) {

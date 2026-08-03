@@ -2384,60 +2384,84 @@ function App() {
                 </div>
                 <ListChecks size={22} />
               </div>
-              <div className="workflow-board">
-                {WORKFLOW_COLUMNS.map((column) => {
-                  const windowStart = Date.now() - WORKFLOW_WINDOW_DAYS * 86400000;
-                  const boardTasks = (calendarTasks.length ? calendarTasks : clickupTasks)
-                    .filter((task) => !WORKFLOW_HIDDEN_STATUS.test(task.status || ""))
-                    .filter((task) => !task.dueDate || task.dueDate >= windowStart);
-                  // Cada tarea cae en UNA sola columna: la primera cuyo regex
-                  // matchea, y si ninguna matchea, en la columna sin regex.
-                  const cards = boardTasks.filter((task) => {
+              {(() => {
+                const windowStart = Date.now() - WORKFLOW_WINDOW_DAYS * 86400000;
+                const boardTasks = (calendarTasks.length ? calendarTasks : clickupTasks)
+                  .filter((task) => !WORKFLOW_HIDDEN_STATUS.test(task.status || ""))
+                  .filter((task) => !task.dueDate || task.dueDate >= windowStart);
+                // Cada tarea cae en UNA sola columna: la primera cuyo regex
+                // matchea, y si ninguna matchea, en la columna sin regex.
+                const grouped = WORKFLOW_COLUMNS.map((column) => ({
+                  column,
+                  cards: boardTasks.filter((task) => {
                     const owner = WORKFLOW_COLUMNS.find((item) => item.match && item.match.test(task.status || ""));
                     return owner ? owner.title === column.title : !column.match;
-                  });
-                  const todayStart = new Date().setHours(0, 0, 0, 0);
-                  return (
-                    <div className={`workflow-col ${cards.length ? "" : "is-empty"}`} key={column.title}>
-                      <header>
-                        <span className="workflow-dot" style={{ background: column.color }} />
-                        <strong title={column.title}>{column.title}</strong>
-                        <span className="workflow-count">{cards.length}</span>
-                      </header>
-                      <div className="workflow-col-body">
-                        {cards.length ? cards.map((task) => {
-                          const due = task.dueDate || null;
-                          const dueTone = !due ? "" : due < todayStart ? "overdue" : due < todayStart + 2 * 86400000 ? "soon" : "";
-                          return (
-                            <article className="workflow-card" key={task.id}>
-                              <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
-                                <strong>{task.name}</strong>
-                                <ExternalLink size={13} />
-                              </a>
-                              <div className="workflow-card-meta">
-                                <span className={`workflow-due ${dueTone}`}>
-                                  {due ? `${dueTone === "overdue" ? "Atrasada · " : ""}${shortDate(due)}` : "Sin fecha"}
-                                </span>
-                              </div>
-                              <select
-                                aria-label={`Mover ${task.name} de estado`}
-                                value={column.match ? column.title : ""}
-                                onChange={(event) => moveClickupTask(task, event.target.value)}
-                              >
-                                {/* "Otros" es el catch-all: no es un estado de ClickUp
-                                    y por lo tanto no es un destino valido. Se muestra
-                                    el estado crudo para que el equipo vea que aparecio. */}
-                                {column.match ? null : <option value="" disabled>{task.status || "Sin estado"}</option>}
-                                {WORKFLOW_COLUMNS.filter((option) => option.match).map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
-                              </select>
-                            </article>
-                          );
-                        }) : <p className="workflow-empty">Sin tareas</p>}
-                      </div>
+                  }),
+                }));
+                // Sin scroll horizontal: solo los estados CON tareas ocupan
+                // columna (la grilla envuelve hacia abajo); los vacios se
+                // muestran como chips para no perder visibilidad del flujo.
+                const filled = grouped.filter((group) => group.cards.length);
+                const empty = grouped.filter((group) => !group.cards.length);
+                const todayStart = new Date().setHours(0, 0, 0, 0);
+                return (
+                  <div className="workflow-board">
+                    <div className="workflow-grid">
+                      {filled.map(({ column, cards }) => (
+                        <div className="workflow-col" key={column.title}>
+                          <header>
+                            <span className="workflow-dot" style={{ background: column.color }} />
+                            <strong title={column.title}>{column.title}</strong>
+                            <span className="workflow-count">{cards.length}</span>
+                          </header>
+                          <div className="workflow-col-body">
+                            {cards.map((task) => {
+                              const due = task.dueDate || null;
+                              const dueTone = !due ? "" : due < todayStart ? "overdue" : due < todayStart + 2 * 86400000 ? "soon" : "";
+                              return (
+                                <article className="workflow-card" key={task.id}>
+                                  <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
+                                    <strong>{task.name}</strong>
+                                    <ExternalLink size={13} />
+                                  </a>
+                                  <div className="workflow-card-meta">
+                                    <span className={`workflow-due ${dueTone}`}>
+                                      {due ? `${dueTone === "overdue" ? "Atrasada · " : ""}${shortDate(due)}` : "Sin fecha"}
+                                    </span>
+                                  </div>
+                                  <select
+                                    aria-label={`Mover ${task.name} de estado`}
+                                    value={column.match ? column.title : ""}
+                                    onChange={(event) => moveClickupTask(task, event.target.value)}
+                                  >
+                                    {/* "Otros" es el catch-all: no es un estado de ClickUp
+                                        y por lo tanto no es un destino valido. Se muestra
+                                        el estado crudo para que el equipo vea que aparecio. */}
+                                    {column.match ? null : <option value="" disabled>{task.status || "Sin estado"}</option>}
+                                    {WORKFLOW_COLUMNS.filter((option) => option.match).map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
+                                  </select>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {!filled.length ? <p className="workflow-empty">No hay auditorías activas en el tablero.</p> : null}
                     </div>
-                  );
-                })}
-              </div>
+                    {empty.length ? (
+                      <div className="workflow-empty-row">
+                        <span className="workflow-empty-label">Sin tareas:</span>
+                        {empty.map(({ column }) => (
+                          <span className="workflow-empty-chip" key={column.title}>
+                            <span className="workflow-dot" style={{ background: column.color }} />
+                            {column.title}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </section>
 
             <section className="panel week-calendar-panel">
