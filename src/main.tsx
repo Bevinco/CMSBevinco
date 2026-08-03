@@ -50,22 +50,21 @@ const WORKFLOW_STATES = [
   "Listo para el Reporte",
 ] as const;
 const CLICKUP_CALENDAR_URL = "https://app.clickup.com/31025999/v/c/xjuuf-5994";
-const WORKFLOW_CARDS_PER_PAGE = 4;
 // Columnas del tablero del inicio: cada una matchea el estado REAL de la
 // tarea en ClickUp (con o sin tildes), que es la fuente de verdad del equipo.
 // La lista "Auditorias Chile" tiene NUEVE estados, no cinco. El orden sigue el
 // orderindex de ClickUp. La ultima columna no tiene regex: es el catch-all, y
 // ahi cae cualquier estado que el equipo agregue sin avisar.
-const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp | null }> = [
-  { title: "Sin Iniciar", match: /inactiv/i },
-  { title: "Falta Información", match: /falta.*inf/i },
-  { title: "En Proceso", match: /proceso|en curso/i },
-  { title: "Gráficos Actualizados", match: /gr[aá]fico/i },
-  { title: "Comentarios Escritos", match: /comentario/i },
+const WORKFLOW_COLUMNS: Array<{ title: string; match: RegExp | null; color: string }> = [
+  { title: "Sin Iniciar", match: /inactiv/i, color: "#a6b3ae" },
+  { title: "Falta Información", match: /falta.*inf/i, color: "#d23f31" },
+  { title: "En Proceso", match: /proceso|en curso/i, color: "#2e75b6" },
+  { title: "Gráficos Actualizados", match: /gr[aá]fico/i, color: "#8bc6c1" },
+  { title: "Comentarios Escritos", match: /comentario/i, color: "#c98f0a" },
   // "listo"/"lista para reporte": el nombre exacto varia en la lista de ClickUp.
-  { title: "Listo para el Reporte", match: /list[oa]/i },
-  { title: "Reporte Enviado", match: /enviad/i },
-  { title: "Otros", match: null },
+  { title: "Listo para el Reporte", match: /list[oa]/i, color: "#90bf4f" },
+  { title: "Reporte Enviado", match: /enviad/i, color: "#0b2b4b" },
+  { title: "Otros", match: null, color: "#c9b26a" },
 ];
 // `cerrada` es type "closed" en ClickUp: archivo, no un paso del flujo. Darle
 // columna serian decenas de paginas tapando el trabajo real. Se oculta a
@@ -718,7 +717,6 @@ function App() {
   const [reportSearch, setReportSearch] = useState("");
   const [reportStatusFilter, setReportStatusFilter] = useState("Todos");
   const [reportPage, setReportPage] = useState(0);
-  const [workflowPages, setWorkflowPages] = useState<Record<string, number>>({});
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [calendarTasks, setCalendarTasks] = useState<ClickupTask[]>([]);
   const [aiModels, setAiModels] = useState<{ reports?: string; chat?: string } | null>(null);
@@ -2363,57 +2361,48 @@ function App() {
                     .filter((task) => !task.dueDate || task.dueDate >= windowStart);
                   // Cada tarea cae en UNA sola columna: la primera cuyo regex
                   // matchea, y si ninguna matchea, en la columna sin regex.
-                  // Antes se filtraba columna por columna sin destino final, asi
-                  // que un estado no contemplado no aparecia en ninguna parte.
                   const cards = boardTasks.filter((task) => {
                     const owner = WORKFLOW_COLUMNS.find((item) => item.match && item.match.test(task.status || ""));
                     return owner ? owner.title === column.title : !column.match;
                   });
-                  const totalPages = Math.max(1, Math.ceil(cards.length / WORKFLOW_CARDS_PER_PAGE));
-                  const page = Math.min(workflowPages[column.title] || 0, totalPages - 1);
-                  const pageCards = cards.slice(page * WORKFLOW_CARDS_PER_PAGE, (page + 1) * WORKFLOW_CARDS_PER_PAGE);
+                  const todayStart = new Date().setHours(0, 0, 0, 0);
                   return (
-                    <div className="workflow-col" key={column.title}>
+                    <div className={`workflow-col ${cards.length ? "" : "is-empty"}`} key={column.title}>
                       <header>
-                        <strong>{column.title}</strong>
-                        <span>{cards.length}</span>
+                        <span className="workflow-dot" style={{ background: column.color }} />
+                        <strong title={column.title}>{column.title}</strong>
+                        <span className="workflow-count">{cards.length}</span>
                       </header>
-                      {cards.length ? pageCards.map((task) => (
-                        <article className="workflow-card" key={task.id}>
-                          <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer">
-                            <strong>{task.name}</strong>
-                            <small>{task.dueDate ? shortDate(task.dueDate) : task.status}</small>
-                          </a>
-                          <select
-                            aria-label={`Mover ${task.name} de estado`}
-                            value={column.match ? column.title : ""}
-                            onChange={(event) => moveClickupTask(task, event.target.value)}
-                          >
-                            {/* "Otros" es el catch-all: no es un estado de ClickUp
-                                y por lo tanto no es un destino valido. Se muestra
-                                el estado crudo para que el equipo vea que aparecio. */}
-                            {column.match ? null : <option value="" disabled>{task.status || "Sin estado"}</option>}
-                            {WORKFLOW_COLUMNS.filter((option) => option.match).map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
-                          </select>
-                        </article>
-                      )) : <p className="workflow-empty">Sin tareas aquí.</p>}
-                      {totalPages > 1 ? (
-                        <footer className="workflow-pager">
-                          <button
-                            aria-label="Página anterior"
-                            disabled={page === 0}
-                            type="button"
-                            onClick={() => setWorkflowPages((current) => ({ ...current, [column.title]: page - 1 }))}
-                          >‹</button>
-                          <span>{page + 1} / {totalPages}</span>
-                          <button
-                            aria-label="Página siguiente"
-                            disabled={page >= totalPages - 1}
-                            type="button"
-                            onClick={() => setWorkflowPages((current) => ({ ...current, [column.title]: page + 1 }))}
-                          >›</button>
-                        </footer>
-                      ) : null}
+                      <div className="workflow-col-body">
+                        {cards.length ? cards.map((task) => {
+                          const due = task.dueDate || null;
+                          const dueTone = !due ? "" : due < todayStart ? "overdue" : due < todayStart + 2 * 86400000 ? "soon" : "";
+                          return (
+                            <article className="workflow-card" key={task.id}>
+                              <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
+                                <strong>{task.name}</strong>
+                                <ExternalLink size={13} />
+                              </a>
+                              <div className="workflow-card-meta">
+                                <span className={`workflow-due ${dueTone}`}>
+                                  {due ? `${dueTone === "overdue" ? "Atrasada · " : ""}${shortDate(due)}` : "Sin fecha"}
+                                </span>
+                              </div>
+                              <select
+                                aria-label={`Mover ${task.name} de estado`}
+                                value={column.match ? column.title : ""}
+                                onChange={(event) => moveClickupTask(task, event.target.value)}
+                              >
+                                {/* "Otros" es el catch-all: no es un estado de ClickUp
+                                    y por lo tanto no es un destino valido. Se muestra
+                                    el estado crudo para que el equipo vea que aparecio. */}
+                                {column.match ? null : <option value="" disabled>{task.status || "Sin estado"}</option>}
+                                {WORKFLOW_COLUMNS.filter((option) => option.match).map((option) => <option key={option.title} value={option.title}>{option.title}</option>)}
+                              </select>
+                            </article>
+                          );
+                        }) : <p className="workflow-empty">Sin tareas</p>}
+                      </div>
                     </div>
                   );
                 })}
