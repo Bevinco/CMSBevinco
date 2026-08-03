@@ -1793,8 +1793,9 @@ function criteriaForClient(criteriaDocuments = [], clientName = "", clientId = "
     seen.add(document.id);
     ordered.push(document);
   }
-  const learning = ordered.filter((document) => document.name === "Aprendizajes del chat");
-  const rest = ordered.filter((document) => document.name !== "Aprendizajes del chat");
+  const learningNames = new Set(["Aprendizajes del chat", "Aprendizajes generales"]);
+  const learning = ordered.filter((document) => learningNames.has(document.name));
+  const rest = ordered.filter((document) => !learningNames.has(document.name));
   return [...learning, ...rest].slice(0, 6);
 }
 
@@ -7038,9 +7039,12 @@ app.post("/api/module1/reports/:reportId/chat/learn", requireAuth, async (reques
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
   const clientName = client?.name || report.clientId;
-  const documentName = "Aprendizajes del chat";
+  // scope=general: el aprendizaje se guarda como conocimiento de la CASA y
+  // aplica a todos los clientes (pedido de Paulina: no entrenar uno a uno).
+  const generalScope = String(request.body?.scope || "") === "general";
+  const documentName = generalScope ? "Aprendizajes generales" : "Aprendizajes del chat";
   let learningDoc = (store.criteriaDocuments || []).find(
-    (document) => document.clientId === report.clientId && document.name === documentName,
+    (document) => document.name === documentName && (generalScope ? !document.clientId : document.clientId === report.clientId),
   );
   const existingRules = learningDoc ? String(learningDoc.text || "") : "";
 
@@ -7050,9 +7054,13 @@ app.post("/api/module1/reports/:reportId/chat/learn", requireAuth, async (reques
     .slice(0, 12000);
 
   const prompt = `
-Eres el curador de la memoria del agente de reportes Bevinco para el cliente "${clientName}".
+${generalScope
+    ? `Eres el curador de la memoria del agente de reportes Bevinco. Estas reglas son el conocimiento base de la CASA y aplican a TODOS los clientes de la cartera.
 
-De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES que deban aplicarse en TODOS los futuros reportes de este cliente: reglas de estilo o formato, preferencias del equipo, datos permanentes del negocio u operacion, y correcciones que deban recordarse siempre.
+De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES y GENERALES que sirvan para cualquier cliente: metodologia de analisis, reglas de estilo o formato, criterios de interpretacion y correcciones transversales. EXCLUYE datos, cifras o preferencias propios de un cliente en particular.`
+    : `Eres el curador de la memoria del agente de reportes Bevinco para el cliente "${clientName}".
+
+De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES que deban aplicarse en TODOS los futuros reportes de este cliente: reglas de estilo o formato, preferencias del equipo, datos permanentes del negocio u operacion, y correcciones que deban recordarse siempre.`}
 
 IGNORA: pedidos puntuales de este periodo (cifras, productos o hechos de esta semana), saludos, agradecimientos y todo lo que no sirva para el proximo reporte.
 
@@ -7091,8 +7099,8 @@ Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sig
         type: "text/markdown",
         source: "chat-learn",
         category: "analysis_rules",
-        clientId: report.clientId,
-        clientName,
+        clientId: generalScope ? null : report.clientId,
+        clientName: generalScope ? "Todos los clientes" : clientName,
         uploadedAt: new Date().toISOString(),
       };
       store.criteriaDocuments = [learningDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
@@ -7107,7 +7115,7 @@ Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sig
       saved: true,
       ruleCount,
       documentName,
-      clientName,
+      clientName: generalScope ? "todos los clientes" : clientName,
       criteriaDocuments: store.criteriaDocuments,
     });
   } catch (error) {

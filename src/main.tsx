@@ -1583,14 +1583,18 @@ function App() {
     return Object.keys(filled).length ? (filled as Partial<NonNullable<Report["analysis"]>>) : null;
   }
 
-  const [chatLearning, setChatLearning] = useState(false);
-  async function learnFromChat() {
+  const [chatLearning, setChatLearning] = useState<"" | "client" | "general">("");
+  async function learnFromChat(scope: "client" | "general" = "client") {
     if (!selectedReport || chatLearning || chatMessages.length < 2) return;
-    setChatLearning(true);
+    setChatLearning(scope);
     setWorkStatus("loading");
     try {
       const payload = await readJson<{ saved: boolean; ruleCount?: number; clientName?: string; message?: string; criteriaDocuments?: CriteriaDocument[] }>(
-        await fetch(`/api/module1/reports/${selectedReport.id}/chat/learn`, { method: "POST" }),
+        await fetch(`/api/module1/reports/${selectedReport.id}/chat/learn`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ scope }),
+        }),
       );
       if (payload.criteriaDocuments) setCriteriaDocuments(payload.criteriaDocuments);
       setError(payload.saved
@@ -1601,7 +1605,7 @@ function App() {
       setError(learnError instanceof Error ? learnError.message : "No se pudo guardar el aprendizaje.");
       setWorkStatus("error");
     } finally {
-      setChatLearning(false);
+      setChatLearning("");
     }
   }
 
@@ -2686,11 +2690,15 @@ function App() {
             </div>
             {chatMessages.length >= 2 ? (
               <div className="chat-learn-bar">
-                <button className="secondary-button" disabled={chatLearning} type="button" onClick={learnFromChat}>
-                  {chatLearning ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {chatLearning ? "Guardando memoria..." : "Guardar aprendizajes en el criterio del cliente"}
+                <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("client")}>
+                  {chatLearning === "client" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                  {chatLearning === "client" ? "Guardando memoria..." : "Guardar aprendizajes del cliente"}
                 </button>
-                <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales) y las suma a la skill de {selectedClient?.name || "este cliente"}.</small>
+                <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("general")}>
+                  {chatLearning === "general" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                  {chatLearning === "general" ? "Guardando memoria..." : "Guardar para TODOS los clientes"}
+                </button>
+                <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales). "Del cliente" las suma a la skill de {selectedClient?.name || "este cliente"}; "para TODOS" las guarda como conocimiento base de la casa, que aplica a toda la cartera.</small>
               </div>
             ) : null}
             {chatFiles.length ? (
