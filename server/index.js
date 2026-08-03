@@ -3069,6 +3069,17 @@ function buildDetailedStockMap(rows) {
 function applyEffectiveInventory(rows, detailedStock, client) {
   if (!detailedStock?.size) return;
   const mappings = Array.isArray(client?.stateMappings) ? client.stateMappings : [];
+  const normalize = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  // Nombres que SI existen como item comprable en el Intelipar: un item del
+  // detailed que no este aqui y contenga el nombre del comprable es una forma
+  // procesada del mismo producto (ej. "Pulpo" -> "Pulpo Cocido") y su stock
+  // debe restar de la sugerencia aunque nadie haya configurado el mapeo.
+  const purchasableKeys = new Set();
+  for (const row of rows || []) {
+    const rowName = pickRecordValue(row.record || {}, ["itemName", "item"], "") ||
+      pickRecordValueFuzzy(row.record || {}, /nombreArt/i) || row.values?.[0] || "";
+    if (rowName && !isTotalRow(rowName) && !/:\s*$/.test(String(rowName))) purchasableKeys.add(normalize(rowName));
+  }
   for (const row of rows || []) {
     const record = row.record || {};
     const name = String(
@@ -3080,11 +3091,28 @@ function applyEffectiveInventory(rows, detailedStock, client) {
     const key = name.toLowerCase();
     let stock = detailedStock.has(key) ? detailedStock.get(key) : parseNumber(record.existencia);
     const mapping = mappings.find((item) => String(item.comprable || "").toLowerCase() === key);
+    const consumedKeys = new Set([key]);
     for (const processed of mapping?.procesados || []) {
-      const processedStock = detailedStock.get(String(processed.nombre || processed.name || "").toLowerCase());
+      const processedKey = String(processed.nombre || processed.name || "").toLowerCase();
+      const processedStock = detailedStock.get(processedKey);
+      consumedKeys.add(processedKey);
       if (!processedStock) continue;
       const yieldFactor = Number(processed.rendimiento ?? processed.factor);
       stock += yieldFactor > 0 && yieldFactor <= 1 ? processedStock / yieldFactor : processedStock;
+    }
+    // Auto-deteccion de variantes: items del detailed que contienen el nombre
+    // del comprable y no son un comprable propio del Intelipar (rendimiento
+    // 1:1 salvo mapeo explicito; el mapeo siempre manda).
+    const baseKey = normalize(name);
+    if (baseKey.length >= 4) {
+      for (const [detailedKey, detailedUnits] of detailedStock) {
+        const variantKey = normalize(detailedKey);
+        if (consumedKeys.has(detailedKey) || variantKey === baseKey) continue;
+        if (!variantKey.includes(baseKey)) continue;
+        if (purchasableKeys.has(variantKey)) continue;
+        stock += detailedUnits;
+        consumedKeys.add(detailedKey);
+      }
     }
     if (Number.isFinite(stock)) record.existencia = String(Number(stock.toFixed(2)));
   }
@@ -3242,6 +3270,18 @@ const EXTRACTOR_VERSION = 3;
 
 async function syncSculptureSources(store, report, requestBody = {}) {
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  // Si el equipo ya trabajo el analisis (usar como resumen / IA) y esta
+  // re-sincronizacion no cambia las cifras, se CONSERVA: antes cada
+  // "Generar reporte" lo borraba y el PDF salia con la plantilla.
+  const previousAnalysis = report.analysis || null;
+  const summarySignature = (summary) => JSON.stringify([
+    Math.round(summary?.revenue || 0),
+    Math.round(summary?.varianceAmount || 0),
+    summary?.costPercent || 0,
+    Math.round(summary?.suggestedCost || 0),
+    Math.round(summary?.purchasedCost || 0),
+  ]);
+  const previousSignature = summarySignature(report.summary);
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
   const { cid, pid, cidSource, pidSource } = resolveSculptureContext({ client, period, requestBody });
   const area = client?.area || requestBody.area || "Food";
@@ -3466,7 +3506,9 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
   report.updatedAt = new Date().toISOString();
   report.extractorVersion = EXTRACTOR_VERSION;
-  report.analysis = null;
+  report.analysis = previousAnalysis && summarySignature(report.summary) === previousSignature
+    ? previousAnalysis
+    : null;
   return syncResults;
 }
 
@@ -4905,7 +4947,7 @@ function renderTwoPageReportHtml(store, report) {
   const commentBlock = (title, items) => {
     const list = (items || []).length ? items : ["Sin hallazgos relevantes para este periodo."];
     return `<h3 class="bv-ctitle">${escapeHtml(title)}</h3>` +
-      list.map((item) => `<div class="bv-citem"><span>&minus;</span><p>${escapeHtml(item)}</p></div>`).join("");
+      list.map((item) => `<div class="bv-citem"><span>&minus;</span><p>${escapeHtml(item).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")}</p></div>`).join("");
   };
   const kpiBox = (title, value) => `
     <div class="bv-kpi">
@@ -5382,6 +5424,7 @@ app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
     reports: store.reports.map((item) => buildReportPayload(store, item)),
     selectedReport: report ? buildReportPayload(store, report) : null,
     backupStatus: supabaseStatus,
+    aiModels: { reports: openaiModel, chat: openaiChatModel },
   });
 });
 
@@ -6456,37 +6499,32 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
 // Sculpture, completa PAR/sugerencia si es cocina (mismas formulas del
 // equipo) y deja solo lo accionable: items con pedido sugerido o con exceso
 // de inventario, agrupados por proveedor y con fila de total.
-app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async (request, response) => {
-  const store = await readStore();
-  const report = findReport(store, request.params.reportId);
-  if (!report) {
-    response.status(404).json({ error: "No se encontró el reporte." });
-    return;
-  }
-  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+// Calcula la sugerencia de compra vigente de un local para un periodo:
+// Intelipar fresco + inventario efectivo (cocinas) + PAR del equipo. Lo usan
+// el CSV del reporte y el modulo de Sugerencias de Compra.
+async function computeSuggestionItems({ client, period }) {
   const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
-  const period = report.monthly
-    ? store.periods.find((candidate) => candidate.id === (report.includedPeriods || []).slice(-1)[0]?.id)
-    : store.periods.find((candidate) => candidate.id === report.periodId);
   const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
   if (!cid || !pid) {
-    response.status(400).json({ error: "Este reporte no tiene un periodo de Sculpture asociado para la sugerencia." });
-    return;
+    const invalid = new Error("El restaurante o el periodo no tienen identificadores de Sculpture.");
+    invalid.status = 400;
+    throw invalid;
   }
-
   let data;
   try {
     const area = client?.area || "Food";
     const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
     data = await fetchSculptureInternalReport({ type: "intelipar", cid, pid, area, baseUrl });
   } catch (error) {
-    console.error("[sugerencia-csv] fallo:", error.message);
-    response.status(502).json({ error: "Sculpture no respondió la sugerencia de compra. Intenta de nuevo en unos segundos." });
-    return;
+    console.error("[sugerencia] fallo:", error.message);
+    const wrapped = new Error("Sculpture no respondió la sugerencia de compra. Intenta de nuevo en unos segundos.");
+    wrapped.status = 502;
+    throw wrapped;
   }
   if (!data.rows?.length) {
-    response.status(404).json({ error: "Sculpture no tiene datos de Intelipar para este periodo." });
-    return;
+    const empty = new Error("Sculpture no tiene datos de Intelipar para este periodo.");
+    empty.status = 404;
+    throw empty;
   }
 
   const periodMs = period?.startsAt && period?.endsAt ? Date.parse(period.endsAt) - Date.parse(period.startsAt) : 0;
@@ -6535,6 +6573,98 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
     })
     .filter((item) => item && (item.suggested > 0 || item.excessCost > 0))
     .sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
+  return { items };
+}
+
+// Modulo Sugerencias de Compra: la sugerencia VIGENTE de un local (ultima
+// semana cerrada), sin pasar por un reporte. format=csv descarga la hoja
+// lista para enviar; por defecto responde JSON para la vista del modulo.
+app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    response.status(404).json({ error: "No se encontró el restaurante." });
+    return;
+  }
+  let clientPeriods = [];
+  try {
+    clientPeriods = await fetchSculpturePeriodsForClient({
+      baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
+      cid: configuredIdentifier(client.sculptureCid, client.cid),
+    });
+  } catch {
+    clientPeriods = [];
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const rawPeriod = clientPeriods.find((period) => period.endsAt && period.endsAt < today) || clientPeriods[0];
+  const period = rawPeriod ? ensurePeriod(store, rawPeriod) : null;
+  if (!period) {
+    response.status(404).json({ error: "El restaurante no tiene periodos cerrados en Sculpture." });
+    return;
+  }
+  try {
+    const { items } = await computeSuggestionItems({ client, period });
+    if (String(request.query.format || "") === "csv") {
+      const escapeCsv = (value) => {
+        const text = String(value ?? "");
+        return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const money = (value) => (value ? Math.round(value) : 0);
+      const qty = (value) => (Number.isFinite(value) ? Number(value.toFixed(2)) : 0);
+      const lines = [
+        ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "Inventario al costo ($)", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Exceso de inventario ($)", "Alerta"].map(escapeCsv).join(";"),
+      ];
+      let lastProvider = "";
+      for (const item of items) {
+        lines.push([
+          item.provider === lastProvider ? "" : item.provider,
+          item.name, item.size, money(item.unitCost), qty(item.onHand), money(item.onHandCost),
+          qty(item.par), qty(item.suggested), money(item.orderCost), qty(item.inventoryDays), money(item.excessCost), item.alerta,
+        ].map(escapeCsv).join(";"));
+        lastProvider = item.provider;
+      }
+      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}`
+        .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
+      response.setHeader("content-type", "text/csv; charset=utf-8");
+      response.setHeader("content-disposition", `attachment; filename="${fileName}.csv"`);
+      response.send(Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8"));
+      return;
+    }
+    response.json({
+      client: { id: client.id, name: client.name, area: client.area },
+      period: { id: period.id, label: period.label },
+      items,
+    });
+  } catch (error) {
+    response.status(error.status || 502).json({ error: error.message || "No se pudo calcular la sugerencia." });
+  }
+});
+
+app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
+  const period = report.monthly
+    ? store.periods.find((candidate) => candidate.id === (report.includedPeriods || []).slice(-1)[0]?.id)
+    : store.periods.find((candidate) => candidate.id === report.periodId);
+  const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
+  if (!cid || !pid) {
+    response.status(400).json({ error: "Este reporte no tiene un periodo de Sculpture asociado para la sugerencia." });
+    return;
+  }
+
+  let items;
+  try {
+    ({ items } = await computeSuggestionItems({ client, period }));
+  } catch (error) {
+    response.status(error.status || 502).json({ error: error.message || "No se pudo calcular la sugerencia." });
+    return;
+  }
 
   const escapeCsv = (value) => {
     const text = String(value ?? "");

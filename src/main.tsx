@@ -75,7 +75,13 @@ const WORKFLOW_HIDDEN_STATUS = /^cerrad/i;
 const WORKFLOW_WINDOW_DAYS = 30;
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "monthly" | "tasks" | "reports" | "criteria" | "users";
+type ActiveView = "dashboard" | "module1" | "monthly" | "compras" | "tasks" | "reports" | "criteria" | "users";
+
+type SuggestionItem = {
+  provider: string; name: string; size: string; unitCost: number; onHand: number;
+  onHandCost: number; par: number; suggested: number; orderCost: number;
+  inventoryDays: number; excessCost: number; alerta?: string;
+};
 type ThemeMode = "light" | "dark";
 
 type Client = {
@@ -591,6 +597,10 @@ function App() {
   const [workflowPages, setWorkflowPages] = useState<Record<string, number>>({});
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [calendarTasks, setCalendarTasks] = useState<ClickupTask[]>([]);
+  const [aiModels, setAiModels] = useState<{ reports?: string; chat?: string } | null>(null);
+  const [comprasClientId, setComprasClientId] = useState("");
+  const [comprasLoading, setComprasLoading] = useState(false);
+  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -770,6 +780,7 @@ function App() {
 
   function applyBootstrapPayload(payload: BootstrapPayload) {
     if (payload.backupStatus) setBackupStatus(payload.backupStatus);
+    if ((payload as { aiModels?: { reports?: string; chat?: string } }).aiModels) setAiModels((payload as { aiModels?: { reports?: string; chat?: string } }).aiModels || null);
     setClients(payload.clients);
     setPeriods(payload.periods);
     setReports(payload.reports);
@@ -1103,6 +1114,27 @@ function App() {
     setSelectedReport(null);
     setCommentsDraft("");
     setEmailDraft("");
+  }
+
+  async function loadComprasSuggestion(clientId: string) {
+    if (!clientId || comprasLoading) return;
+    setComprasLoading(true);
+    setComprasData(null);
+    setWorkStatus("loading");
+    setError("Calculando la sugerencia de compra de la última semana cerrada...");
+    try {
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] }>(
+        await fetch(`/api/module1/clients/${clientId}/purchase-suggestion`),
+      );
+      setComprasData(payload);
+      setError(`Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
+      setWorkStatus("ready");
+    } catch (comprasError) {
+      setError(comprasError instanceof Error ? comprasError.message : "No se pudo calcular la sugerencia.");
+      setWorkStatus("error");
+    } finally {
+      setComprasLoading(false);
+    }
   }
 
   async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
@@ -2005,6 +2037,7 @@ function App() {
     dashboard: ["CMS operativo", "Reportes Bevinco/Sculpture"],
     module1: ["Operación semanal", "Reportes semanales"],
     monthly: ["Operación mensual", "Reportes mensuales"],
+    compras: ["Operación de compras", "Sugerencias de compra"],
     tasks: ["Gestión operativa", "Pendientes ClickUp"],
     reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
@@ -2041,6 +2074,7 @@ function App() {
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "compras" ? "active" : ""} onClick={() => navigateTo("compras")}><ShoppingCart size={18} /> Sugerencias de compra</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -2461,10 +2495,17 @@ function App() {
               <p className="eyebrow">Reporte generado{selectedReport?.period?.label ? ` · ${selectedReport.period.label}` : ""}</p>
               <h2>Trabajar el reporte</h2>
             </div>
-            <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
-              {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
-              {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
-            </button>
+            <div className="workspace-header-side">
+              {aiModels ? (
+                <span className="ai-model-tag" title={`Reportes: ${aiModels.reports || "?"} · Chat: ${aiModels.chat || "?"}`}>
+                  ✦ {aiModels.chat || aiModels.reports}
+                </span>
+              ) : null}
+              <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
+                {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
+                {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
+              </button>
+            </div>
           </div>
           <div className="report-tabs" role="tablist">
             <button className={reportTab === "chat" ? "active" : ""} role="tab" onClick={() => setReportTab("chat")}>
@@ -2490,7 +2531,11 @@ function App() {
               ) : (
                 chatMessages.map((item, index) => (
                   <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
-                    <div className="chat-bubble-content">{item.content}</div>
+                    <div className="chat-bubble-content">
+                      {item.content.split(/\*\*([^*]+)\*\*/g).map((part, partIndex) =>
+                        partIndex % 2 === 1 ? <strong key={partIndex}>{part}</strong> : part,
+                      )}
+                    </div>
                     {item.role === "assistant" && !item.content.startsWith("⚠") ? (
                       <div className="chat-bubble-actions">
                         <button type="button" onClick={() => applyChatAsSummary(item.content)}>Usar como resumen</button>
@@ -2679,7 +2724,7 @@ function App() {
                     <div className="analysis-items">
                       {(block.items.length ? block.items : [block.empty]).map((item) => (
                         <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
-                          {highlightFigures(item)}
+                          {highlightFigures(item.replace(/\*\*/g, ""))}
                         </p>
                       ))}
                     </div>
@@ -2985,6 +3030,90 @@ function App() {
               </div>
             </section>
             </>
+          ) : null}
+          </>
+        ) : null}
+
+        {activeView === "compras" ? (
+          <>
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Sugerencia vigente</p>
+                <h2>¿Qué hay que comprar esta semana?</h2>
+              </div>
+              <div className="action-row wrap-actions">
+                {comprasData ? (
+                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv`} target="_blank" rel="noreferrer">
+                    <Printer size={17} /> Descargar CSV para enviar
+                  </a>
+                ) : null}
+              </div>
+            </div>
+            <div className="unit-form-grid">
+              <label>
+                Restaurante/local
+                <select
+                  value={comprasClientId}
+                  onChange={(event) => { setComprasClientId(event.target.value); setComprasData(null); }}
+                  onFocus={ensureSculptureDirectory}
+                  onMouseDown={ensureSculptureDirectory}
+                >
+                  <option value="">Selecciona un restaurante...</option>
+                  {(sculptureUnits.filter((unit) => !unit.hidden).length
+                    ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ id: unit.id, name: `${unit.name} - ${unit.area}` }))
+                    : clients.map((client) => ({ id: client.id, name: clientDisplayName(client) }))
+                  ).map((option) => (
+                    <option key={option.id} value={option.id}>{option.name}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="query-actions">
+                <button className="primary-button" disabled={!comprasClientId || comprasLoading} onClick={() => loadComprasSuggestion(comprasClientId)} type="button">
+                  {comprasLoading ? <span className="btn-spinner" /> : <ShoppingCart size={17} />}
+                  {comprasLoading ? "Calculando..." : "Calcular sugerencia"}
+                </button>
+              </div>
+            </div>
+            <p className="muted-copy">Se calcula en vivo sobre la última semana cerrada de auditoría (PAR del equipo, inventario efectivo con productos procesados). Solo lista lo accionable: productos con pedido sugerido o con exceso de inventario.</p>
+          </section>
+
+          {comprasData ? (
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">{comprasData.period.label}</p>
+                  <h2>{comprasData.client.name} · {comprasData.items.length} producto(s)</h2>
+                </div>
+                <ShoppingCart size={22} />
+              </div>
+              <div className="compras-table-wrap">
+                <table className="compras-table">
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th><th>Producto</th><th>Tamaño</th><th className="num">Stock</th>
+                      <th className="num">PAR</th><th className="num">Sugerido</th><th className="num">Costo pedido</th>
+                      <th className="num">Días inv.</th><th className="num">Exceso</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comprasData.items.map((item, index) => (
+                      <tr key={`${item.provider}-${item.name}-${index}`}>
+                        <td>{index > 0 && comprasData.items[index - 1].provider === item.provider ? "" : item.provider}</td>
+                        <td><strong>{item.name}</strong>{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
+                        <td>{item.size}</td>
+                        <td className="num">{item.onHand ? item.onHand.toFixed(2) : "0"}</td>
+                        <td className="num">{item.par ? Math.round(item.par) : "-"}</td>
+                        <td className="num">{item.suggested ? <strong>{Math.round(item.suggested)}</strong> : "0"}</td>
+                        <td className="num">{item.orderCost ? money(item.orderCost) : "-"}</td>
+                        <td className="num">{item.inventoryDays ? Math.round(item.inventoryDays) : "-"}</td>
+                        <td className={`num ${item.excessCost ? "is-excess" : ""}`}>{item.excessCost ? money(item.excessCost) : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           ) : null}
           </>
         ) : null}
