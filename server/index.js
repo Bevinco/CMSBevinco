@@ -4516,7 +4516,10 @@ function formatPercentDelta(value) {
   return `${sign}${number.toFixed(1)} pp`;
 }
 
-function renderTwoPageReportHtml(store, report) {
+function renderTwoPageReportHtml(store, report, options = {}) {
+  // webMode: la misma pieza servida como pagina web compartible (link con
+  // token), con toolbar de marca, sombras y layout responsive para celular.
+  const webMode = options.web === true;
   const payload = buildReportPayload(store, report);
   const analysis = payload.analysis || generateReportAnalysis(payload);
 
@@ -5135,6 +5138,25 @@ function renderTwoPageReportHtml(store, report) {
     .bv-col { display: flex; flex-direction: column; gap: 10px; }
     .bv-col .bv-panel { margin-bottom: 0; }
     .page-break { break-before: page; page-break-before: always; }
+    ${webMode ? `
+    body { padding: 0 14px 48px; }
+    .web-toolbar { align-items: center; background: ${NAVY}; color: #fff; display: flex; gap: 12px; justify-content: space-between; margin: 0 -14px 22px; padding: 13px 22px; position: sticky; top: 0; z-index: 5; }
+    .web-toolbar-brand { display: flex; flex-direction: column; line-height: 1.25; }
+    .web-toolbar-brand strong { font-size: 15px; letter-spacing: 1.2px; }
+    .web-toolbar-brand span { color: #bcd9d6; font-size: 12px; }
+    .web-toolbar button { background: ${GREEN}; border: 0; border-radius: 8px; color: ${NAVY}; cursor: pointer; font-weight: 700; min-height: 38px; padding: 0 18px; }
+    .bv-page { border-radius: 12px; box-shadow: 0 20px 44px rgba(9, 28, 24, 0.14); padding: 18px 26px 12px; }
+    @media (max-width: 760px) {
+      .bv-row, .bv-grid2, .bv-stockeff { grid-template-columns: 1fr; }
+      .bv-head { gap: 8px; grid-template-columns: 1fr; justify-items: center; }
+      .bv-arrow { display: none; }
+      .bv-title h1 { font-size: 26px; }
+      .bv-kpis { flex-direction: row; flex-wrap: wrap; }
+      .bv-kpi { flex: 1 1 140px; }
+      .bv-table { display: block; overflow-x: auto; }
+    }
+    @media print { .web-toolbar { display: none; } }
+    ` : ""}
     @media print {
       body { background: #fff; padding: 0; }
       .toolbar { display: none; }
@@ -5150,7 +5172,14 @@ function renderTwoPageReportHtml(store, report) {
   </style>
 </head>
 <body>
-  <div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>
+  ${webMode ? `
+  <header class="web-toolbar">
+    <div class="web-toolbar-brand">
+      <strong>BEVINCO · Sculpture Hospitality</strong>
+      <span>Reporte ${isMonthlyReport ? "mensual" : "semanal"} · ${escapeHtml(clientTitle)}</span>
+    </div>
+    <button onclick="window.print()">Descargar PDF</button>
+  </header>` : `<div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div>`}
 
   <main class="bv-page">
     ${pageHeader}
@@ -6487,6 +6516,35 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
 
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.send(renderTwoPageReportHtml(store, report));
+});
+
+// Link web compartible del reporte, al estilo de los reportes HTML de la
+// agencia (reportes.gopointagency.com/cliente/token): la pagina es publica
+// y el token largo es el secreto, asi el cliente la abre sin login.
+app.post("/api/module1/reports/:reportId/share", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).json({ error: "No se encontró el reporte." });
+    return;
+  }
+  if (!report.webToken) {
+    report.webToken = crypto.randomBytes(9).toString("hex");
+    await writeStore(store);
+  }
+  response.json({ url: `/r/${report.webToken}` });
+});
+
+app.get("/r/:token", async (request, response) => {
+  const token = String(request.params.token || "");
+  const store = token.length >= 12 ? await readStore() : null;
+  const report = store ? store.reports.find((candidate) => candidate.webToken === token) : null;
+  if (!report) {
+    response.status(404).send("Reporte no disponible.");
+    return;
+  }
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.send(renderTwoPageReportHtml(store, report, { web: true }));
 });
 
 app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, response) => {

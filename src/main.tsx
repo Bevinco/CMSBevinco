@@ -1241,6 +1241,26 @@ function App() {
     setEmailDraft("");
   }
 
+  async function shareWebReport(reportId: string) {
+    try {
+      const payload = await readJson<{ url: string }>(
+        await fetch(`/api/module1/reports/${reportId}/share`, { method: "POST" }),
+      );
+      const url = `${window.location.origin}${payload.url}`;
+      window.open(url, "_blank", "noopener");
+      try {
+        await navigator.clipboard.writeText(url);
+        setError(`Link web copiado al portapapeles: ${url}`);
+      } catch {
+        setError(`Link web del reporte: ${url}`);
+      }
+      setWorkStatus("ready");
+    } catch (shareError) {
+      setError(shareError instanceof Error ? shareError.message : "No se pudo generar el link web.");
+      setWorkStatus("error");
+    }
+  }
+
   async function loadComprasSuggestion(clientId: string) {
     if (!clientId || comprasLoading) return;
     setComprasLoading(true);
@@ -2549,6 +2569,11 @@ function App() {
                     <Printer size={17} /> Exportar PDF
                   </a>
                 ) : null}
+                {selectedReport ? (
+                  <button className="button-link" type="button" onClick={() => shareWebReport(selectedReport.id)}>
+                    <ExternalLink size={17} /> Link web
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -3130,6 +3155,9 @@ function App() {
                 <a className="button-link" href={`/api/module1/reports/${monthlyReport.id}/export`} target="_blank" rel="noreferrer">
                   <Printer size={17} /> Exportar PDF
                 </a>
+                <button className="button-link" type="button" onClick={() => shareWebReport(monthlyReport.id)}>
+                  <ExternalLink size={17} /> Link web
+                </button>
                 <button className="primary-button" onClick={openMonthlyReport} type="button">
                   <Bot size={17} /> Abrir para análisis, chat y envío
                 </button>
