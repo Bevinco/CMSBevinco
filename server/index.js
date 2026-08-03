@@ -6630,14 +6630,51 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
     clientPeriods = [];
   }
   const today = new Date().toISOString().slice(0, 10);
-  const rawPeriod = clientPeriods.find((period) => period.endsAt && period.endsAt < today) || clientPeriods[0];
-  const period = rawPeriod ? ensurePeriod(store, rawPeriod) : null;
-  if (!period) {
+  // Ultimos periodos TERMINADOS, del mas reciente al mas viejo. Un periodo
+  // puede haber terminado sin estar AUDITADO todavia: Sculpture deja la
+  // Existencia de cierre en blanco y registra usado = existencia previa
+  // (todo "consumido", diferencia -100%). Con ese periodo el motor veria
+  // stock 0 en toda la cocina y sugeriria el PAR completo (el bug del pulpo
+  // procesado). Por eso se recorre hacia atras hasta encontrar un periodo
+  // con conteos de cierre cargados.
+  const closedPeriods = clientPeriods.filter((period) => period.endsAt && period.endsAt < today).slice(0, 4);
+  if (!closedPeriods.length && clientPeriods[0]) closedPeriods.push(clientPeriods[0]);
+  if (!closedPeriods.length) {
     response.status(404).json({ error: "El restaurante no tiene periodos cerrados en Sculpture." });
     return;
   }
   try {
-    const { items } = await computeSuggestionItems({ client, period });
+    let period = null;
+    let items = null;
+    let firstResult = null;
+    for (const rawPeriod of closedPeriods) {
+      const candidate = ensurePeriod(store, rawPeriod);
+      if (!candidate) continue;
+      let result;
+      try {
+        result = await computeSuggestionItems({ client, period: candidate });
+      } catch (candidateError) {
+        if (firstResult) break;
+        continue;
+      }
+      if (!firstResult) firstResult = { period: candidate, items: result.items };
+      const audited = result.items.some((item) => item.onHand > 0);
+      if (audited || !result.items.length) {
+        period = candidate;
+        items = result.items;
+        break;
+      }
+    }
+    if (!items) {
+      // Ningun periodo reciente tiene conteos: se responde el mas nuevo que
+      // haya calculado, antes que fallar.
+      if (!firstResult) {
+        response.status(404).json({ error: "Sculpture no tiene datos de Intelipar en las últimas semanas de este restaurante." });
+        return;
+      }
+      period = firstResult.period;
+      items = firstResult.items;
+    }
     if (String(request.query.format || "") === "csv") {
       const escapeCsv = (value) => {
         const text = String(value ?? "");
