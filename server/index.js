@@ -3055,8 +3055,15 @@ function buildDetailedStockMap(rows) {
       row.values?.[0] || "",
     ).trim();
     if (!name || isTotalRow(name) || /:\s*$/.test(name)) continue;
-    const units = parseNumber(record.existencia);
-    if (units) stock.set(name.toLowerCase(), units);
+    let units = parseNumber(record.existencia);
+    if (!units) {
+      // Cierre sin conteo cargado (columna Existencia en blanco): el stock se
+      // deriva del flujo previa + compras - usado. Sin esto, un item con
+      // inventario real pero sin conteo de cierre sugeria el PAR completo.
+      const derived = parseNumber(record.existenciaPrevia) + parseNumber(record.compras) - parseNumber(record.usado);
+      if (derived > 0) units = derived;
+    }
+    if (units > 0) stock.set(name.toLowerCase(), units);
   }
   return stock;
 }
