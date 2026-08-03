@@ -5,6 +5,8 @@ import {
   Bot,
   Building2,
   CalendarDays,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -512,6 +514,128 @@ function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: s
                   </button>
                 );
               })}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+type SearchSelectOption = { value: string; label: string; hint?: string };
+
+function SearchSelect({
+  value,
+  options,
+  onChange,
+  placeholder = "Selecciona...",
+  searchPlaceholder = "Escribe para buscar...",
+  emptyText = "Sin coincidencias",
+  onOpen,
+}: {
+  value: string;
+  options: SearchSelectOption[];
+  onChange: (next: string) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  emptyText?: string;
+  onOpen?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const plain = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const filtered = query.trim() ? options.filter((option) => plain(option.label).includes(plain(query.trim()))) : options;
+  const selected = options.find((option) => option.value === value && option.value !== "") || null;
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setHighlight(0);
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [query]);
+
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const item = listRef.current.children[highlight] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: "nearest" });
+  }, [open, highlight]);
+
+  function choose(option: SearchSelectOption) {
+    onChange(option.value);
+    setOpen(false);
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlight((current) => Math.min(current + 1, filtered.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlight((current) => Math.max(current - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (filtered[highlight]) choose(filtered[highlight]);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div className="search-select">
+      <button
+        className={`search-select-trigger ${selected ? "" : "is-empty"}`}
+        type="button"
+        onClick={() => {
+          onOpen?.();
+          setOpen((current) => !current);
+        }}
+      >
+        <span>{selected ? selected.label : placeholder}</span>
+        <ChevronDown size={16} />
+      </button>
+      {open ? (
+        <>
+          <div className="month-picker-backdrop" onClick={() => setOpen(false)} />
+          <div className="search-select-pop" role="listbox">
+            <input
+              ref={inputRef}
+              className="search-select-input"
+              placeholder={searchPlaceholder}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onKeyDown}
+            />
+            <div className="search-select-list" ref={listRef}>
+              {filtered.length ? (
+                filtered.map((option, index) => (
+                  <button
+                    className={`search-select-option ${option.value === value ? "selected" : ""} ${index === highlight ? "highlight" : ""}`}
+                    key={`${option.value}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === value}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => choose(option)}
+                  >
+                    <span className="search-select-option-label">
+                      {option.label}
+                      {option.hint ? <small>{option.hint}</small> : null}
+                    </span>
+                    {option.value === value && option.value !== "" ? <Check size={15} /> : null}
+                  </button>
+                ))
+              ) : (
+                <p className="search-select-empty">{emptyText}</p>
+              )}
             </div>
           </div>
         </>
@@ -2378,10 +2502,14 @@ function App() {
               <div className="unit-form-grid">
                 <label>
                   Restaurante/local
-                  <select
+                  <SearchSelect
                     value={selectedSculptureUnitId || (selectedClientId ? `cms:${selectedClientId}` : "")}
-                    onChange={(event) => {
-                      const value = event.target.value;
+                    placeholder={workStatus === "loading" && !sculptureDirectoryLoaded ? "Cargando restaurantes..." : "Selecciona un restaurante..."}
+                    options={sculptureUnits.filter((unit) => !unit.hidden).length
+                      ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ value: unit.id, label: unit.name, hint: unit.area }))
+                      : clients.map((client) => ({ value: `cms:${client.id}`, label: clientDisplayName(client), hint: client.area || "Food" }))}
+                    onOpen={ensureSculptureDirectory}
+                    onChange={(value) => {
                       if (value.startsWith("cms:")) {
                         setSelectedClientId(value.slice(4));
                         setSelectedSculptureUnitId("");
@@ -2392,44 +2520,23 @@ function App() {
                         showLatestReportFor(value);
                       }
                     }}
-                    onFocus={ensureSculptureDirectory}
-                    onMouseDown={ensureSculptureDirectory}
-                  >
-                    {sculptureUnits.filter((unit) => !unit.hidden).length ? (
-                      sculptureUnits.filter((unit) => !unit.hidden).map((unit) => (
-                        <option key={unit.id} value={unit.id}>
-                          {unit.name} - {unit.area}
-                        </option>
-                      ))
-                    ) : clients.length ? (
-                      clients.map((client) => (
-                        <option key={client.id} value={`cms:${client.id}`}>
-                          {clientDisplayName(client)} - {client.area || "Food"}
-                        </option>
-                      ))
-                    ) : workStatus === "loading" && !sculptureDirectoryLoaded ? (
-                      <option value="">Cargando restaurantes...</option>
-                    ) : (
-                      <option value="">No hay restaurantes disponibles</option>
-                    )}
-                  </select>
+                  />
                 </label>
                 <label>
                   Periodo
-                  <select value={selectedPeriodId} onChange={(event) => setSelectedPeriodId(event.target.value)}>
-                    <option value="">
-                      {clientPeriodsLoading
-                        ? "Cargando periodos del restaurante..."
-                        : clientPeriods.length
-                          ? `Última semana cerrada (${clientPeriods.length} disponibles)`
-                          : "Selecciona un restaurante para ver sus periodos"}
-                    </option>
-                    {clientPeriods.map((period) => (
-                      <option key={period.id} value={period.id}>
-                        {period.label}
-                      </option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={selectedPeriodId}
+                    placeholder={clientPeriodsLoading
+                      ? "Cargando periodos del restaurante..."
+                      : clientPeriods.length
+                        ? `Última semana cerrada (${clientPeriods.length} disponibles)`
+                        : "Selecciona un restaurante para ver sus periodos"}
+                    options={[
+                      { value: "", label: "Última semana cerrada" },
+                      ...clientPeriods.map((period) => ({ value: period.id, label: period.label })),
+                    ]}
+                    onChange={setSelectedPeriodId}
+                  />
                 </label>
               </div>
               <div className="query-actions">
@@ -2918,10 +3025,12 @@ function App() {
             <div className="unit-form-grid">
               <label>
                 Restaurante/local
-                <select
+                <SearchSelect
                   value={selectedSculptureUnitId || (selectedClientId ? `cms:${selectedClientId}` : "")}
-                  onChange={(event) => {
-                    const value = event.target.value;
+                  placeholder="Selecciona un restaurante..."
+                  options={sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ value: unit.id, label: unit.name, hint: unit.area }))}
+                  onOpen={ensureSculptureDirectory}
+                  onChange={(value) => {
                     if (value.startsWith("cms:")) {
                       setSelectedClientId(value.slice(4));
                       setSelectedSculptureUnitId("");
@@ -2929,11 +3038,7 @@ function App() {
                       setSelectedSculptureUnitId(value);
                     }
                   }}
-                >
-                  {sculptureUnits.filter((unit) => !unit.hidden).map((unit) => (
-                    <option key={unit.id} value={unit.id}>{unit.name} - {unit.area}</option>
-                  ))}
-                </select>
+                />
               </label>
               <label>
                 Mes
@@ -3054,20 +3159,15 @@ function App() {
             <div className="unit-form-grid">
               <label>
                 Restaurante/local
-                <select
+                <SearchSelect
                   value={comprasClientId}
-                  onChange={(event) => { setComprasClientId(event.target.value); setComprasData(null); }}
-                  onFocus={ensureSculptureDirectory}
-                  onMouseDown={ensureSculptureDirectory}
-                >
-                  <option value="">Selecciona un restaurante...</option>
-                  {(sculptureUnits.filter((unit) => !unit.hidden).length
-                    ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ id: unit.id, name: `${unit.name} - ${unit.area}` }))
-                    : clients.map((client) => ({ id: client.id, name: clientDisplayName(client) }))
-                  ).map((option) => (
-                    <option key={option.id} value={option.id}>{option.name}</option>
-                  ))}
-                </select>
+                  placeholder="Selecciona un restaurante..."
+                  options={sculptureUnits.filter((unit) => !unit.hidden).length
+                    ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ value: unit.id, label: unit.name, hint: unit.area }))
+                    : clients.map((client) => ({ value: client.id, label: clientDisplayName(client) }))}
+                  onOpen={ensureSculptureDirectory}
+                  onChange={(value) => { setComprasClientId(value); setComprasData(null); }}
+                />
               </label>
               <div className="query-actions">
                 <button className="primary-button" disabled={!comprasClientId || comprasLoading} onClick={() => loadComprasSuggestion(comprasClientId)} type="button">

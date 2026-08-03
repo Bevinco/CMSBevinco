@@ -4531,3 +4531,116 @@ button:disabled {
 :root[data-theme="dark"] .report-tabs button:hover { background: var(--surface-soft); color: var(--text); }
 :root[data-theme="dark"] .report-tabs button.active { color: #86b4dd; }
 :root[data-theme="dark"] .chat-attach { background: var(--surface-muted); color: var(--text-muted); }
+
+/* ===== Selects modernos ===== */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%233d7d76' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  cursor: pointer;
+  min-height: 38px;
+  padding: 0 32px 0 10px;
+}
+
+select:focus {
+  border-color: var(--sculpture-green);
+  box-shadow: 0 0 0 3px rgba(61, 125, 118, 0.14);
+  outline: none;
+}
+
+:root[data-theme="dark"] select {
+  background-color: var(--surface-soft);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237cc4bb' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* ===== SearchSelect: combobox con buscador ===== */
+.search-select { position: relative; width: 100%; }
+
+.search-select-trigger {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  color: #172026;
+  display: flex;
+  font-weight: 600;
+  gap: 9px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.search-select-trigger span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-select-trigger svg { color: #3d7d76; flex: 0 0 auto; }
+.search-select-trigger.is-empty span { color: #8b9a95; font-weight: 500; }
+.search-select-trigger:hover { border-color: var(--sculpture-green); }
+
+.search-select-pop {
+  animation: view-in 140ms ease;
+  background: #ffffff;
+  border: 1px solid #dce4e2;
+  border-radius: 14px;
+  box-shadow: 0 22px 48px rgba(9, 28, 24, 0.18);
+  left: 0;
+  margin-top: 6px;
+  min-width: 280px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 46;
+}
+
+.search-select-input {
+  border: 1px solid #cfdad7;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.search-select-input:focus { border-color: var(--sculpture-green); box-shadow: 0 0 0 3px rgba(61, 125, 118, 0.14); outline: none; }
+
+.search-select-list { display: grid; gap: 2px; max-height: 288px; overflow: auto; }
+
+.search-select-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #24352f;
+  display: flex;
+  font-weight: 600;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.search-select-option-label { display: grid; gap: 1px; min-width: 0; }
+.search-select-option-label small { color: #8b9a95; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.2px; text-transform: uppercase; }
+.search-select-option.highlight { background: #eef4f1; }
+.search-select-option.selected { color: #1d5a52; }
+.search-select-option svg { color: #3d7d76; flex: 0 0 auto; }
+
+.search-select-empty { color: #8b9a95; font-size: 0.84rem; margin: 6px 4px; }
+
+:root[data-theme="dark"] .search-select-trigger { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+:root[data-theme="dark"] .search-select-trigger svg { color: #7cc4bb; }
+:root[data-theme="dark"] .search-select-pop { background: var(--surface); border-color: var(--line); }
+:root[data-theme="dark"] .search-select-input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+:root[data-theme="dark"] .search-select-option { color: var(--text); }
+:root[data-theme="dark"] .search-select-option.highlight { background: var(--surface-soft); }
+:root[data-theme="dark"] .search-select-option-label small { color: var(--text-muted); }
