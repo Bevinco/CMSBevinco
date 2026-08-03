@@ -4747,7 +4747,8 @@ function renderTwoPageReportHtml(store, report) {
     const W = 340; const H = 230;
     const L = 46; const R = 326; const T = 26; const B = 172;
     const plotW = R - L; const plotH = B - T;
-    const n = Math.max(history.length, 1);
+    const nextSuggested = history.length ? history[history.length - 1].suggestedCost || 0 : 0;
+    const n = Math.max(history.length + (nextSuggested > 0 ? 1 : 0), 1);
     const rawMaxPurchase = Math.max(...history.map((p) => Math.max(p.purchasedCost || 0, p.suggestedCost || 0)), 0);
     const stepP = niceStep(Math.max(rawMaxPurchase, 1) * 1.15);
     const maxV = niceCeil(Math.max(rawMaxPurchase, 1) * 1.15, stepP);
@@ -4784,6 +4785,9 @@ function renderTwoPageReportHtml(store, report) {
     // Para la PRIMERA semana de la ventana, la sugerencia correspondiente es
     // la generada la semana previa: se rescata de los reportes ya guardados
     // del cliente para que el grafico no arranque vacio.
+    // Pedido de Pedro (31-jul): proyectar la sugerencia emitida en la ultima
+    // semana como un punto extra "proxima semana" (solo verde: la compra aun
+    // no existe), para ver la tendencia de lo que se recomendo comprar.
     const purchasedSeries = history.map((p) => p.purchasedCost || 0);
     const firstEndsAt = String(history[0]?.endsAt || "");
     let previousSuggested = 0;
@@ -4796,14 +4800,19 @@ function renderTwoPageReportHtml(store, report) {
       previousSuggested = prior?.candidate.summary?.suggestedCost || 0;
     }
     const suggestedShifted = history.map((p, i) => (i > 0 ? history[i - 1].suggestedCost || 0 : previousSuggested));
+    if (nextSuggested > 0) {
+      suggestedShifted.push(nextSuggested);
+      purchasedSeries.push(0);
+    }
     const xLabels = history.map((p, i) =>
-      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmm(p.endsAt) || escapeHtml(p.label)}</text>`).join("") +
+      (nextSuggested > 0 ? `<text x="${xAt(n - 1)}" y="${B + 13}" text-anchor="middle" class="ax-next">Próx.</text>` : "");
     const legendY = H - 8;
     const emptyNote = rawMaxPurchase
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra para las semanas consultadas.</text>`;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.ax-next{font:700 10.5px Calibri,Arial;fill:${GREEN}}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${emptyNote}
       ${rawMaxPurchase ? drawSeries(suggestedShifted, GREEN, 0.5) + drawSeries(purchasedSeries, NAVY, 0.42) : ""}
       ${xLabels}
@@ -5100,7 +5109,7 @@ function renderTwoPageReportHtml(store, report) {
     .bv-table th.bv-table-title { background: ${TEAL}; border-radius: 8px 8px 0 0; color: #fff; font-size: 15px; font-weight: 700; letter-spacing: 0.3px; padding: 8px 10px; text-align: center; }
     .bv-table th { background: ${NAVY}; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.2px; padding: 7px 10px; vertical-align: middle; }
     .bv-table th:first-child { text-align: left; }
-    .bv-table th:not(:first-child) { text-align: right; }
+    .bv-table th:not(:first-child) { text-align: center; }
     .bv-table td { border-bottom: 1px solid #e3ebe8; color: #2b3a36; font-size: 12.5px; padding: 7px 10px; vertical-align: middle; }
     .bv-table tbody tr:last-child td { border-bottom: 0; }
     .bv-table tr.alt td { background: #f5f9f8; }
@@ -6581,7 +6590,25 @@ async function computeSuggestionItems({ client, period }) {
 // lista para enviar; por defecto responde JSON para la vista del modulo.
 app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async (request, response) => {
   const store = await readStore();
-  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  let client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    // Local que nunca se sincronizo: se crea desde el directorio de Sculpture
+    // para que operaciones pueda pedir la sugerencia de CUALQUIER restaurante.
+    try {
+      const directory = await discoverSculptureUnits();
+      const unit = (directory.units || []).find((candidate) => candidate.id === request.params.clientId);
+      if (unit) {
+        client = ensureClient(store, {
+          ...unit,
+          sculptureBaseUrl: unit.baseUrl || unit.sculptureBaseUrl || baseUrlForSculptureArea(unit.area),
+          recipients: [],
+        });
+        await writeStore(store);
+      }
+    } catch {
+      // El directorio no respondio: cae al 404 de abajo.
+    }
+  }
   if (!client) {
     response.status(404).json({ error: "No se encontró el restaurante." });
     return;
