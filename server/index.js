@@ -5647,6 +5647,20 @@ function renderDynamicReportHtml(store, report) {
     }).join("");
   }
 
+  // Posicion de etiqueta punto a punto: la serie que va mas ARRIBA etiqueta
+  // hacia arriba y la otra hacia abajo. Con posiciones fijas, al cruzarse las
+  // lineas los valores quedaban tapados por los puntos de la otra serie.
+  function alignAgainst(own, other, preferTop) {
+    return function (ctx) {
+      var i = ctx.dataIndex;
+      var mine = own[i];
+      var theirs = other ? other[i] : null;
+      if (mine == null) return preferTop ? "top" : "bottom";
+      if (theirs == null || mine === theirs) return preferTop ? "top" : "bottom";
+      return mine > theirs ? "top" : "bottom";
+    };
+  }
+
   function kpiChip(current, previous, invert) {
     if (!previous && previous !== 0) return "";
     var delta = current - previous;
@@ -5681,14 +5695,16 @@ function renderDynamicReportHtml(store, report) {
     h.forEach(function (p) { if (p.costPercent) pcts.push(p.costPercent); if (p.idealCostPercent) pcts.push(p.idealCostPercent); });
     var pctMin = pcts.length ? Math.max(0, Math.floor((Math.min.apply(null, pcts) - 3) / 5) * 5) : 0;
     var pctMax = pcts.length ? Math.ceil((Math.max.apply(null, pcts) + 3) / 5) * 5 : 40;
+    var realSeries = h.map(function (p) { return p.costPercent || null; });
+    var idealSeries = h.map(function (p) { return p.idealCostPercent || null; });
     charts.cost = new Chart(document.getElementById("costChart"), {
       data: {
         labels: labels,
         datasets: [
-          { type: "line", label: "% Costo real", data: h.map(function (p) { return p.costPercent || null; }), borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
-            datalabels: { display: true, align: "top", offset: 6, backgroundColor: NAVY, borderRadius: 4, color: "#fff", font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
-          { type: "line", label: "% Costo ideal", data: h.map(function (p) { return p.idealCostPercent || null; }), borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
-            datalabels: { display: true, align: "bottom", offset: 6, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+          { type: "line", label: "% Costo real", data: realSeries, borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
+            datalabels: { display: true, align: alignAgainst(realSeries, idealSeries, true), offset: 8, clip: false, backgroundColor: NAVY, borderRadius: 4, color: "#fff", font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+          { type: "line", label: "% Costo ideal", data: idealSeries, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
+            datalabels: { display: true, align: alignAgainst(idealSeries, realSeries, false), offset: 8, clip: false, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
           { type: "bar", label: "Ingresos", data: h.map(function (p) { return p.revenue || 0; }), backgroundColor: TEAL, yAxisID: "y1", maxBarThickness: 60,
             datalabels: { display: true, anchor: "start", align: "end", color: "#fff", font: { weight: 800, size: 12 }, formatter: fmtK } }
         ]
@@ -5754,13 +5770,14 @@ function renderDynamicReportHtml(store, report) {
         labels: labels,
         datasets: [
           { label: "Compra sugerida", data: suggested, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: function (ctx) { return ctx.dataIndex === labels.length - 1 && nextSuggested ? 6 : 4; }, spanGaps: true,
-            datalabels: { display: true, align: "top", offset: 5, color: "#5c8f1e", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } },
+            datalabels: { display: true, align: alignAgainst(suggested, purchased, true), offset: 8, clip: false, color: "#5c8f1e", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } },
           { label: "Compra realizada", data: purchased, borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, spanGaps: true,
-            datalabels: { display: true, align: "bottom", offset: 5, color: NAVY, font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } }
+            datalabels: { display: true, align: alignAgainst(purchased, suggested, false), offset: 8, clip: false, color: NAVY, font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 18, right: 26 } },
         interaction: { mode: "index", intersect: false },
         plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.y); } } } },
@@ -5802,7 +5819,7 @@ function renderDynamicReportHtml(store, report) {
           { type: "bar", label: "Inventario al costo", data: h.map(function (p) { return p.inventoryCost || 0; }), backgroundColor: TEAL, maxBarThickness: 44 },
           { type: "bar", label: "Consumo (usado)", data: h.map(function (p) { return p.usedCost || 0; }), backgroundColor: NAVY, maxBarThickness: 44 },
           { type: "line", label: "Días de cobertura", data: h.map(function (p) { return p.usedCost > 0 ? Math.round((p.inventoryCost / (p.usedCost / 7)) * 10) / 10 : null; }), borderColor: "#d97706", backgroundColor: "#d97706", borderWidth: 2.2, pointRadius: 4, yAxisID: "y1",
-            datalabels: { display: true, align: "top", offset: 5, backgroundColor: "#d97706", borderRadius: 4, color: "#fff", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? v + " d" : ""; }, padding: { top: 2, bottom: 2, left: 5, right: 5 } } }
+            datalabels: { display: true, align: "top", offset: 8, clip: false, backgroundColor: "#d97706", borderRadius: 4, color: "#fff", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? v + " d" : ""; }, padding: { top: 2, bottom: 2, left: 5, right: 5 } } }
         ]
       },
       options: {
