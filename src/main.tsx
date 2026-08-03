@@ -1239,6 +1239,27 @@ function App() {
     setEmailDraft("");
   }
 
+  const [importingCriteria, setImportingCriteria] = useState(false);
+  async function importGeneralCriteria() {
+    if (!selectedReport || importingCriteria) return;
+    setImportingCriteria(true);
+    setWorkStatus("loading");
+    setError("Importando el conocimiento base de la casa a este restaurante...");
+    try {
+      const payload = await readJson<{ saved: boolean; distilledNow?: boolean; clientName?: string; criteriaDocuments?: CriteriaDocument[] }>(
+        await fetch(`/api/module1/clients/${selectedReport.clientId}/import-general-criteria`, { method: "POST" }),
+      );
+      if (payload.criteriaDocuments) setCriteriaDocuments(payload.criteriaDocuments);
+      setError(`Conocimiento base importado a ${payload.clientName}${payload.distilledNow ? " (se destiló primero desde todos los criterios cargados)" : ""}. El agente ya entiende el negocio en este chat.`);
+      setWorkStatus("ready");
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "No se pudo importar el conocimiento base.");
+      setWorkStatus("error");
+    } finally {
+      setImportingCriteria(false);
+    }
+  }
+
   const [distilling, setDistilling] = useState(false);
   async function distillGeneralKnowledge() {
     if (distilling) return;
@@ -2720,6 +2741,18 @@ function App() {
 
           {reportTab === "chat" ? (
             <div className="report-tab-body">
+            {selectedReport && !criteriaDocuments.some((doc) => doc.clientId === selectedReport.clientId) ? (
+              <div className="chat-import-bar">
+                <div>
+                  <strong>{selectedClient?.name || "Este restaurante"} aún no tiene criterios propios.</strong>
+                  <small>Impórtale el conocimiento base de la casa para que el agente entienda el negocio desde el primer mensaje.</small>
+                </div>
+                <button className="secondary-button" disabled={importingCriteria} type="button" onClick={importGeneralCriteria}>
+                  {importingCriteria ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                  {importingCriteria ? "Importando..." : "Importar criterios generales"}
+                </button>
+              </div>
+            ) : null}
             <div className="chat-thread" aria-live="polite">
               {!chatMessages.length ? (
                 <div className="chat-empty">

@@ -4660,3 +4660,11 @@ select:focus {
 :root[data-theme="dark"] .search-select-option { color: var(--text); }
 :root[data-theme="dark"] .search-select-option.highlight { background: var(--surface-soft); }
 :root[data-theme="dark"] .search-select-option-label small { color: var(--text-muted); }
+
+.chat-import-bar { align-items: center; background: #f2f8ec; border: 1px solid #d8e8c8; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 12px; padding: 12px 16px; }
+.chat-import-bar > div { display: grid; gap: 2px; }
+.chat-import-bar strong { color: #33531f; font-size: 0.88rem; }
+.chat-import-bar small { color: #6b8f2f; font-size: 0.76rem; }
+:root[data-theme="dark"] .chat-import-bar { background: rgba(144, 191, 79, 0.10); border-color: rgba(144, 191, 79, 0.30); }
+:root[data-theme="dark"] .chat-import-bar strong { color: #b9d98a; }
+:root[data-theme="dark"] .chat-import-bar small { color: #93b35c; }

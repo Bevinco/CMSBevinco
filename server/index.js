@@ -7129,17 +7129,18 @@ Devuelve UNICAMENTE la lista consolidada final de reglas (las existentes que sig
 // a CUALQUIER cliente, incluidos los nuevos. Asi un cliente recien creado no
 // parte de cero: hereda el entendimiento transversal del negocio sin datos
 // especificos de otros clientes (pedido de Paulina, 04-ago).
-app.post("/api/module1/criteria-documents/distill-general", requireAuth, async (_request, response) => {
-  const store = await readStore();
+async function distillBusinessKnowledge(store) {
   if (!openaiApiKey) {
-    response.status(503).json({ error: "La IA no está configurada en el servidor (falta OPENAI_API_KEY)." });
-    return;
+    const error = new Error("La IA no está configurada en el servidor (falta OPENAI_API_KEY).");
+    error.status = 503;
+    throw error;
   }
   const documentName = "Conocimiento base del negocio";
   const sources = (store.criteriaDocuments || []).filter((document) => document.name !== documentName && String(document.text || "").trim());
   if (!sources.length) {
-    response.status(400).json({ error: "No hay criterios cargados desde los cuales destilar." });
-    return;
+    const error = new Error("No hay criterios cargados desde los cuales destilar.");
+    error.status = 400;
+    throw error;
   }
   const corpus = sources
     .map((document) => `### ${document.name}${document.clientName ? ` (cliente: ${document.clientName})` : " (general)"}\n${String(document.text || "").slice(0, 6000)}`)
@@ -7160,52 +7161,112 @@ ${corpus}
 Devuelve UNICAMENTE el documento destilado en markdown, organizado en secciones cortas con vinetas ("- "). Sin encabezado inicial ni comentarios adicionales.
 `.trim();
 
+  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 5000, ...reasoningFor(openaiModel) }),
+  });
+  const responsePayload = await openaiResponse.json().catch(() => ({}));
+  if (!openaiResponse.ok) {
+    console.error("[openai] distill fallo:", responsePayload?.error?.message || openaiResponse.status);
+    const error = new Error("La IA no pudo destilar el conocimiento. Intenta de nuevo.");
+    error.status = 502;
+    throw error;
+  }
+  const distilled = String(extractOpenAiText(responsePayload) || "").trim().slice(0, 20000);
+  if (!distilled) {
+    const error = new Error("La IA devolvió un documento vacío. Intenta de nuevo.");
+    error.status = 502;
+    throw error;
+  }
+  let baseDoc = (store.criteriaDocuments || []).find((document) => !document.clientId && document.name === documentName);
+  if (!baseDoc) {
+    baseDoc = {
+      id: `${Date.now()}-${crypto.randomUUID()}`,
+      name: documentName,
+      type: "text/markdown",
+      source: "distill-general",
+      category: "analysis_rules",
+      clientId: null,
+      clientName: "Todos los clientes",
+      uploadedAt: new Date().toISOString(),
+    };
+    store.criteriaDocuments = [baseDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
+  }
+  baseDoc.text = distilled;
+  baseDoc.size = distilled.length;
+  baseDoc.updatedAt = new Date().toISOString();
+  store.reports.forEach((item) => { item.analysis = null; });
+  return { baseDoc, sourceCount: sources.length };
+}
+
+app.post("/api/module1/criteria-documents/distill-general", requireAuth, async (_request, response) => {
+  const store = await readStore();
   try {
-    const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { authorization: `Bearer ${openaiApiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: openaiModel, input: prompt, max_output_tokens: 5000, ...reasoningFor(openaiModel) }),
-    });
-    const responsePayload = await openaiResponse.json().catch(() => ({}));
-    if (!openaiResponse.ok) {
-      console.error("[openai] distill fallo:", responsePayload?.error?.message || openaiResponse.status);
-      response.status(502).json({ error: "La IA no pudo destilar el conocimiento. Intenta de nuevo." });
-      return;
-    }
-    const distilled = String(extractOpenAiText(responsePayload) || "").trim().slice(0, 20000);
-    if (!distilled) {
-      response.status(502).json({ error: "La IA devolvió un documento vacío. Intenta de nuevo." });
-      return;
-    }
-    let baseDoc = (store.criteriaDocuments || []).find((document) => !document.clientId && document.name === documentName);
-    if (!baseDoc) {
-      baseDoc = {
-        id: `${Date.now()}-${crypto.randomUUID()}`,
-        name: documentName,
-        type: "text/markdown",
-        source: "distill-general",
-        category: "analysis_rules",
-        clientId: null,
-        clientName: "Todos los clientes",
-        uploadedAt: new Date().toISOString(),
-      };
-      store.criteriaDocuments = [baseDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
-    }
-    baseDoc.text = distilled;
-    baseDoc.size = distilled.length;
-    baseDoc.updatedAt = new Date().toISOString();
-    store.reports.forEach((item) => { item.analysis = null; });
+    const { baseDoc, sourceCount } = await distillBusinessKnowledge(store);
     await writeStore(store);
     response.json({
       saved: true,
-      documentName,
-      sourceCount: sources.length,
-      size: distilled.length,
+      documentName: baseDoc.name,
+      sourceCount,
+      size: baseDoc.size,
       criteriaDocuments: store.criteriaDocuments,
     });
   } catch (error) {
     console.error("[openai] distill error:", error.message);
-    response.status(502).json({ error: "No se pudo destilar el conocimiento. Intenta de nuevo en unos segundos." });
+    response.status(error.status || 502).json({ error: error.message || "No se pudo destilar el conocimiento." });
+  }
+});
+
+// "Importar criterios generales": copia el conocimiento base del negocio como
+// skill PROPIA del cliente (destilandolo primero si aun no existe), para que
+// un restaurante con el que nunca se ha conversado entienda la operacion
+// desde el primer mensaje y el equipo pueda refinar su copia sin tocar la base.
+app.post("/api/module1/clients/:clientId/import-general-criteria", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    response.status(404).json({ error: "No se encontró el restaurante." });
+    return;
+  }
+  try {
+    let baseDoc = (store.criteriaDocuments || []).find((document) => !document.clientId && document.name === "Conocimiento base del negocio");
+    let distilledNow = false;
+    if (!baseDoc?.text) {
+      baseDoc = (await distillBusinessKnowledge(store)).baseDoc;
+      distilledNow = true;
+    }
+    const generalLearnings = (store.criteriaDocuments || []).find((document) => !document.clientId && document.name === "Aprendizajes generales");
+    const importedText = [baseDoc.text, generalLearnings?.text ? `\n\n## Aprendizajes generales de la casa\n${generalLearnings.text}` : ""].join("").trim();
+    const documentName = "Base del negocio (importada)";
+    let clientDoc = (store.criteriaDocuments || []).find((document) => document.clientId === client.id && document.name === documentName);
+    if (!clientDoc) {
+      clientDoc = {
+        id: `${Date.now()}-${crypto.randomUUID()}`,
+        name: documentName,
+        type: "text/markdown",
+        source: "import-general",
+        category: "analysis_rules",
+        clientId: client.id,
+        clientName: client.name,
+        uploadedAt: new Date().toISOString(),
+      };
+      store.criteriaDocuments = [clientDoc, ...(store.criteriaDocuments || [])].slice(0, 60);
+    }
+    clientDoc.text = importedText;
+    clientDoc.size = importedText.length;
+    clientDoc.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    response.json({
+      saved: true,
+      documentName,
+      distilledNow,
+      clientName: client.name,
+      criteriaDocuments: store.criteriaDocuments,
+    });
+  } catch (error) {
+    console.error("[criterios] import-general error:", error.message);
+    response.status(error.status || 502).json({ error: error.message || "No se pudo importar el conocimiento base." });
   }
 });
 
