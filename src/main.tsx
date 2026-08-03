@@ -469,10 +469,22 @@ function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: s
   const [viewYear, setViewYear] = useState(() => Number((value || "").slice(0, 4)) || new Date().getFullYear());
   const selectedYear = Number((value || "").slice(0, 4)) || null;
   const selectedMonth = Number((value || "").slice(5, 7)) || null;
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open && selectedYear) setViewYear(selectedYear);
   }, [open, selectedYear]);
+
+  // Mismo cierre por click afuera que SearchSelect: el backdrop no cubre la
+  // pantalla completa cuando un ancestro animado con transform lo contiene.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   const monthName = selectedMonth ? MONTH_FULL[selectedMonth - 1] : "";
   const display = selectedYear && selectedMonth
@@ -480,7 +492,7 @@ function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: s
     : placeholder;
 
   return (
-    <div className="month-picker">
+    <div className="month-picker" ref={rootRef}>
       <button className={`month-picker-trigger ${value ? "" : "is-empty"}`} type="button" onClick={() => setOpen((current) => !current)}>
         <CalendarDays size={16} />
         <span>{display}</span>
@@ -545,6 +557,18 @@ function SearchSelect({
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Cierre al clickear fuera, a nivel documento: el backdrop posicionado no
+  // alcanza (los paneles animados con transform lo dejan atrapado adentro).
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   const plain = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   const filtered = query.trim() ? options.filter((option) => plain(option.label).includes(plain(query.trim()))) : options;
@@ -589,7 +613,7 @@ function SearchSelect({
   }
 
   return (
-    <div className="search-select">
+    <div className="search-select" ref={rootRef}>
       <button
         className={`search-select-trigger ${selected ? "" : "is-empty"}`}
         type="button"
