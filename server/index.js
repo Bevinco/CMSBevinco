@@ -90,7 +90,7 @@ async function performSupabaseHydration() {
     if (remote && typeof remote === "object" && Array.isArray(remote.reports)) {
       await fsPromisesMkdir();
       const tempPath = `${moduleStorePath}.tmp`;
-      await fs.writeFile(tempPath, JSON.stringify(remote, null, 2));
+      await fs.writeFile(tempPath, JSON.stringify(remote));
       await fs.rename(tempPath, moduleStorePath);
       supabaseStatus.restored = true;
       supabaseStatus.lastOkAt = new Date().toISOString();
@@ -1150,10 +1150,12 @@ async function ensureStore() {
 // escribir, y de paso corrige el "lost update" entre requests simultaneas
 // (antes cada una escribia SU copia y la ultima pisaba a la primera).
 let cachedStore = null;
+let storeLoadPromise = null;
 
-async function readStore() {
-  if (cachedStore) return cachedStore;
+async function loadStore() {
   await hydrateStoreFromSupabase();
+  // Una escritura pudo completar mientras esperabamos la hidratacion.
+  if (cachedStore) return cachedStore;
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
   let store;
@@ -1178,6 +1180,20 @@ async function readStore() {
   return store;
 }
 
+function readStore() {
+  if (cachedStore) return Promise.resolve(cachedStore);
+  // El login dispara varias peticiones en paralelo. Todas deben compartir no
+  // solo la hidratacion de Supabase, sino tambien UNA lectura y UN parseo del
+  // JSON local; de lo contrario cada request conserva su propia copia del
+  // grafo durante el arranque y vuelve a presionar el limite de 512MB.
+  if (!storeLoadPromise) {
+    storeLoadPromise = loadStore().finally(() => {
+      storeLoadPromise = null;
+    });
+  }
+  return storeLoadPromise;
+}
+
 async function writeStore(store) {
   cachedStore = store;
   await fs.mkdir(dataDir, { recursive: true });
@@ -1195,25 +1211,69 @@ function findReport(store, reportId) {
   return store.reports.find((report) => report.id === reportId);
 }
 
-function lastFourPeriods(store, report) {
+function createReportPayloadContext(store) {
+  const clientsById = new Map((store.clients || []).map((client) => [client.id, client]));
+  const periodsById = new Map();
+  for (const period of store.periods || []) {
+    // Conserva el mismo comportamiento de Array.find(): gana el primero.
+    if (!periodsById.has(period.id)) periodsById.set(period.id, period);
+  }
+
+  const reportsByClientPeriod = new Map();
+  for (const report of store.reports || []) {
+    if (!reportsByClientPeriod.has(report.clientId)) reportsByClientPeriod.set(report.clientId, new Map());
+    const byPeriod = reportsByClientPeriod.get(report.clientId);
+    if (!byPeriod.has(report.periodId)) byPeriod.set(report.periodId, report);
+  }
+
+  const weeklyPeriodsByClient = new Map();
+  for (const [clientId, byPeriod] of reportsByClientPeriod) {
+    const periodIds = new Set(byPeriod.keys());
+    const seenStarts = new Set();
+    const weekly = (store.periods || [])
+      .filter((period) => period.source !== "mensual" && !String(period.id).startsWith("mensual-"))
+      .filter((period) => periodIds.has(period.id))
+      .sort((left, right) => String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)))
+      .filter((period) => {
+        const key = period.startsAt || period.label;
+        if (seenStarts.has(key)) return false;
+        seenStarts.add(key);
+        return true;
+      });
+    weeklyPeriodsByClient.set(clientId, weekly);
+  }
+
+  return {
+    clientsById,
+    periodsById,
+    reportsByClientPeriod,
+    weeklyPeriodsByClient,
+    allClientNames: (store.clients || []).map((item) => item.name),
+  };
+}
+
+function lastFourPeriods(store, report, context = null) {
   // Historico POR CLIENTE: los periodos del store son globales (varios
   // restaurantes comparten rangos), asi que solo cuentan el periodo del
   // reporte y los periodos donde ESTE cliente tiene reporte guardado.
   // Se excluyen los sinteticos mensuales y se ordena por fecha.
-  const clientPeriodIds = new Set(
-    store.reports.filter((item) => item.clientId === report.clientId).map((item) => item.periodId),
-  );
-  const seenStarts = new Set();
-  const weekly = store.periods
-    .filter((period) => period.source !== "mensual" && !String(period.id).startsWith("mensual-"))
-    .filter((period) => period.id === report.periodId || clientPeriodIds.has(period.id))
-    .sort((left, right) => String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)))
-    .filter((period) => {
-      const key = period.startsAt || period.label;
-      if (seenStarts.has(key)) return false;
-      seenStarts.add(key);
-      return true;
-    });
+  let weekly = context?.weeklyPeriodsByClient.get(report.clientId);
+  if (!weekly) {
+    const clientPeriodIds = new Set(
+      store.reports.filter((item) => item.clientId === report.clientId).map((item) => item.periodId),
+    );
+    const seenStarts = new Set();
+    weekly = store.periods
+      .filter((period) => period.source !== "mensual" && !String(period.id).startsWith("mensual-"))
+      .filter((period) => period.id === report.periodId || clientPeriodIds.has(period.id))
+      .sort((left, right) => String(left.startsAt || left.label).localeCompare(String(right.startsAt || right.label)))
+      .filter((period) => {
+        const key = period.startsAt || period.label;
+        if (seenStarts.has(key)) return false;
+        seenStarts.add(key);
+        return true;
+      });
+  }
   const selectedIndex = weekly.findIndex((period) => period.id === report.periodId);
   if (selectedIndex === -1) return weekly.slice(-4);
   return weekly.slice(Math.max(0, selectedIndex - 3), selectedIndex + 1);
@@ -1222,10 +1282,11 @@ function lastFourPeriods(store, report) {
 // Historial de las ultimas 4 semanas usando SOLO datos reales sincronizados.
 // Un reporte de auditoria no puede inventar cifras: si una semana no fue
 // consultada, sus valores quedan en 0 y los graficos la omiten.
-function historyForReport(store, report) {
-  const periods = lastFourPeriods(store, report);
+function historyForReport(store, report, context = null) {
+  const periods = lastFourPeriods(store, report, context);
+  const indexedReports = context?.reportsByClientPeriod.get(report.clientId);
   return periods.map((period) => {
-    const existing = store.reports.find(
+    const existing = indexedReports?.get(period.id) || store.reports.find(
       (candidate) => candidate.clientId === report.clientId && candidate.periodId === period.id,
     );
     const summarySource = existing?.summary || (period.id === report.periodId ? report.summary : null);
@@ -3801,24 +3862,37 @@ function accumulateReportPayloads(payloads = []) {
   };
 }
 
-function buildReportPayload(store, report) {
-  const client = store.clients.find((candidate) => candidate.id === report.clientId);
-  const period = store.periods.find((candidate) => candidate.id === report.periodId);
+function buildReportPayload(store, report, { includeKnowledge = false, context = null } = {}) {
+  const client = context?.clientsById.get(report.clientId) || store.clients.find((candidate) => candidate.id === report.clientId);
+  const period = context?.periodsById.get(report.periodId) || store.periods.find((candidate) => candidate.id === report.periodId);
+  // Limpia cualquier copia historica que pudiera haber quedado embebida en un
+  // reporte. La biblioteca pertenece al nivel superior del store.
+  const { criteriaDocuments: _criteriaDocuments, allClientNames: _allClientNames, ...reportData } = report;
 
   const payload = {
-    ...report,
+    ...reportData,
     client,
     period,
     // Los reportes mensuales traen su propio historial: las semanas del mes.
     history: Array.isArray(report.monthlyHistory) && report.monthlyHistory.length
       ? report.monthlyHistory
-      : historyForReport(store, report),
-    criteriaDocuments: store.criteriaDocuments || [],
-    allClientNames: (store.clients || []).map((item) => item.name),
+      : historyForReport(store, report, context),
   };
-  payload.analysis = report.analysis || generateReportAnalysis(payload);
+  const knowledge = {
+    criteriaDocuments: store.criteriaDocuments || [],
+    allClientNames: context?.allClientNames || (store.clients || []).map((item) => item.name),
+  };
+  // El conocimiento se usa para calcular el analisis y para llamadas internas
+  // a IA/chat, pero no se copia en cada DTO que viaja al navegador.
+  payload.analysis = report.analysis || generateReportAnalysis({ ...payload, ...knowledge });
+  if (includeKnowledge) Object.assign(payload, knowledge);
 
   return payload;
+}
+
+function buildReportPayloads(store) {
+  const context = createReportPayloadContext(store);
+  return (store.reports || []).map((report) => buildReportPayload(store, report, { context }));
 }
 
 function renderReportHtml(store, report) {
@@ -6129,17 +6203,17 @@ app.get("/api/sculpture/requisition", requireAuth, async (request, response) => 
 
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
-  const report = store.reports[0];
-  if (report) {
-    await syncSculptureSources(store, report);
-    await writeStore(store);
-  }
+  // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
+  // con Sculpture queda en las acciones explicitas de cargar/sincronizar un
+  // reporte; hacerla aqui agregaba red, mutaciones y dos serializaciones del
+  // store a cada login.
+  const reports = buildReportPayloads(store);
   response.json({
     clients: store.clients,
     periods: store.periods,
     criteriaDocuments: store.criteriaDocuments || [],
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
-    selectedReport: report ? buildReportPayload(store, report) : null,
+    reports,
+    selectedReport: reports[0] || null,
     backupStatus: supabaseStatus,
     aiModels: { reports: openaiModel, chat: openaiChatModel },
   });
@@ -6155,7 +6229,7 @@ app.post("/api/module1/import-samples", requireAuth, async (_request, response) 
     clients: sampleStore.clients,
     periods: sampleStore.periods,
     criteriaDocuments: sampleStore.criteriaDocuments || [],
-    reports: sampleStore.reports.map((item) => buildReportPayload(sampleStore, item)),
+    reports: buildReportPayloads(sampleStore),
     selectedReport: report ? buildReportPayload(sampleStore, report) : null,
   });
 });
@@ -6200,7 +6274,7 @@ app.post("/api/module1/criteria-documents", requireAuth, async (request, respons
     clients: store.clients,
     periods: store.periods,
     criteriaDocuments: store.criteriaDocuments,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
     selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
   });
 });
@@ -6246,7 +6320,7 @@ app.post("/api/module1/criteria-documents/import-chatgpt", requireAuth, async (r
       clients: store.clients,
       periods: store.periods,
       criteriaDocuments: store.criteriaDocuments,
-      reports: store.reports.map((item) => buildReportPayload(store, item)),
+      reports: buildReportPayloads(store),
       selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
       importSummary: aiImport.summary,
       importedCount: documents.length,
@@ -6349,7 +6423,7 @@ app.delete("/api/module1/criteria-documents/:documentId", requireAuth, async (re
     clients: store.clients,
     periods: store.periods,
     criteriaDocuments: store.criteriaDocuments,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
     selectedReport: store.reports[0] ? buildReportPayload(store, store.reports[0]) : null,
   });
 });
@@ -6380,7 +6454,7 @@ app.delete("/api/module1/clients/:clientId", requireAuth, async (request, respon
     removedClientId: clientId,
     removedReports,
     clients: store.clients,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
   });
 });
 
@@ -6470,7 +6544,7 @@ app.post("/api/module1/sculpture-units/import", requireAuth, async (request, res
     client,
     clients: store.clients,
     selectedReport: buildReportPayload(store, report),
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
   });
 });
 
@@ -6659,7 +6733,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     selectedReport: refreshedReports[0] || null,
     queriedReports: refreshedReports,
     accumulatedReport,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
     syncResultsByPeriod,
   });
 });
@@ -6719,7 +6793,7 @@ app.post("/api/module1/import-csv", requireAuth, async (request, response) => {
   response.json({
     clients: store.clients,
     periods: store.periods,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
     selectedReport: buildReportPayload(store, report),
     imported,
   });
@@ -6914,7 +6988,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
   response.json({
     report: buildReportPayload(store, report),
     weeksIncluded: accumulated.includedPeriods,
-    reports: store.reports.map((item) => buildReportPayload(store, item)),
+    reports: buildReportPayloads(store),
   });
 });
 
@@ -6944,7 +7018,7 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
     return;
   }
 
-  const payload = buildReportPayload(store, report);
+  const payload = buildReportPayload(store, report, { includeKnowledge: true });
   const clientName = payload.client?.name || report.clientId;
   const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "", payload.allClientNames || [])
     .map((document) => ({
@@ -7308,12 +7382,12 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   if (!report.monthly) await syncSculptureSources(store, report);
 
   const templateSummary = generateReportSummary(store, report);
-  const payloadForAI = buildReportPayload(store, report);
+  const payloadForAI = buildReportPayload(store, report, { includeKnowledge: true });
   const aiResult = await generateReportAnalysisAI(payloadForAI);
 
   const generatedSummary = aiResult?.comments || templateSummary;
   report.comments = generatedSummary;
-  report.analysis = aiResult?.analysis || generateReportAnalysis(buildReportPayload(store, report));
+  report.analysis = aiResult?.analysis || payloadForAI.analysis;
   report.emailDraft = aiResult?.emailDraft || [
     `Hola,`,
     "",
