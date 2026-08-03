@@ -186,7 +186,17 @@ let pdfBrowserPromise = null;
 // de la instancia de Render (OOM del 29-jul). Se cierra tras un minuto sin
 // uso; el siguiente PDF paga ~3s de arranque a cambio de liberar la memoria.
 let pdfBrowserIdleTimer = null;
-const PDF_BROWSER_IDLE_MS = 60_000;
+const PDF_BROWSER_IDLE_MS = 20_000;
+
+// Un solo PDF a la vez: dos renders simultaneos duplican el pico de memoria
+// de Chromium y en el plan de 512MB eso mata la instancia (OOM). Los pedidos
+// extra esperan su turno en fila.
+let pdfJobChain = Promise.resolve();
+function enqueuePdfJob(job) {
+  const run = pdfJobChain.then(job, job);
+  pdfJobChain = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 function schedulePdfBrowserClose() {
   clearTimeout(pdfBrowserIdleTimer);
@@ -1133,7 +1143,16 @@ async function ensureStore() {
   }
 }
 
+// Cache en memoria del store: re-leer y re-parsear el JSON completo (varios
+// MB con 141 reportes) en CADA peticion creaba una copia del grafo de objetos
+// por request concurrente y disparaba los OOM de 512MB en Render. Node es
+// single-thread: una sola instancia compartida es segura, se invalida al
+// escribir, y de paso corrige el "lost update" entre requests simultaneas
+// (antes cada una escribia SU copia y la ultima pisaba a la primera).
+let cachedStore = null;
+
 async function readStore() {
+  if (cachedStore) return cachedStore;
   await hydrateStoreFromSupabase();
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
@@ -1155,15 +1174,19 @@ async function readStore() {
   store.users ||= [];
   store.hiddenSculptureUnits ||= [];
   store.presence ||= {};
+  cachedStore = store;
   return store;
 }
 
 async function writeStore(store) {
+  cachedStore = store;
   await fs.mkdir(dataDir, { recursive: true });
   // Escritura atomica: evita que una lectura concurrente (o un reinicio a
   // mitad de escritura) vea el JSON truncado.
+  // Sin pretty-print: el archivo es de la maquina y el sangrado duplicaba
+  // su tamaño en disco y en memoria al serializar.
   const tempPath = `${moduleStorePath}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(store, null, 2));
+  await fs.writeFile(tempPath, JSON.stringify(store));
   await fs.rename(tempPath, moduleStorePath);
   await persistStoreToSupabase(store);
 }
@@ -7391,7 +7414,7 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
     return;
   }
   try {
-    const pdf = await renderReportPdf(store, report);
+    const pdf = await enqueuePdfJob(() => renderReportPdf(store, report));
     const client = store.clients.find((candidate) => candidate.id === report.clientId);
     const period = store.periods.find((candidate) => candidate.id === report.periodId);
     const fileName = `Reporte Bevinco - ${client?.name || report.clientId} - ${period?.label || report.periodId}`.replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
@@ -7763,7 +7786,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
 
   let reportPdf;
   try {
-    reportPdf = await renderReportPdf(store, report);
+    reportPdf = await enqueuePdfJob(() => renderReportPdf(store, report));
   } catch (pdfError) {
     console.error("[pdf] fallo al adjuntar:", pdfError.stack || pdfError.message);
     response.status(500).json({ error: "No se pudo generar el PDF adjunto. Intenta de nuevo en unos segundos." });
