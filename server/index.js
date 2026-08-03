@@ -5283,6 +5283,608 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 </html>`;
 }
 
+// ===== Reporte web dinamico (/r/:token) =====================================
+// Estructura y funcionalidad de los reportes HTML de GoPoint (topbar sticky,
+// secciones numeradas, cards con Chart.js, selector de periodo en vivo) con
+// la identidad de bevinco.cl. La version imprimible queda en /r/:token/print.
+
+// La informacion del reporte en JSON, recortada para la pagina publica (sin
+// criterios, directorio ni datos de otros clientes).
+function dynamicReportData(store, report) {
+  const payload = buildReportPayload(store, report);
+  const history = [...(payload.history || [])]
+    .sort((a, b) => String(a.endsAt || a.label).localeCompare(String(b.endsAt || b.label)))
+    .map((item) => ({
+      label: item.label || "",
+      endsAt: item.endsAt || "",
+      revenue: item.revenue || 0,
+      costPercent: item.costPercent || 0,
+      idealCostPercent: item.idealCostPercent || 0,
+      varianceAmount: item.varianceAmount || 0,
+      suggestedCost: item.suggestedCost || 0,
+      purchasedCost: item.purchasedCost || 0,
+      inventoryCost: item.inventoryCost || 0,
+      usedCost: item.usedCost || 0,
+    }));
+  const familyVariances = (payload.familyVariances || []).filter((item) => item.amount);
+  // Compra sugerida comparable con la compra de esta semana: la emitida la
+  // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
+  const priorWeekly = (() => {
+    const currentEnd = String(payload.period?.endsAt || "");
+    if (!currentEnd) return null;
+    return (store.reports || [])
+      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
+      .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
+      .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
+      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]?.candidate || null;
+  })();
+  const suggestedSource = (priorWeekly?.familySuggested?.length ? priorWeekly.familySuggested : payload.familySuggested) || [];
+  const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
+  const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
+  const familyPurchases = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys()])]
+    .map((family) => ({ family, purchased: purchasesMap.get(family) || 0, suggested: suggestedMap.get(family) || 0 }))
+    .filter((item) => item.purchased || item.suggested)
+    .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
+    .slice(0, 7);
+  const savings = Number.isFinite(payload.summary?.savingsTotal)
+    ? payload.summary.savingsTotal
+    : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
+  const shortages = Number.isFinite(payload.summary?.shortagesTotal)
+    ? payload.summary.shortagesTotal
+    : familyVariances.filter((item) => item.amount < 0).reduce((sum, item) => sum + item.amount, 0);
+  const topProducts = (payload.topUsageProducts && payload.topUsageProducts.length
+    ? payload.topUsageProducts
+    : (payload.topProducts || []).map((item) => ({
+        name: item.name,
+        usedCost: 0,
+        varianceAmount: item.varianceAmount,
+        variancePercent: item.variancePercent,
+        realCostPercent: 0,
+      }))).slice(0, 10);
+  const lastHistory = history[history.length - 1] || {};
+  return {
+    reportId: report.id,
+    monthly: Boolean(report.monthly || payload.isAccumulated),
+    client: {
+      name: payload.client?.accountName || payload.client?.name || report.clientId,
+      area: payload.client?.area || "",
+    },
+    period: {
+      label: payload.period?.label || "",
+      startsAt: payload.period?.startsAt || "",
+      endsAt: payload.period?.endsAt || "",
+    },
+    summary: {
+      revenue: payload.summary?.revenue || 0,
+      costPercent: payload.summary?.costPercent || lastHistory.costPercent || 0,
+      idealCostPercent: lastHistory.idealCostPercent || 0,
+      varianceAmount: payload.summary?.varianceAmount || 0,
+      variancePercent: payload.summary?.variancePercent || 0,
+      savings,
+      shortages,
+      waste: Math.abs(payload.summary?.wasteCost || 0),
+    },
+    history,
+    familyVariances,
+    familyPurchases,
+    topProducts,
+    analysis: {
+      // Cada campo es una LISTA de hallazgos (igual que los usa el PDF).
+      bestOfWeek: [].concat(payload.analysis?.bestOfWeek || []).filter(Boolean),
+      weeklyChallenges: [].concat(payload.analysis?.weeklyChallenges || []).filter(Boolean),
+      stockEfficiency: [].concat(payload.analysis?.stockEfficiency || []).filter(Boolean),
+    },
+  };
+}
+
+// Los periodos navegables desde la pagina: los reportes guardados del mismo
+// cliente (semanales y mensuales), del mas nuevo al mas viejo.
+function clientReportPeriodList(store, clientId) {
+  return (store.reports || [])
+    .filter((candidate) => candidate.clientId === clientId && candidate.summary)
+    .map((candidate) => {
+      const period = store.periods.find((item) => item.id === candidate.periodId);
+      return {
+        reportId: candidate.id,
+        label: period?.label || candidate.periodLabel || candidate.id,
+        endsAt: period?.endsAt || "",
+        monthly: Boolean(candidate.monthly),
+      };
+    })
+    .sort((left, right) => String(right.endsAt).localeCompare(String(left.endsAt)));
+}
+
+function renderDynamicReportHtml(store, report) {
+  const NAVY = "#001E43";
+  const GREEN = "#90BF4F";
+  const boot = {
+    token: report.webToken,
+    data: dynamicReportData(store, report),
+    periods: clientReportPeriodList(store, report.clientId),
+  };
+  const clientTitle = boot.data.client.name;
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reporte ${escapeHtml(clientTitle)} · Bevinco</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <style>
+    :root {
+      --navy: ${NAVY};
+      --green: ${GREEN};
+      --green-soft: rgba(144, 191, 79, 0.14);
+      --bg: #F9F6EF;
+      --card: #ffffff;
+      --line: #e9e4d6;
+      --line-soft: #f1ede2;
+      --text: #14212e;
+      --text-light: #4b5a68;
+      --text-muted: #8b95a5;
+      --red: #d23f31;
+      --red-soft: rgba(210, 63, 49, 0.10);
+      --r-lg: 18px;
+      --r-md: 14px;
+      --shadow-sm: 0 1px 2px rgba(0, 30, 67, 0.05), 0 1px 3px rgba(0, 30, 67, 0.06);
+      --shadow-md: 0 4px 16px rgba(0, 30, 67, 0.08), 0 1px 3px rgba(0, 30, 67, 0.05);
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: "Inter", "Segoe UI", Arial, sans-serif; margin: 0; }
+    .topbar { background: var(--navy); position: sticky; top: 0; z-index: 60; }
+    .topbar-inner { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; margin: 0 auto; max-width: 1180px; padding: 13px 22px; }
+    .brand { align-items: center; display: flex; gap: 13px; }
+    .brand-mark { color: var(--green); font-size: 19px; font-weight: 900; letter-spacing: -0.03em; }
+    .brand-mark span { color: #F9F6EF; }
+    .brand-divider { background: rgba(249, 246, 239, 0.25); height: 26px; width: 1px; }
+    .brand-sub { color: #b9c6d8; display: flex; flex-direction: column; font-size: 11px; font-weight: 600; line-height: 1.35; }
+    .brand-sub b { color: #F9F6EF; font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em; }
+    .controls { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+    .control { display: flex; flex-direction: column; gap: 3px; }
+    .control-label { color: #8fa1b8; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .select { appearance: none; background: rgba(249, 246, 239, 0.08); border: 1px solid rgba(249, 246, 239, 0.25); border-radius: 9px; color: #F9F6EF; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; min-height: 36px; padding: 0 30px 0 12px; }
+    .select-wrap { position: relative; }
+    .select-wrap::after { color: var(--green); content: "▾"; pointer-events: none; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); }
+    .select option { background: var(--navy); }
+    .live-pill { align-items: center; border: 1px solid rgba(144, 191, 79, 0.5); border-radius: 999px; color: var(--green); display: flex; font-size: 10.5px; font-weight: 700; gap: 7px; padding: 7px 13px; }
+    .live-pill .dot { animation: pulse 1.6s infinite; background: var(--green); border-radius: 50%; height: 7px; width: 7px; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .pdf-btn { background: var(--green); border: 0; border-radius: 100px; color: var(--navy); cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 800; min-height: 38px; padding: 0 20px; text-decoration: none; display: inline-flex; align-items: center; }
+    .pdf-btn:hover { filter: brightness(1.06); }
+    .main { margin: 0 auto; max-width: 1180px; padding: 26px 22px 20px; }
+    .hero-meta { align-items: baseline; display: flex; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 18px; }
+    .hero-meta h1 { color: var(--navy); font-size: 30px; font-weight: 900; letter-spacing: -0.04em; margin: 0; }
+    .hero-meta .period-tag { background: var(--green); border-radius: 999px; color: var(--navy); font-size: 12px; font-weight: 800; padding: 5px 14px; }
+    .hero-meta .area-tag { background: #efe9da; border-radius: 999px; color: var(--text-light); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 5px 12px; text-transform: uppercase; }
+    .kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 26px; }
+    .kpi-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-sm); padding: 14px 16px; }
+    .kpi-label { color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+    .kpi-value { color: var(--navy); font-size: 24px; font-weight: 900; letter-spacing: -0.02em; margin-top: 5px; }
+    .kpi-value.neg { color: var(--red); }
+    .kpi-value.pos { color: #5c8f1e; }
+    .kpi-chip { border-radius: 999px; display: inline-block; font-size: 10.5px; font-weight: 700; margin-top: 7px; padding: 3px 9px; }
+    .kpi-chip.up { background: var(--green-soft); color: #4f7d17; }
+    .kpi-chip.down { background: var(--red-soft); color: var(--red); }
+    .kpi-chip.flat { background: #f1f3f5; color: var(--text-muted); }
+    .section { margin-bottom: 30px; }
+    .section-title { align-items: center; display: flex; font-size: 15.5px; font-weight: 800; gap: 11px; letter-spacing: -0.01em; margin: 0 0 14px 2px; }
+    .section-title .num { background: var(--green-soft); border-radius: 8px; color: #5c8f1e; display: grid; font-size: 11px; font-weight: 900; height: 26px; min-width: 26px; place-items: center; }
+    .section-title .hint { color: var(--text-muted); font-size: 11px; font-weight: 500; margin-left: auto; text-align: right; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 18px 20px; transition: box-shadow 0.18s; }
+    .card:hover { box-shadow: var(--shadow-md); }
+    .card-header { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 12px; }
+    .card-title { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+    .tag { background: #f4f1e7; border: 1px solid var(--line-soft); border-radius: 999px; color: var(--text-muted); font-size: 9px; font-weight: 600; letter-spacing: 0.06em; padding: 3px 9px; text-transform: uppercase; white-space: nowrap; }
+    .chart-wrap { height: 300px; position: relative; }
+    .chart-wrap.tall { height: 340px; }
+    .grid-2 { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .grid-2 > * { min-width: 0; }
+    .grid-var { display: grid; gap: 18px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+    .grid-var > * { min-width: 0; }
+    .side-kpis { display: flex; flex-direction: column; gap: 14px; }
+    .side-kpis .kpi-card { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .comments-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .comment-card h3 { color: #5c8f1e; font-size: 13.5px; font-weight: 800; margin: 0 0 9px; }
+    .comment-card p { color: var(--text-light); font-size: 13px; line-height: 1.65; margin: 0 0 8px; }
+    .comment-card p b { color: var(--text); }
+    .table-scroll { max-height: 430px; overflow: auto; }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; }
+    thead th { background: var(--navy); color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; padding: 9px 12px; position: sticky; text-align: left; text-transform: uppercase; top: 0; z-index: 2; }
+    thead th.num { text-align: right; }
+    tbody td { border-bottom: 1px solid var(--line-soft); font-size: 12.5px; padding: 9px 12px; }
+    tbody td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    tbody tr:nth-child(even) td { background: #fbf9f3; }
+    td .neg { color: var(--red); font-weight: 700; }
+    td .pos { color: #5c8f1e; font-weight: 700; }
+    .footer { color: var(--navy); font-size: 13.5px; font-weight: 700; margin: 8px auto 34px; max-width: 1180px; padding: 0 22px; text-align: center; }
+    .footer b { color: #5c8f1e; }
+    .loading { opacity: 0.45; pointer-events: none; transition: opacity 0.15s; }
+    @media (max-width: 900px) {
+      .grid-2, .grid-var { grid-template-columns: minmax(0, 1fr); }
+      .side-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      .hero-meta h1 { font-size: 24px; }
+      .topbar-inner { padding: 11px 16px; }
+      .main { padding: 20px 14px; }
+      .chart-wrap, .chart-wrap.tall { height: 260px; }
+    }
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">BEVINCO<span>.</span></div>
+      <div class="brand-divider"></div>
+      <div class="brand-sub"><b>Reporte de auditoría</b>Sculpture Hospitality</div>
+    </div>
+    <div class="controls">
+      <div class="control">
+        <span class="control-label">Período</span>
+        <span class="select-wrap"><select id="periodSelect" class="select"></select></span>
+      </div>
+      <div class="live-pill"><span class="dot"></span> Datos del CMS</div>
+      <a class="pdf-btn" id="pdfBtn" href="#" target="_blank" rel="noreferrer">Descargar PDF</a>
+    </div>
+  </div>
+</header>
+
+<main class="main" id="main">
+  <div class="hero-meta">
+    <h1 id="clientName"></h1>
+    <span class="period-tag" id="periodTag"></span>
+    <span class="area-tag" id="areaTag"></span>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">01</span> Costo real vs Costo ideal <span class="hint">Ingresos por semana y ambas curvas de costo</span></h2>
+    <div class="card"><div class="chart-wrap tall"><canvas id="costChart"></canvas></div></div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">02</span> Ahorro y faltantes de inventario <span class="hint">Diferencia al costo por familia · semana actual</span></h2>
+    <div class="grid-var">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Diferencia por familia <span class="tag">Variance · Sculpture</span></div></div>
+        <div class="chart-wrap"><canvas id="famChart"></canvas></div>
+      </div>
+      <div class="side-kpis" id="varKpis"></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">03</span> Compras <span class="hint">La sugerencia emitida una semana se compara con la compra de la siguiente</span></h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Compra realizada vs sugerida <span class="tag">InteliPar</span></div></div>
+        <div class="chart-wrap"><canvas id="buyChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Por familia <span class="tag">Sugerida semana previa vs comprada</span></div></div>
+        <div class="chart-wrap"><canvas id="famBuyChart"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">04</span> Cobertura de inventario <span class="hint">Inventario al costo vs consumo, y días de cobertura</span></h2>
+    <div class="card"><div class="chart-wrap"><canvas id="covChart"></canvas></div></div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">05</span> Análisis de la semana <span class="hint">Comentarios del equipo auditor</span></h2>
+    <div class="comments-grid" id="comments"></div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title"><span class="num">06</span> Top 10 productos por uso <span class="hint">Dónde está la plata: uso, ahorro/faltante y costo real</span></h2>
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Producto</th><th class="num">Usado (costo)</th><th class="num">Ahorro / Faltante</th><th class="num">%</th><th class="num">Costo real</th></tr></thead>
+          <tbody id="productRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">Tú te encargas del sabor. <b>Nosotros del margen.</b> — Bevinco · Sculpture Hospitality</footer>
+
+<script>window.__BOOT__ = ${JSON.stringify(boot).replace(/</g, "\\u003c")};</script>
+<script>
+(function () {
+  var NAVY = "${NAVY}";
+  var GREEN = "${GREEN}";
+  var TEAL = "#8bc6c1";
+  var RED = "#d23f31";
+  var FAMILY_COLORS = {
+    "Destilados": "#10243e", "Vinos": "#2e75b6", "Espumantes": "#90BF4F",
+    "Cervezas y Sidra": "#8bc6c1", "Barriles": "#8c5f42", "Sin Alcohol": "#a6a6a6", "Otros": "#c9b26a"
+  };
+  var EXTRA = ["#001E43", "#2e75b6", "#90BF4F", "#8bc6c1", "#8c5f42", "#368675", "#c9b26a", "#d97706", "#6b8f2f", "#a6a6a6"];
+  var charts = {};
+  var boot = window.__BOOT__;
+  Chart.register(ChartDataLabels);
+  Chart.defaults.font.family = '"Inter", "Segoe UI", Arial, sans-serif';
+  Chart.defaults.color = "#8b95a5";
+  Chart.defaults.plugins.datalabels.display = false;
+
+  function fmtMoney(value) {
+    return "$" + new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(value || 0));
+  }
+  function fmtK(value) {
+    var v = value || 0;
+    if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + "M";
+    if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + "K";
+    return String(Math.round(v));
+  }
+  function fmtPct(value) { return (value || 0).toFixed(1) + "%"; }
+  function ddmm(iso) {
+    var m = String(iso || "").match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+    return m ? m[3] + "-" + m[2] : "";
+  }
+  function esc(text) {
+    var div = document.createElement("div");
+    div.textContent = String(text == null ? "" : text);
+    return div.innerHTML;
+  }
+  function famColor(name, index) {
+    return FAMILY_COLORS[name] || EXTRA[index % EXTRA.length];
+  }
+  function destroyChart(key) {
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+  }
+  function richItems(items) {
+    return (items || []).map(function (item) {
+      var safe = esc(item).replace(/\\*\\*([^*]+)\\*\\*/g, "<b>$1</b>");
+      return "<p>&minus;&nbsp; " + safe + "</p>";
+    }).join("");
+  }
+
+  function kpiChip(current, previous, invert) {
+    if (!previous && previous !== 0) return "";
+    var delta = current - previous;
+    if (!isFinite(delta) || Math.abs(delta) < 0.05) return '<span class="kpi-chip flat">= igual que la semana previa</span>';
+    var good = invert ? delta < 0 : delta > 0;
+    var arrow = delta > 0 ? "▲" : "▼";
+    return '<span class="kpi-chip ' + (good ? "up" : "down") + '">' + arrow + " " + Math.abs(delta).toFixed(1) + " pp vs semana previa</span>";
+  }
+
+  function renderKpis(data) {
+    var h = data.history;
+    var prev = h.length > 1 ? h[h.length - 2] : null;
+    var s = data.summary;
+    var cards = [
+      { label: "Ingresos", value: fmtMoney(s.revenue), chip: "" },
+      { label: "% Costo real", value: fmtPct(s.costPercent), chip: kpiChip(s.costPercent, prev ? prev.costPercent : null, true) },
+      { label: "% Costo ideal", value: fmtPct(s.idealCostPercent), chip: "" },
+      { label: "Diferencia al costo", value: fmtMoney(s.varianceAmount), tone: s.varianceAmount < 0 ? "neg" : "pos", chip: "" },
+      { label: "Merma reportada", value: s.waste ? "-" + fmtMoney(s.waste) : "$0", tone: s.waste ? "neg" : "", chip: "" }
+    ];
+    document.getElementById("kpis").innerHTML = cards.map(function (card) {
+      return '<div class="kpi-card"><div class="kpi-label">' + card.label + '</div>' +
+        '<div class="kpi-value ' + (card.tone || "") + '">' + card.value + "</div>" + (card.chip || "") + "</div>";
+    }).join("");
+  }
+
+  function renderCostChart(data) {
+    destroyChart("cost");
+    var h = data.history;
+    var labels = h.map(function (p) { return ddmm(p.endsAt) || p.label; });
+    var pcts = [];
+    h.forEach(function (p) { if (p.costPercent) pcts.push(p.costPercent); if (p.idealCostPercent) pcts.push(p.idealCostPercent); });
+    var pctMin = pcts.length ? Math.max(0, Math.floor((Math.min.apply(null, pcts) - 3) / 5) * 5) : 0;
+    var pctMax = pcts.length ? Math.ceil((Math.max.apply(null, pcts) + 3) / 5) * 5 : 40;
+    charts.cost = new Chart(document.getElementById("costChart"), {
+      data: {
+        labels: labels,
+        datasets: [
+          { type: "line", label: "% Costo real", data: h.map(function (p) { return p.costPercent || null; }), borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
+            datalabels: { display: true, align: "top", offset: 6, backgroundColor: NAVY, borderRadius: 4, color: "#fff", font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+          { type: "line", label: "% Costo ideal", data: h.map(function (p) { return p.idealCostPercent || null; }), borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
+            datalabels: { display: true, align: "bottom", offset: 6, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+          { type: "bar", label: "Ingresos", data: h.map(function (p) { return p.revenue || 0; }), backgroundColor: TEAL, yAxisID: "y1", maxBarThickness: 60,
+            datalabels: { display: true, anchor: "start", align: "end", color: "#fff", font: { weight: 800, size: 12 }, formatter: fmtK } }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: { callbacks: { label: function (ctx) {
+            return ctx.dataset.label + ": " + (ctx.dataset.type === "bar" ? fmtMoney(ctx.parsed.y) : fmtPct(ctx.parsed.y));
+          } } }
+        },
+        scales: {
+          y: { min: pctMin, max: pctMax, ticks: { callback: function (v) { return v + "%"; } }, grid: { color: "#efece1" } },
+          y1: { position: "right", beginAtZero: true, ticks: { callback: fmtK }, grid: { display: false } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  function renderFamChart(data) {
+    destroyChart("fam");
+    var rows = data.familyVariances.slice().sort(function (a, b) { return b.amount - a.amount; });
+    charts.fam = new Chart(document.getElementById("famChart"), {
+      type: "bar",
+      data: {
+        labels: rows.map(function (r) { return r.family; }),
+        datasets: [{
+          data: rows.map(function (r) { return r.amount; }),
+          backgroundColor: rows.map(function (r, i) { return famColor(r.family, i); }),
+          maxBarThickness: 34,
+          datalabels: { display: true, anchor: "end", align: function (ctx) { return ctx.dataset.data[ctx.dataIndex] < 0 ? "start" : "end"; },
+            color: "#4b5a68", font: { weight: 800, size: 11 }, formatter: fmtK }
+        }]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        layout: { padding: { left: 6, right: 34 } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return fmtMoney(ctx.parsed.x); } } } },
+        scales: { x: { ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
+      }
+    });
+    var s = data.summary;
+    document.getElementById("varKpis").innerHTML =
+      '<div class="kpi-card"><div class="kpi-label">Suma de ahorros</div><div class="kpi-value pos">' + fmtMoney(s.savings) + "</div></div>" +
+      '<div class="kpi-card"><div class="kpi-label">Suma de faltantes</div><div class="kpi-value neg">' + fmtMoney(s.shortages) + "</div></div>" +
+      '<div class="kpi-card"><div class="kpi-label">Merma reportada al $</div><div class="kpi-value ' + (s.waste ? "neg" : "") + '">' + (s.waste ? "-" + fmtMoney(s.waste) : "$0") + "</div></div>";
+  }
+
+  function renderBuyChart(data) {
+    destroyChart("buy");
+    var h = data.history;
+    var labels = h.map(function (p) { return ddmm(p.endsAt) || p.label; });
+    var purchased = h.map(function (p) { return p.purchasedCost || null; });
+    var suggested = [null].concat(h.slice(0, -1).map(function (p) { return p.suggestedCost || null; }));
+    var nextSuggested = h.length && h[h.length - 1].suggestedCost ? h[h.length - 1].suggestedCost : null;
+    if (nextSuggested) { labels = labels.concat(["Próx. semana"]); purchased = purchased.concat([null]); suggested = suggested.concat([nextSuggested]); }
+    charts.buy = new Chart(document.getElementById("buyChart"), {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [
+          { label: "Compra sugerida", data: suggested, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: function (ctx) { return ctx.dataIndex === labels.length - 1 && nextSuggested ? 6 : 4; }, spanGaps: true,
+            datalabels: { display: true, align: "top", offset: 5, color: "#5c8f1e", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } },
+          { label: "Compra realizada", data: purchased, borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, spanGaps: true,
+            datalabels: { display: true, align: "bottom", offset: 5, color: NAVY, font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.y); } } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: fmtK }, grid: { color: "#efece1" } }, x: { grid: { display: false } } }
+      }
+    });
+  }
+
+  function renderFamBuyChart(data) {
+    destroyChart("famBuy");
+    var rows = data.familyPurchases;
+    charts.famBuy = new Chart(document.getElementById("famBuyChart"), {
+      type: "bar",
+      data: {
+        labels: rows.map(function (r) { return r.family; }),
+        datasets: [
+          { label: "Sugerida (sem. previa)", data: rows.map(function (r) { return r.suggested; }), backgroundColor: GREEN, maxBarThickness: 20 },
+          { label: "Comprada", data: rows.map(function (r) { return r.purchased; }), backgroundColor: NAVY, maxBarThickness: 20 }
+        ]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        layout: { padding: { left: 6 } },
+        plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.x); } } } },
+        scales: { x: { ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
+      }
+    });
+  }
+
+  function renderCovChart(data) {
+    destroyChart("cov");
+    var h = data.history;
+    var labels = h.map(function (p) { return ddmm(p.endsAt) || p.label; });
+    charts.cov = new Chart(document.getElementById("covChart"), {
+      data: {
+        labels: labels,
+        datasets: [
+          { type: "bar", label: "Inventario al costo", data: h.map(function (p) { return p.inventoryCost || 0; }), backgroundColor: TEAL, maxBarThickness: 44 },
+          { type: "bar", label: "Consumo (usado)", data: h.map(function (p) { return p.usedCost || 0; }), backgroundColor: NAVY, maxBarThickness: 44 },
+          { type: "line", label: "Días de cobertura", data: h.map(function (p) { return p.usedCost > 0 ? Math.round((p.inventoryCost / (p.usedCost / 7)) * 10) / 10 : null; }), borderColor: "#d97706", backgroundColor: "#d97706", borderWidth: 2.2, pointRadius: 4, yAxisID: "y1",
+            datalabels: { display: true, align: "top", offset: 5, backgroundColor: "#d97706", borderRadius: 4, color: "#fff", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? v + " d" : ""; }, padding: { top: 2, bottom: 2, left: 5, right: 5 } } }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: { callbacks: { label: function (ctx) {
+            if (ctx.dataset.yAxisID === "y1") return ctx.dataset.label + ": " + ctx.parsed.y + " días";
+            return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.y);
+          } } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: fmtK }, grid: { color: "#efece1" } },
+          y1: { position: "right", beginAtZero: true, ticks: { callback: function (v) { return v + " d"; } }, grid: { display: false } },
+          x: { grid: { display: false } } }
+      }
+    });
+  }
+
+  function renderComments(data) {
+    var blocks = [
+      { title: "Lo mejor de la semana", items: data.analysis.bestOfWeek },
+      { title: "Los desafíos de la semana", items: data.analysis.weeklyChallenges },
+      { title: "Eficiencia de stock y compra", items: data.analysis.stockEfficiency }
+    ].filter(function (block) { return block.items && block.items.length; });
+    document.getElementById("comments").innerHTML = blocks.map(function (block) {
+      return '<div class="card comment-card"><h3>' + block.title + "</h3>" + richItems(block.items) + "</div>";
+    }).join("") || '<div class="card comment-card"><p>Sin comentarios para este período.</p></div>';
+  }
+
+  function renderProducts(data) {
+    document.getElementById("productRows").innerHTML = data.topProducts.map(function (item) {
+      var tone = item.varianceAmount < 0 ? "neg" : "pos";
+      return "<tr><td><b>" + esc(item.name) + "</b></td>" +
+        '<td class="num">' + (item.usedCost ? fmtMoney(item.usedCost) : "-") + "</td>" +
+        '<td class="num"><span class="' + tone + '">' + fmtMoney(item.varianceAmount) + "</span></td>" +
+        '<td class="num">' + fmtPct(item.variancePercent) + "</td>" +
+        '<td class="num">' + (item.realCostPercent ? fmtPct(item.realCostPercent) : "-") + "</td></tr>";
+    }).join("");
+  }
+
+  function renderAll(data) {
+    document.getElementById("clientName").textContent = data.client.name;
+    document.getElementById("periodTag").textContent = data.period.label || "";
+    document.getElementById("areaTag").textContent = (data.monthly ? "Mensual · " : "Semanal · ") + (data.client.area || "");
+    document.getElementById("pdfBtn").href = "/r/" + boot.token + "/print?period=" + encodeURIComponent(data.reportId);
+    renderKpis(data);
+    renderCostChart(data);
+    renderFamChart(data);
+    renderBuyChart(data);
+    renderFamBuyChart(data);
+    renderCovChart(data);
+    renderComments(data);
+    renderProducts(data);
+  }
+
+  var select = document.getElementById("periodSelect");
+  select.innerHTML = boot.periods.map(function (p) {
+    return '<option value="' + esc(p.reportId) + '"' + (p.reportId === boot.data.reportId ? " selected" : "") + ">" +
+      esc((p.monthly ? "Mensual · " : "") + p.label) + "</option>";
+  }).join("");
+  select.addEventListener("change", function () {
+    var main = document.getElementById("main");
+    main.classList.add("loading");
+    fetch("/r/" + boot.token + "/data?period=" + encodeURIComponent(select.value))
+      .then(function (res) { if (!res.ok) throw new Error("No se pudo cargar el período."); return res.json(); })
+      .then(function (payload) { renderAll(payload.data); })
+      .catch(function () { alert("No se pudo cargar ese período. Intenta de nuevo."); })
+      .then(function () { main.classList.remove("loading"); });
+  });
+
+  // Con la fuente ya cargada: Chart.js mide las etiquetas al crear el
+  // grafico y si Inter llega despues, los textos quedan cortados.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { renderAll(boot.data); });
+  } else {
+    renderAll(boot.data);
+  }
+})();
+</script>
+</body>
+</html>`;
+}
+
 app.get("/api/system/backup-status", requireAuth, (_request, response) => {
   response.json(supabaseStatus);
 });
@@ -6563,16 +7165,50 @@ app.post("/api/module1/reports/:reportId/share", requireAuth, async (request, re
   response.json({ url: `/r/${report.webToken}` });
 });
 
-app.get("/r/:token", async (request, response) => {
+async function reportForToken(request) {
   const token = String(request.params.token || "");
   const store = token.length >= 12 ? await readStore() : null;
-  const report = store ? store.reports.find((candidate) => candidate.webToken === token) : null;
+  const base = store ? store.reports.find((candidate) => candidate.webToken === token) : null;
+  if (!base) return { store: null, report: null };
+  // ?period= permite navegar a otros reportes DEL MISMO CLIENTE con el mismo
+  // token (el selector de periodo de la pagina dinamica).
+  const requested = String(request.query.period || "");
+  const report = requested
+    ? store.reports.find((candidate) => candidate.id === requested && candidate.clientId === base.clientId) || base
+    : base;
+  return { store, report: { ...report, webToken: token } };
+}
+
+app.get("/r/:token", async (request, response) => {
+  const { store, report } = await reportForToken(request);
+  if (!report) {
+    response.status(404).send("Reporte no disponible.");
+    return;
+  }
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.send(renderDynamicReportHtml(store, report));
+});
+
+app.get("/r/:token/print", async (request, response) => {
+  const { store, report } = await reportForToken(request);
   if (!report) {
     response.status(404).send("Reporte no disponible.");
     return;
   }
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.send(renderTwoPageReportHtml(store, report, { web: true }));
+});
+
+app.get("/r/:token/data", async (request, response) => {
+  const { store, report } = await reportForToken(request);
+  if (!report) {
+    response.status(404).json({ error: "Reporte no disponible." });
+    return;
+  }
+  response.json({
+    data: dynamicReportData(store, report),
+    periods: clientReportPeriodList(store, report.clientId),
+  });
 });
 
 app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, response) => {
