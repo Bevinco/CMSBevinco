@@ -82,6 +82,9 @@ async function performSupabaseHydration() {
   try {
     const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?id=eq.1&select=data`, {
       headers: supabaseHeaders(),
+      // Sin timeout, una conexion colgada dejaba la hidratacion pendiente para
+      // siempre y el CMS operando con el store de muestras.
+      signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) {
       supabaseStatus.lastError = `Lectura rechazada (${response.status}). Revisa URL, clave service_role y la tabla cms_store.`;
@@ -134,6 +137,7 @@ async function persistStoreToSupabase(store) {
       method: "POST",
       headers: { ...supabaseHeaders(), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify([{ id: 1, data: store, updated_at: new Date().toISOString() }]),
+      signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) {
       supabaseStatus.lastError = `Escritura rechazada (${response.status}). Revisa que la clave sea la service_role.`;
@@ -8134,4 +8138,10 @@ app.listen(port, () => {
       : "[supabase] SIN CONFIGURAR: los reportes y criterios no sobreviviran reinicios",
   );
   console.log(`Bevinco CMS listening on port ${port}`);
+  // Restaurar el store APENAS arranca, sin esperar la primera peticion que lo
+  // necesite: si el primer login es el superadmin de entorno (no toca el
+  // store), el CMS quedaba en blanco hasta que alguien abriera un reporte.
+  readStore()
+    .then((store) => console.log(`[store] listo: ${store.reports.length} reportes, ${(store.criteriaDocuments || []).length} criterios`))
+    .catch((error) => console.error("[store] carga inicial fallo:", error.message));
 });
