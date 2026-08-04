@@ -4713,3 +4713,8 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 :root[data-theme="dark"] .eyebrow { color: #a7ca6f; }
 :root[data-theme="dark"] .search-select-trigger, :root[data-theme="dark"] .month-picker-trigger,
 :root[data-theme="dark"] .search-select-pop, :root[data-theme="dark"] .month-picker-pop { border-color: var(--line); }
+
+/* Backdrop de los desplegables montados como portal en <body>: cubre la
+   pantalla completa por encima de todo el CMS. */
+.portal-backdrop { inset: 0; position: fixed; z-index: 9998; }
+.search-select-pop.is-portal, .month-picker-pop.is-portal { margin-top: 0; z-index: 9999; }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { createPortal } from "react-dom";
 import {
   BarChart3,
   Bot,
@@ -466,24 +467,30 @@ const MONTH_FULL = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "juli
 
 function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: string; onChange: (next: string) => void; placeholder?: string }) {
   const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
   const [viewYear, setViewYear] = useState(() => Number((value || "").slice(0, 4)) || new Date().getFullYear());
   const selectedYear = Number((value || "").slice(0, 4)) || null;
   const selectedMonth = Number((value || "").slice(5, 7)) || null;
-  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open && selectedYear) setViewYear(selectedYear);
   }, [open, selectedYear]);
 
-  // Mismo cierre por click afuera que SearchSelect: el backdrop no cubre la
-  // pantalla completa cuando un ancestro animado con transform lo contiene.
+  // Portal en <body>, igual que SearchSelect: el backdrop cubre la pantalla
+  // completa por encima de todo y cualquier click afuera cierra el calendario.
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    const close = () => setOpen(false);
+    const closeOnScroll = (event: Event) => {
+      if ((event.target as HTMLElement)?.closest?.(".month-picker-pop")) return;
+      setOpen(false);
     };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", closeOnScroll, true);
+    };
   }, [open]);
 
   const monthName = selectedMonth ? MONTH_FULL[selectedMonth - 1] : "";
@@ -492,15 +499,28 @@ function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: s
     : placeholder;
 
   return (
-    <div className="month-picker" ref={rootRef}>
-      <button className={`month-picker-trigger ${value ? "" : "is-empty"}`} type="button" onClick={() => setOpen((current) => !current)}>
+    <div className="month-picker">
+      <button
+        className={`month-picker-trigger ${value ? "" : "is-empty"}`}
+        type="button"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setAnchor({ left: rect.left, top: rect.bottom });
+          setOpen((current) => !current);
+        }}
+      >
         <CalendarDays size={16} />
         <span>{display}</span>
       </button>
-      {open ? (
+      {open && anchor ? createPortal(
         <>
-          <div className="month-picker-backdrop" onClick={() => setOpen(false)} />
-          <div className="month-picker-pop" role="dialog" aria-label="Elegir mes">
+          <div className="portal-backdrop" onPointerDown={() => setOpen(false)} />
+          <div
+            className="month-picker-pop is-portal"
+            role="dialog"
+            aria-label="Elegir mes"
+            style={{ left: anchor.left, position: "fixed", top: anchor.top + 6 }}
+          >
             <div className="month-picker-year">
               <button type="button" aria-label="Año anterior" onClick={() => setViewYear((year) => year - 1)}><ChevronLeft size={16} /></button>
               <strong>{viewYear}</strong>
@@ -527,7 +547,8 @@ function MonthPicker({ value, onChange, placeholder = "Elegir mes" }: { value: s
               })}
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       ) : null}
     </div>
   );
@@ -553,21 +574,30 @@ function SearchSelect({
   onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Cierre al clickear fuera, a nivel documento: el backdrop posicionado no
-  // alcanza (los paneles animados con transform lo dejan atrapado adentro).
+  // El pop y el backdrop se montan como PORTAL en <body>: dentro del panel,
+  // los ancestros animados con transform encogen el backdrop fijo y el menu
+  // no se cerraba al clickear fuera. En body, el backdrop cubre la pantalla
+  // completa por encima de todo y cualquier click afuera lo cierra.
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    const close = () => setOpen(false);
+    const closeOnScroll = (event: Event) => {
+      // El scroll DENTRO de la lista de opciones no debe cerrar el menu.
+      if ((event.target as HTMLElement)?.closest?.(".search-select-pop")) return;
+      setOpen(false);
     };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", closeOnScroll, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", closeOnScroll, true);
+    };
   }, [open]);
 
   const plain = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -613,11 +643,13 @@ function SearchSelect({
   }
 
   return (
-    <div className="search-select" ref={rootRef}>
+    <div className="search-select">
       <button
         className={`search-select-trigger ${selected ? "" : "is-empty"}`}
         type="button"
-        onClick={() => {
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setAnchor({ left: rect.left, top: rect.bottom, width: rect.width });
           onOpen?.();
           setOpen((current) => !current);
         }}
@@ -625,10 +657,14 @@ function SearchSelect({
         <span>{selected ? selected.label : placeholder}</span>
         <ChevronDown size={16} />
       </button>
-      {open ? (
+      {open && anchor ? createPortal(
         <>
-          <div className="month-picker-backdrop" onClick={() => setOpen(false)} />
-          <div className="search-select-pop" role="listbox">
+          <div className="portal-backdrop" onPointerDown={() => setOpen(false)} />
+          <div
+            className="search-select-pop is-portal"
+            role="listbox"
+            style={{ left: anchor.left, position: "fixed", right: "auto", top: anchor.top + 6, width: Math.max(anchor.width, 280) }}
+          >
             <input
               ref={inputRef}
               className="search-select-input"
@@ -661,7 +697,8 @@ function SearchSelect({
               )}
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       ) : null}
     </div>
   );
