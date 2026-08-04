@@ -1991,9 +1991,19 @@ async function generateReportAnalysisAI(payload) {
       costoPorcentaje: summary.costPercent || 0,
       variancePorcentaje: summary.variancePercent || 0,
       varianceMonto: summary.varianceAmount || 0,
+      sumaAhorros: summary.savingsTotal ?? undefined,
+      sumaFaltantes: summary.shortagesTotal ?? undefined,
+      mermaReportadaAlCosto: summary.wasteCost || 0,
     },
-    categorias: (payload.categoryVariances || []).slice(0, 10),
-    productos: (payload.topProducts || []).slice(0, 10),
+    // Nivel FAMILIA primero (Destilados, Barriles/Schop, Vinos...): es el
+    // nivel macro del metodo; sin el, la IA no podia comentar "Total
+    // Barriles" ni separar merma de faltante injustificado.
+    familias: payload.familyVariances || [],
+    categorias: (payload.categoryVariances || []).slice(0, 40),
+    productos: (payload.topProducts || []).slice(0, 20),
+    productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
+    compraPorFamilia: payload.familyPurchases || [],
+    sugerenciaPorFamilia: payload.familySuggested || [],
     sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 12),
     historico: (payload.history || []).slice(0, 6),
   };
@@ -7083,9 +7093,19 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
         costoIdeal: summary.idealCostPercent || 0,
         variancePorcentaje: summary.variancePercent || 0,
         varianceMonto: summary.varianceAmount || 0,
+        sumaAhorros: summary.savingsTotal ?? undefined,
+        sumaFaltantes: summary.shortagesTotal ?? undefined,
+        mermaReportadaAlCosto: summary.wasteCost || 0,
       },
-      categorias: (payload.categoryVariances || []).slice(0, 10),
-      productos: (payload.topProducts || []).slice(0, 10),
+      // Variance por FAMILIA (Destilados, Barriles/Schop, Vinos...): es el
+      // nivel macro que el equipo comenta primero; sin esto el agente decia
+      // "no tengo el variance de Total Barriles" (reclamo de Pedro, 04-ago).
+      familias: payload.familyVariances || [],
+      categorias: (payload.categoryVariances || []).slice(0, 40),
+      productos: (payload.topProducts || []).slice(0, 20),
+      productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
+      compraPorFamilia: payload.familyPurchases || [],
+      sugerenciaPorFamilia: payload.familySuggested || [],
       sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 10),
       historico: (payload.history || []).slice(0, 4),
     }),
