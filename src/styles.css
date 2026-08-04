@@ -1,27 +1,29 @@
-@import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
+/* Identidad bevinco.cl: navy 001E43 + verde 90BF4F sobre fondo crema F9F6EF,
+   tipografia Inter con titulos black y tracking apretado, botones pastilla. */
 :root {
   --sculpture-green: #90bf4f;
-  --sculpture-blue: #054372;
+  --sculpture-blue: #001e43;
   --sculpture-navy: #001e43;
-  --sculpture-charcoal: #393939;
+  --sculpture-charcoal: #14212e;
   --sculpture-gray: #d6d6d6;
   --sculpture-tan: #b7a28e;
   --sculpture-teal: #8bc6c1;
   --sculpture-light-green: #a7ca6f;
   --sculpture-clay: #9f674f;
   --surface: #ffffff;
-  --surface-soft: #f5f8f7;
-  --surface-muted: #edf3f2;
-  --line: #d6d6d6;
-  --line-soft: #e7eceb;
-  --text: #393939;
-  --text-muted: #66706d;
+  --surface-soft: #f7f4ea;
+  --surface-muted: #f1ede0;
+  --line: #e5dfcf;
+  --line-soft: #efeadd;
+  --text: #14212e;
+  --text-muted: #6d7a72;
   --shadow: 0 14px 34px rgba(0, 30, 67, 0.08);
   color: var(--text);
-  background: #eef4f3;
+  background: #f9f6ef;
   font-family:
-    "Ubuntu", "Avenir Next", Avenir, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Inter", "Avenir Next", Avenir, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -47,7 +49,7 @@ html {
 }
 
 body {
-  background: #eef4f3;
+  background: #f9f6ef;
   font-variant-numeric: tabular-nums;
   margin: 0;
   min-width: 320px;
@@ -784,7 +786,10 @@ button:disabled {
 }
 
 .query-actions button {
-  flex: 1 1 190px;
+  /* Sin estirarse al ancho completo: un boton solo en la fila quedaba
+     gigante (Calcular sugerencia en Compras). */
+  flex: 0 1 auto;
+  min-width: 220px;
 }
 
 .sculpture-picker {
@@ -2567,7 +2572,7 @@ button:disabled {
 
 .login-shell,
 .loading-shell {
-  background: #eef4f3;
+  background: #f9f6ef;
 }
 
 .login-panel {
@@ -2619,13 +2624,13 @@ button:disabled {
 
 .nav-list button:hover,
 .nav-list button.active {
-  background: rgba(5, 67, 114, 0.74);
+  background: rgba(144, 191, 79, 0.18);
   border-left-color: var(--sculpture-green);
   color: #ffffff;
 }
 
 .workspace {
-  background: #eef4f3;
+  background: #f9f6ef;
 }
 
 .topbar h1 {
@@ -4668,3 +4673,43 @@ select:focus {
 :root[data-theme="dark"] .chat-import-bar { background: rgba(144, 191, 79, 0.10); border-color: rgba(144, 191, 79, 0.30); }
 :root[data-theme="dark"] .chat-import-bar strong { color: #b9d98a; }
 :root[data-theme="dark"] .chat-import-bar small { color: #93b35c; }
+
+/* ===== Identidad bevinco.cl: capa final de marca ===== */
+h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
+.page-heading h1, .login-card h1 { font-weight: 900; letter-spacing: -0.03em; }
+.eyebrow { color: #6b8f2f; letter-spacing: 0.04em; }
+
+.primary-button {
+  background: var(--sculpture-navy);
+  border-radius: 100px;
+  font-weight: 800;
+}
+.primary-button:hover:not(:disabled) {
+  background: #0a3560;
+  box-shadow: 0 8px 20px rgba(0, 30, 67, 0.24);
+}
+.secondary-button, .icon-button, .action-row button, .button-link {
+  background: var(--surface-muted);
+  border-radius: 100px;
+  color: var(--sculpture-charcoal);
+  font-weight: 700;
+}
+.secondary-button:hover:not(:disabled), .icon-button:hover:not(:disabled),
+.action-row button:hover:not(:disabled), .button-link:hover { background: #e9e3d2; }
+
+.panel { border: 1px solid #eee9db; border-radius: 20px; }
+.metrics article, .dashboard-kpis article { border-radius: 16px; }
+
+.compras-filters button.active { background: var(--sculpture-navy); border-color: var(--sculpture-navy); }
+.search-select-trigger, .month-picker-trigger, .search-select-pop, .month-picker-pop { border-color: #e2dcc9; }
+.search-select-trigger:hover, .month-picker-trigger:hover { border-color: var(--sculpture-green); }
+
+:root[data-theme="dark"] .panel { border-color: var(--line); }
+:root[data-theme="dark"] .secondary-button, :root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .action-row button, :root[data-theme="dark"] .button-link {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+:root[data-theme="dark"] .eyebrow { color: #a7ca6f; }
+:root[data-theme="dark"] .search-select-trigger, :root[data-theme="dark"] .month-picker-trigger,
+:root[data-theme="dark"] .search-select-pop, :root[data-theme="dark"] .month-picker-pop { border-color: var(--line); }
