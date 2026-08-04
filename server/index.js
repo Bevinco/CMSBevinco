@@ -54,6 +54,9 @@ let hydrationPromise = null;
 const supabaseStatus = {
   configured: supabaseConfigured,
   restored: false,
+  // hydrated: la restauracion inicial TERMINO bien (con o sin respaldo previo).
+  // Mientras sea false, no se confia en la cache ni se escribe al respaldo.
+  hydrated: false,
   lastOkAt: "",
   lastError: supabaseConfigured ? "" : "Sin configurar: los datos no sobreviven reinicios del servidor.",
 };
@@ -83,6 +86,8 @@ async function performSupabaseHydration() {
     if (!response.ok) {
       supabaseStatus.lastError = `Lectura rechazada (${response.status}). Revisa URL, clave service_role y la tabla cms_store.`;
       console.error("[supabase] lectura fallo:", response.status, (await response.text()).slice(0, 200));
+      supabaseStatus.hydrated = false;
+      hydrationPromise = null; // reintentar en la proxima peticion
       return;
     }
     const rows = await response.json();
@@ -93,15 +98,20 @@ async function performSupabaseHydration() {
       await fs.writeFile(tempPath, JSON.stringify(remote));
       await fs.rename(tempPath, moduleStorePath);
       supabaseStatus.restored = true;
+      supabaseStatus.hydrated = true;
       supabaseStatus.lastOkAt = new Date().toISOString();
+      cachedStore = null; // el archivo recien restaurado manda sobre cualquier cache previa
       console.log(`[supabase] store restaurado (${remote.reports.length} reportes, ${(remote.criteriaDocuments || []).length} criterios)`);
     } else {
+      supabaseStatus.hydrated = true;
       supabaseStatus.lastOkAt = new Date().toISOString();
       console.log("[supabase] sin respaldo previo; se creara al primer guardado");
     }
   } catch (error) {
     supabaseStatus.lastError = `No se pudo restaurar el respaldo: ${error.message}`;
     console.error("[supabase] no se pudo hidratar el store:", error.message);
+    supabaseStatus.hydrated = false;
+    hydrationPromise = null; // reintentar en la proxima peticion
   }
 }
 
@@ -111,6 +121,14 @@ async function fsPromisesMkdir() {
 
 async function persistStoreToSupabase(store) {
   if (!supabaseConfigured) return;
+  // CANDADO DE SEGURIDAD: si la restauracion desde Supabase nunca se logro en
+  // este arranque, el proceso puede estar sirviendo el store de MUESTRAS.
+  // Escribir en ese estado sobrescribiria el respaldo bueno con datos vacios.
+  if (!supabaseStatus.hydrated) {
+    supabaseStatus.lastError = "Respaldo bloqueado: la restauración inicial no se ha completado (protege el respaldo remoto).";
+    console.error("[supabase] escritura BLOQUEADA: hidratacion pendiente o fallida");
+    return;
+  }
   try {
     const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?on_conflict=id`, {
       method: "POST",
@@ -1154,7 +1172,8 @@ let storeLoadPromise = null;
 
 async function loadStore() {
   await hydrateStoreFromSupabase();
-  // Una escritura pudo completar mientras esperabamos la hidratacion.
+  // Una escritura pudo completar mientras esperabamos la hidratacion (y una
+  // hidratacion exitosa invalida la cache para releer el archivo restaurado).
   if (cachedStore) return cachedStore;
   await ensureStore();
   const raw = await fs.readFile(moduleStorePath, "utf8");
@@ -1180,8 +1199,15 @@ async function loadStore() {
   return store;
 }
 
+function supabaseHydrationOk() {
+  return !supabaseConfigured || supabaseStatus.hydrated === true;
+}
+
 function readStore() {
-  if (cachedStore) return Promise.resolve(cachedStore);
+  // La cache solo vale si la restauracion inicial se completo: si fallo (red
+  // caida justo en el arranque), se reintenta en cada peticion en vez de
+  // quedarse sirviendo el store de muestras para siempre.
+  if (cachedStore && supabaseHydrationOk()) return Promise.resolve(cachedStore);
   // El login dispara varias peticiones en paralelo. Todas deben compartir no
   // solo la hidratacion de Supabase, sino tambien UNA lectura y UN parseo del
   // JSON local; de lo contrario cada request conserva su propia copia del
