@@ -816,6 +816,24 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account
     await loginResponse.arrayBuffer();
   }
 
+  // Login sin redireccion y de vuelta en el formulario = credenciales
+  // rechazadas: devolver cookie vacia para que el error diga la verdad en
+  // lugar de "Unable to load page".
+  if (!redirectLocation) {
+    try {
+      const probe = await fetch(new URL("/", baseUrl).toString(), {
+        headers: { accept: "text/html,application/xhtml+xml", cookie, referer: `${baseUrl}/` },
+      });
+      const probeHtml = await probe.text();
+      if (looksLikeSculptureLogin(probeHtml)) {
+        console.error(`[sculpture] login rechazado para ${credentials.id} en ${baseUrl}`);
+        return "";
+      }
+    } catch {
+      // Si la sonda falla se sigue con la cookie: el flujo normal reintenta.
+    }
+  }
+
   sculptureSessionCookieCache.set(`${credentials.id}|${baseUrl}`, cookie);
   return cookie;
 }
@@ -832,7 +850,11 @@ async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodB
   const cookie = await fetchSculptureLoginCookie(baseUrl, account);
   if (cookie) return cookie;
 
-  const error = new Error("SCULPTURE_SESSION_COOKIE or SCULPTURE_USERNAME/SCULPTURE_PASSWORD must be configured.");
+  const error = new Error(
+    account && account.id !== "principal"
+      ? `Login rechazado para la cuenta "${account.id}" en ${baseUrl}: revisa usuario/contraseña o la URL del portal (foodUrl/beverageUrl).`
+      : "SCULPTURE_SESSION_COOKIE or SCULPTURE_USERNAME/SCULPTURE_PASSWORD must be configured.",
+  );
   error.status = 503;
   throw error;
 }
