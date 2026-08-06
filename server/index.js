@@ -800,6 +800,15 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account
 
   let cookie = mergeCookieHeaders(loginPageCookie, getSetCookieHeaders(loginResponse));
   const redirectLocation = loginResponse.headers.get("location");
+  const trace = {
+    at: new Date().toISOString(),
+    postUrl,
+    campoUsuario: usernameField,
+    campoPassword: passwordField,
+    postStatus: loginResponse.status,
+    redirect: redirectLocation || "",
+    mensaje: "",
+  };
 
   if (redirectLocation && loginResponse.status >= 300 && loginResponse.status < 400) {
     const redirectResponse = await fetch(new URL(redirectLocation, postUrl).toString(), {
@@ -813,7 +822,14 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account
     await redirectResponse.arrayBuffer();
     cookie = mergeCookieHeaders(cookie, getSetCookieHeaders(redirectResponse));
   } else {
-    await loginResponse.arrayBuffer();
+    // Sin redireccion suele venir el formulario de nuevo con el motivo del
+    // rechazo: se captura el texto visible para el diagnostico.
+    const bodyText = await loginResponse.text();
+    const $error = cheerio.load(bodyText);
+    trace.mensaje = ($error(".alert, .error, .invalid-feedback, [class*='error' i]").first().text() || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 240);
   }
 
   // Login sin redireccion y de vuelta en el formulario = credenciales
@@ -826,7 +842,9 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account
       });
       const probeHtml = await probe.text();
       if (looksLikeSculptureLogin(probeHtml)) {
-        console.error(`[sculpture] login rechazado para ${credentials.id} en ${baseUrl}`);
+        console.error(`[sculpture] login rechazado para ${credentials.id} en ${baseUrl}: ${trace.mensaje || "sin mensaje"}`);
+        trace.resultado = "rechazado";
+        sculptureLoginTraces.set(`${credentials.id}|${baseUrl}`, trace);
         return "";
       }
     } catch {
@@ -834,9 +852,14 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account
     }
   }
 
+  trace.resultado = "ok";
+  sculptureLoginTraces.set(`${credentials.id}|${baseUrl}`, trace);
   sculptureSessionCookieCache.set(`${credentials.id}|${baseUrl}`, cookie);
   return cookie;
 }
+
+// Ultima traza de login por cuenta y portal, para el diagnostico de accesos.
+const sculptureLoginTraces = new Map();
 
 async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodBaseUrl, accountId = "" } = {}) {
   const account = sculptureAccountById(accountId);
@@ -6325,7 +6348,17 @@ app.get("/api/module1/sculpture-accounts/status", requireAuth, async (_request, 
   const results = [];
   for (const account of sculptureAccounts()) {
     const masked = String(account.username).replace(/^(.{2}).*(@.*)$/, "$1***$2");
-    const info = { id: account.id, username: masked, areas: account.areas, units: [], errors: [] };
+    const info = {
+      id: account.id,
+      username: masked,
+      // Largo exacto de la contraseña configurada (sin exponerla): si no
+      // calza con la real, la variable de entorno la esta alterando.
+      passwordLength: String(account.password || "").length,
+      areas: account.areas,
+      units: [],
+      errors: [],
+      loginTraces: [],
+    };
     for (const area of account.areas) {
       const baseUrl = account.urls?.[area] || baseUrlForSculptureArea(area);
       try {
@@ -6335,6 +6368,8 @@ app.get("/api/module1/sculpture-accounts/status", requireAuth, async (_request, 
       } catch (error) {
         info.errors.push({ area, baseUrl, status: error.status || 0, error: error.message });
       }
+      const trace = sculptureLoginTraces.get(`${account.id}|${baseUrl}`);
+      if (trace) info.loginTraces.push({ area, ...trace });
     }
     results.push(info);
   }
