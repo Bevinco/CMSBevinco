@@ -6401,6 +6401,52 @@ app.patch("/api/module1/clients/:clientId/distribution", requireAuth, async (req
   });
 });
 
+// Inspector de paginas Sculpture (solo lectura, para diagnostico): trae una
+// pagina del portal con la sesion del CMS y devuelve titulo, tabla parseada y
+// links de navegacion. Permite explorar Prep Items/Yields sin compartir
+// credenciales ni pantallazos.
+app.get("/api/module1/sculpture-inspect", requireAuth, async (request, response) => {
+  const cid = configuredIdentifier(request.query.cid);
+  const area = String(request.query.area || "Food");
+  const baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(area);
+  const pagePath = String(request.query.path || "/");
+  const accountId = String(request.query.accountId || "");
+  if (!/^\/[\w\-./?=&%]*$/.test(pagePath)) {
+    response.status(400).json({ error: "path inválido: usa una ruta del portal, ej. /prepitem/" });
+    return;
+  }
+  try {
+    let html;
+    if (cid) {
+      const context = await activateSculptureContext({ baseUrl, cid, accountId });
+      const pageResponse = await fetch(new URL(pagePath, baseUrl).toString(), {
+        headers: { accept: "text/html,application/xhtml+xml", cookie: context.cookie, referer: context.referer },
+      });
+      html = await pageResponse.text();
+    } else {
+      html = await fetchSculpturePage({ baseUrl, path: pagePath, accountId });
+    }
+    const $ = cheerio.load(html);
+    const links = [];
+    $("a[href]").each((_, node) => {
+      const text = $(node).text().replace(/\s+/g, " ").trim();
+      const href = String($(node).attr("href") || "");
+      if (text && href && !/^(javascript:|#)/.test(href)) links.push({ text: text.slice(0, 60), href: href.slice(0, 160) });
+    });
+    const parsed = parseSculptureTable(html);
+    response.json({
+      path: pagePath,
+      title: ($("title").text() || "").replace(/\s+/g, " ").trim(),
+      headers: parsed.headers || [],
+      rows: (parsed.rows || []).slice(0, 100).map((row) => row.values || row),
+      totalRows: (parsed.rows || []).length,
+      links: links.slice(0, 150),
+    });
+  } catch (error) {
+    response.status(error.status || 502).json({ error: error.message });
+  }
+});
+
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
