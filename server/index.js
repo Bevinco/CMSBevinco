@@ -6376,6 +6376,31 @@ app.get("/api/module1/sculpture-accounts/status", requireAuth, async (_request, 
   response.json({ accounts: results });
 });
 
+// Listas de distribucion por cliente (pedido del equipo, punto 2): la lista
+// del reporte (correo con PDF) y la de sugerencia de compra viven en el CMS
+// y se editan aqui, sin depender de ClickUp.
+app.patch("/api/module1/clients/:clientId/distribution", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    response.status(404).json({ error: "No se encontró el restaurante." });
+    return;
+  }
+  const cleanList = (list) => [...new Set(
+    (Array.isArray(list) ? list : String(list || "").split(/[,;\s]+/))
+      .map((email) => String(email).trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  )].slice(0, 30);
+  if (request.body?.recipients !== undefined) client.recipients = cleanList(request.body.recipients);
+  if (request.body?.purchaseRecipients !== undefined) client.purchaseRecipients = cleanList(request.body.purchaseRecipients);
+  await writeStore(store);
+  response.json({
+    id: client.id,
+    recipients: client.recipients || [],
+    purchaseRecipients: client.purchaseRecipients || [],
+  });
+});
+
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
@@ -7875,17 +7900,50 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       };
       const money = (value) => (value ? Math.round(value) : 0);
       const qty = (value) => (Number.isFinite(value) ? Number(value.toFixed(2)) : 0);
+      const header = ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Alerta"];
+      const itemRow = (item, showProvider) => [
+        showProvider ? item.provider : "",
+        item.name, item.size, money(item.unitCost), qty(item.onHand),
+        qty(item.par), qty(item.suggested), money(item.orderCost), qty(item.inventoryDays), item.alerta,
+      ].map(escapeCsv).join(";");
+      // Hoja lista para reenviar al proveedor: seccion POR COMPRAR agrupada
+      // por proveedor con subtotales y TOTAL DEL PEDIDO; el exceso va aparte
+      // al final como informacion (no es pedido).
+      const toBuy = items.filter((item) => item.suggested > 0);
+      const withExcess = items.filter((item) => !(item.suggested > 0) && item.excessCost > 0);
       const lines = [
-        ["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Costo unit. ($)", "Inventario", "Inventario al costo ($)", "PAR", "Compra Sugerida", "Costo de la compra ($)", "Inventario en días", "Exceso de inventario ($)", "Alerta"].map(escapeCsv).join(";"),
+        [`SUGERENCIA DE COMPRA - ${client.name || client.id} - ${period.label || period.id}`].map(escapeCsv).join(";"),
+        "",
+        header.map(escapeCsv).join(";"),
       ];
       let lastProvider = "";
-      for (const item of items) {
-        lines.push([
-          item.provider === lastProvider ? "" : item.provider,
-          item.name, item.size, money(item.unitCost), qty(item.onHand), money(item.onHandCost),
-          qty(item.par), qty(item.suggested), money(item.orderCost), qty(item.inventoryDays), money(item.excessCost), item.alerta,
-        ].map(escapeCsv).join(";"));
+      let providerTotal = 0;
+      let orderTotal = 0;
+      const pushProviderSubtotal = () => {
+        if (!lastProvider) return;
+        lines.push(["", `Subtotal ${lastProvider}`, "", "", "", "", "", money(providerTotal), "", ""].map(escapeCsv).join(";"));
+      };
+      for (const item of toBuy) {
+        if (item.provider !== lastProvider) {
+          pushProviderSubtotal();
+          providerTotal = 0;
+        }
+        lines.push(itemRow(item, item.provider !== lastProvider));
         lastProvider = item.provider;
+        providerTotal += item.orderCost || 0;
+        orderTotal += item.orderCost || 0;
+      }
+      pushProviderSubtotal();
+      lines.push(["", "TOTAL DEL PEDIDO", "", "", "", "", "", money(orderTotal), "", ""].map(escapeCsv).join(";"));
+      if (withExcess.length) {
+        lines.push("");
+        lines.push(["EXCESO DE INVENTARIO (capital inmovilizado - no comprar)"].map(escapeCsv).join(";"));
+        lines.push(["Proveedor", "Nombre Articulo", "Tamaño Articulo", "Inventario", "Inventario al costo ($)", "Inventario en días", "Exceso de inventario ($)"].map(escapeCsv).join(";"));
+        for (const item of withExcess) {
+          lines.push([
+            item.provider, item.name, item.size, qty(item.onHand), money(item.onHandCost), qty(item.inventoryDays), money(item.excessCost),
+          ].map(escapeCsv).join(";"));
+        }
       }
       const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}`
         .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
@@ -7897,6 +7955,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
     response.json({
       client: { id: client.id, name: client.name, area: client.area },
       period: { id: period.id, label: period.label },
+      purchaseRecipients: client.purchaseRecipients || [],
       items,
     });
   } catch (error) {

@@ -784,6 +784,7 @@ function App() {
   const [comprasClientId, setComprasClientId] = useState("");
   const [comprasPeriods, setComprasPeriods] = useState<Array<{ pid: string; label: string }>>([]);
   const [comprasPeriodPid, setComprasPeriodPid] = useState("");
+  const [comprasRecipientsDraft, setComprasRecipientsDraft] = useState("");
   const [comprasLoading, setComprasLoading] = useState(false);
   const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
   const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
@@ -1344,6 +1345,30 @@ function App() {
     }
   }
 
+  const [savingDistribution, setSavingDistribution] = useState(false);
+  async function saveClientDistribution(clientId: string, patch: { recipients?: string[]; purchaseRecipients?: string[] }) {
+    if (!clientId || savingDistribution) return;
+    setSavingDistribution(true);
+    try {
+      const payload = await readJson<{ recipients: string[]; purchaseRecipients: string[] }>(
+        await fetch(`/api/module1/clients/${clientId}/distribution`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(patch),
+        }),
+      );
+      setError(`Lista de distribución guardada (${(patch.recipients ? payload.recipients : payload.purchaseRecipients).length} correo(s)). Queda para los próximos envíos de este cliente.`);
+      setWorkStatus("ready");
+      return payload;
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "No se pudo guardar la lista.");
+      setWorkStatus("error");
+      return null;
+    } finally {
+      setSavingDistribution(false);
+    }
+  }
+
   async function shareWebReport(reportId: string) {
     try {
       const payload = await readJson<{ url: string }>(
@@ -1392,10 +1417,11 @@ function App() {
     setWorkStatus("loading");
     setError(comprasPeriodPid ? "Calculando la sugerencia de compra del periodo elegido..." : "Calculando la sugerencia de compra de la última semana auditada...");
     try {
-      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] }>(
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; items: SuggestionItem[] }>(
         await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${comprasPeriodPid ? `?period=${encodeURIComponent(comprasPeriodPid)}` : ""}`),
       );
       setComprasData(payload);
+      setComprasRecipientsDraft((payload.purchaseRecipients || []).join(", "));
       setError(`Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
       setWorkStatus("ready");
     } catch (comprasError) {
@@ -2983,6 +3009,14 @@ function App() {
                 {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
                 {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
               </button>
+              <button
+                className="secondary-button"
+                disabled={!selectedReport || savingDistribution || !emailRecipients.length}
+                type="button"
+                onClick={() => selectedReport && saveClientDistribution(selectedReport.clientId, { recipients: emailRecipients })}
+              >
+                <Mail size={16} /> Guardar como lista del cliente
+              </button>
             </div>
             </div>
           ) : null}
@@ -3432,6 +3466,25 @@ function App() {
                 <article><span>Total del pedido sugerido</span><strong>{money(orderTotal)}</strong></article>
                 <article><span>Capital inmovilizado (exceso)</span><strong className="is-excess">{money(excessTotal)}</strong></article>
                 <article><span>Proveedores involucrados</span><strong>{new Set(toBuy.map((item) => item.provider)).size}</strong></article>
+              </div>
+              <div className="compras-distribution">
+                <label>
+                  Lista de distribución de esta sugerencia
+                  <input
+                    placeholder="correo1@local.cl, correo2@local.cl"
+                    value={comprasRecipientsDraft}
+                    onChange={(event) => setComprasRecipientsDraft(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="secondary-button"
+                  disabled={savingDistribution}
+                  type="button"
+                  onClick={() => saveClientDistribution(comprasData.client.id, { purchaseRecipients: comprasRecipientsDraft.split(/[,;\s]+/).filter(Boolean) })}
+                >
+                  {savingDistribution ? <span className="btn-spinner btn-spinner-dark" /> : <Mail size={16} />}
+                  Guardar lista
+                </button>
               </div>
               <div className="compras-table-wrap">
                 <table className="compras-table">

@@ -4718,3 +4718,9 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
    pantalla completa por encima de todo el CMS. */
 .portal-backdrop { inset: 0; position: fixed; z-index: 9998; }
 .search-select-pop.is-portal, .month-picker-pop.is-portal { margin-top: 0; z-index: 9999; }
+
+.compras-distribution { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.compras-distribution label { display: grid; flex: 1 1 320px; gap: 5px; }
+.compras-distribution input { border: 1px solid #e2dcc9; border-radius: 9px; min-height: 40px; padding: 0 12px; }
+.compras-distribution input:focus { border-color: var(--sculpture-green); box-shadow: 0 0 0 3px rgba(144, 191, 79, 0.16); outline: none; }
+:root[data-theme="dark"] .compras-distribution input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
