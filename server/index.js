@@ -916,16 +916,18 @@ function parseSculptureUnitsFromHtml(html, { area, baseUrl }) {
       .replace(/^\d+\s+/, "")
       .replace(/\s*[-·]\s*(barra|bar|cocina|food|beverage)$/i, "")
       .trim();
-    const moduleName = /barra|bar|beverage/i.test(`${cleanName} ${area}`)
-      ? "Barra"
-      : /cocina|food/i.test(`${cleanName} ${area}`)
-        ? "Cocina"
-        : area;
+    // El PORTAL define el modulo: Food es cocina y Beverage es barra. Antes
+    // decidia el nombre y "Bar Valdivia" o "Bardot cocina" (contienen "Bar")
+    // quedaban como Barra aunque vinieran del portal de cocina.
+    const moduleName = /beverage/i.test(area) ? "Barra" : "Cocina";
     const id = `${resolvedCid}-${moduleName}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const baseName = accountName || cleanName;
+    // Sin sufijo redundante si el nombre ya dice el modulo ("Bardot cocina").
+    const displayName = new RegExp(`\\b${moduleName}\\b`, "i").test(baseName) ? baseName : `${baseName} - ${moduleName}`;
 
     units.set(`${resolvedCid}-${area}`, {
       id,
-      name: `${accountName || cleanName} - ${moduleName}`,
+      name: displayName,
       accountName: accountName || cleanName,
       moduleName,
       cid: resolvedCid,
@@ -1297,8 +1299,47 @@ async function loadStore() {
   store.users ||= [];
   store.hiddenSculptureUnits ||= [];
   store.presence ||= {};
+  migrateSculptureModuleNames(store);
   cachedStore = store;
   return store;
+}
+
+// Migracion unica: clientes cuyo modulo quedo mal clasificado por el nombre
+// ("Bardot cocina - Barra", "Bar Valdivia - Barra" siendo cocinas) pasan al
+// modulo que dicta su portal (Food=Cocina, Beverage=Barra), arrastrando sus
+// reportes y criterios al id corregido. Idempotente via store.migrations.
+function migrateSculptureModuleNames(store) {
+  if (store.migrations?.moduleNamesV2) return;
+  store.migrations = { ...(store.migrations || {}), moduleNamesV2: true };
+  let changed = 0;
+  for (const client of store.clients) {
+    const cid = String(client.sculptureCid || "").trim();
+    if (!/^\d+$/.test(cid)) continue;
+    const moduleName = /beverage|barra/i.test(String(client.area || "")) ? "Barra" : "Cocina";
+    const accountName = String(client.accountName || client.name || "")
+      .replace(/\s*[-·]\s*(barra|bar|cocina|food|beverage)$/i, "")
+      .trim() || String(client.name || client.id);
+    const newId = `${cid}-${moduleName}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    client.moduleName = moduleName;
+    if (newId === client.id) continue;
+    if (store.clients.some((other) => other !== client && other.id === newId)) {
+      // Ya existe la variante correcta: no se fusiona automaticamente.
+      console.error(`[migracion] ${client.id} -> ${newId} omitido: el destino ya existe`);
+      continue;
+    }
+    const oldId = client.id;
+    client.id = newId;
+    client.accountName = accountName;
+    client.name = new RegExp(`\\b${moduleName}\\b`, "i").test(accountName) ? accountName : `${accountName} - ${moduleName}`;
+    for (const report of store.reports) {
+      if (report.clientId === oldId) report.clientId = newId;
+    }
+    for (const document of store.criteriaDocuments || []) {
+      if (document.clientId === oldId) document.clientId = newId;
+    }
+    changed += 1;
+  }
+  if (changed) console.log(`[migracion] modulo corregido en ${changed} cliente(s)`);
 }
 
 function supabaseHydrationOk() {
