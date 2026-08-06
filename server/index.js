@@ -6431,6 +6431,9 @@ app.get("/api/module1/sculpture-inspect", requireAuth, async (request, response)
     $("a[href]").each((_, node) => {
       const text = $(node).text().replace(/\s+/g, " ").trim();
       const href = String($(node).attr("href") || "");
+      // Los selectores de local y semana suman ~150 links y tapan el menu de
+      // navegacion, que es lo que interesa mapear.
+      if (/\?(clientid|periodid)=/i.test(href)) return;
       if (text && href && !/^(javascript:|#)/.test(href)) links.push({ text: text.slice(0, 60), href: href.slice(0, 160) });
     });
     const parsed = parseSculptureTable(html);
