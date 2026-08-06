@@ -7111,6 +7111,10 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
 
   const payload = buildReportPayload(store, report, { includeKnowledge: true });
   const clientName = payload.client?.name || report.clientId;
+  // El detalle completo del variance (todas las filas por SKU): sin esto el
+  // agente solo veia un extracto y respondia "no tengo el variance de X"
+  // (auditoria pedida por Pedro, 04-ago).
+  const varianceDetailText = await varianceDetailForChat(store, report);
   const criteria = criteriaForClient(payload.criteriaDocuments || [], clientName, payload.client?.id || payload.clientId || "", payload.allClientNames || [])
     .map((document) => ({
       nombre: document.name,
@@ -7160,6 +7164,11 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 10),
       historico: (payload.history || []).slice(0, 4),
     }),
+    "",
+    "",
+    varianceDetailText
+      ? "VARIANCE DETALLADO COMPLETO (todas las filas por producto, separadas por ';'; misma fuente que el archivo 'detailed' de Sculpture):\n" + varianceDetailText
+      : "VARIANCE DETALLADO COMPLETO: no disponible en este momento (Sculpture no respondió); usa el extracto de arriba y acláralo si te preguntan por un SKU que no aparece.",
     "",
     "Análisis/resumen actual del reporte (el usuario puede pedir ajustarlo):",
     String(report.comments || "(aún no generado)").slice(0, 3000),
@@ -7926,7 +7935,26 @@ async function buildVarianceCsvAttachment(store, report) {
   const filename = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
     .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")
     .slice(0, 120) + ".csv";
-  return { filename, buffer: Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8") };
+  return { filename, text: lines.join("\n"), buffer: Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8") };
+}
+
+// El variance detallado COMPLETO para el chat (todas las filas, como los
+// archivos que el equipo le subia a su ChatGPT). Se trae fresco de Sculpture
+// con cache corta en memoria para no golpearlo en cada mensaje del chat.
+const varianceChatCache = new Map();
+async function varianceDetailForChat(store, report) {
+  const cached = varianceChatCache.get(report.id);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.text;
+  let text = "";
+  try {
+    const attachment = await buildVarianceCsvAttachment(store, report);
+    text = String(attachment?.text || "").slice(0, 60000);
+  } catch (error) {
+    console.error("[chat] variance detallado no disponible:", error.message);
+  }
+  varianceChatCache.set(report.id, { at: Date.now(), text });
+  if (varianceChatCache.size > 12) varianceChatCache.delete(varianceChatCache.keys().next().value);
+  return text;
 }
 
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
