@@ -782,6 +782,8 @@ function App() {
   const [calendarTasks, setCalendarTasks] = useState<ClickupTask[]>([]);
   const [aiModels, setAiModels] = useState<{ reports?: string; chat?: string } | null>(null);
   const [comprasClientId, setComprasClientId] = useState("");
+  const [comprasPeriods, setComprasPeriods] = useState<Array<{ pid: string; label: string }>>([]);
+  const [comprasPeriodPid, setComprasPeriodPid] = useState("");
   const [comprasLoading, setComprasLoading] = useState(false);
   const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
   const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
@@ -1362,15 +1364,36 @@ function App() {
     }
   }
 
+  async function loadComprasPeriods(clientId: string) {
+    setComprasPeriods([]);
+    setComprasPeriodPid("");
+    const unit = sculptureUnits.find((item) => item.id === clientId);
+    if (!unit) return;
+    try {
+      const query = new URLSearchParams({
+        cid: String(unit.sculptureCid || unit.cid || ""),
+        baseUrl: String(unit.baseUrl || unit.sculptureBaseUrl || ""),
+        area: String(unit.area || ""),
+        accountId: String((unit as { sculptureAccountId?: string }).sculptureAccountId || ""),
+      });
+      const payload = await readJson<{ periods: Array<{ pid: string; label: string }> }>(
+        await fetch(`/api/module1/sculpture-units/periods?${query.toString()}`),
+      );
+      setComprasPeriods(payload.periods || []);
+    } catch {
+      setComprasPeriods([]);
+    }
+  }
+
   async function loadComprasSuggestion(clientId: string) {
     if (!clientId || comprasLoading) return;
     setComprasLoading(true);
     setComprasData(null);
     setWorkStatus("loading");
-    setError("Calculando la sugerencia de compra de la última semana cerrada...");
+    setError(comprasPeriodPid ? "Calculando la sugerencia de compra del periodo elegido..." : "Calculando la sugerencia de compra de la última semana auditada...");
     try {
       const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] }>(
-        await fetch(`/api/module1/clients/${clientId}/purchase-suggestion`),
+        await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${comprasPeriodPid ? `?period=${encodeURIComponent(comprasPeriodPid)}` : ""}`),
       );
       setComprasData(payload);
       setError(`Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
@@ -3345,7 +3368,7 @@ function App() {
               </div>
               <div className="action-row wrap-actions">
                 {comprasData ? (
-                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv`} target="_blank" rel="noreferrer">
+                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}`} target="_blank" rel="noreferrer">
                     <Printer size={17} /> Descargar CSV para enviar
                   </a>
                 ) : null}
@@ -3361,7 +3384,19 @@ function App() {
                     ? sculptureUnits.filter((unit) => !unit.hidden).map((unit) => ({ value: unit.id, label: unit.name, hint: unit.area }))
                     : clients.map((client) => ({ value: client.id, label: clientDisplayName(client) }))}
                   onOpen={ensureSculptureDirectory}
-                  onChange={(value) => { setComprasClientId(value); setComprasData(null); }}
+                  onChange={(value) => { setComprasClientId(value); setComprasData(null); loadComprasPeriods(value); }}
+                />
+              </label>
+              <label>
+                Periodo
+                <SearchSelect
+                  value={comprasPeriodPid}
+                  placeholder={comprasPeriods.length ? `Última semana auditada (${comprasPeriods.length} disponibles)` : "Última semana auditada"}
+                  options={[
+                    { value: "", label: "Última semana auditada" },
+                    ...comprasPeriods.map((period) => ({ value: String(period.pid), label: period.label })),
+                  ]}
+                  onChange={(value) => { setComprasPeriodPid(value); setComprasData(null); }}
                 />
               </label>
               <div className="query-actions">

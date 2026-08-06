@@ -705,8 +705,44 @@ function baseUrlForSculptureArea(area = "") {
     : sculptureFoodBaseUrl;
 }
 
-async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl) {
-  if (!sculptureUsername || !sculpturePassword) return "";
+// ===== Cuentas Sculpture =====
+// La cuenta principal viene de SCULPTURE_USERNAME/PASSWORD. Los clientes
+// alojados en otros accesos (ej. Valdivia Cocina, Tomates Fin de Mes) se
+// configuran en SCULPTURE_EXTRA_ACCOUNTS, un JSON asi:
+//   [{"id":"valdivia","username":"...","password":"...","areas":["Food"]},
+//    {"id":"tt-afm","username":"...","password":"...","areas":["Food","Beverage"]}]
+// Cada unidad descubierta queda marcada con su sculptureAccountId y todos los
+// fetch posteriores usan la sesion de ESA cuenta.
+function sculptureAccounts() {
+  const accounts = [];
+  if (sculptureUsername && sculpturePassword) {
+    accounts.push({ id: "principal", username: sculptureUsername, password: sculpturePassword, areas: ["Food", "Beverage"] });
+  }
+  try {
+    const extra = JSON.parse(process.env.SCULPTURE_EXTRA_ACCOUNTS || "[]");
+    for (const item of Array.isArray(extra) ? extra : []) {
+      if (!item?.username || !item?.password) continue;
+      accounts.push({
+        id: String(item.id || item.username).toLowerCase().replace(/[^a-z0-9@._-]+/g, "-"),
+        username: item.username,
+        password: item.password,
+        areas: Array.isArray(item.areas) && item.areas.length ? item.areas : ["Food", "Beverage"],
+      });
+    }
+  } catch {
+    console.error("[sculpture] SCULPTURE_EXTRA_ACCOUNTS no es JSON valido; se ignora");
+  }
+  return accounts;
+}
+
+function sculptureAccountById(accountId = "") {
+  const accounts = sculptureAccounts();
+  return accounts.find((account) => account.id === accountId) || accounts[0] || null;
+}
+
+async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl, account = null) {
+  const credentials = account || sculptureAccountById("principal");
+  if (!credentials?.username || !credentials?.password) return "";
 
   const loginUrl = new URL(sculptureLoginPath, baseUrl).toString();
   const loginPageResponse = await fetch(loginUrl, {
@@ -740,8 +776,8 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl) {
     if (!name) return;
     body.set(name, $(input).attr("value") || "");
   });
-  body.set(usernameField, sculptureUsername);
-  body.set(passwordField, sculpturePassword);
+  body.set(usernameField, credentials.username);
+  body.set(passwordField, credentials.password);
 
   const loginResponse = await fetch(postUrl, {
     method: "POST",
@@ -774,17 +810,20 @@ async function fetchSculptureLoginCookie(baseUrl = sculptureFoodBaseUrl) {
     await loginResponse.arrayBuffer();
   }
 
-  sculptureSessionCookieCache.set(baseUrl, cookie);
+  sculptureSessionCookieCache.set(`${credentials.id}|${baseUrl}`, cookie);
   return cookie;
 }
 
-async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodBaseUrl } = {}) {
+async function getSculptureCookie({ forceLogin = false, baseUrl = sculptureFoodBaseUrl, accountId = "" } = {}) {
+  const account = sculptureAccountById(accountId);
+  const cacheKey = `${account?.id || "principal"}|${baseUrl}`;
   // La cache guarda cookies de logins recientes; tiene prioridad sobre la
   // cookie fija del entorno, que puede haber vencido.
-  if (!forceLogin && sculptureSessionCookieCache.get(baseUrl)) return sculptureSessionCookieCache.get(baseUrl);
-  if (!forceLogin && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
+  if (!forceLogin && sculptureSessionCookieCache.get(cacheKey)) return sculptureSessionCookieCache.get(cacheKey);
+  // La cookie fija del entorno solo aplica a la cuenta principal.
+  if (!forceLogin && (!account || account.id === "principal") && process.env.SCULPTURE_SESSION_COOKIE) return process.env.SCULPTURE_SESSION_COOKIE;
 
-  const cookie = await fetchSculptureLoginCookie(baseUrl);
+  const cookie = await fetchSculptureLoginCookie(baseUrl, account);
   if (cookie) return cookie;
 
   const error = new Error("SCULPTURE_SESSION_COOKIE or SCULPTURE_USERNAME/SCULPTURE_PASSWORD must be configured.");
@@ -972,7 +1011,7 @@ function parseSculpturePeriodsFromHtml(html) {
   return Array.from(periods.values()).sort((left, right) => String(right.startsAt || right.label).localeCompare(String(left.startsAt || left.label)));
 }
 
-async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
+async function fetchSculpturePage({ baseUrl, path: pagePath = "/", accountId = "" }) {
   const requestPage = async (cookie) => {
     const response = await fetch(new URL(pagePath, baseUrl).toString(), {
       headers: {
@@ -984,11 +1023,11 @@ async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
     const html = await response.text();
     return { response, html };
   };
-  let cookie = await getSculptureCookie({ baseUrl });
+  let cookie = await getSculptureCookie({ baseUrl, accountId });
   let { response, html } = await requestPage(cookie);
 
-  if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
-    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+  if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureAccountById(accountId)) {
+    cookie = await getSculptureCookie({ forceLogin: true, baseUrl, accountId });
     ({ response, html } = await requestPage(cookie));
   }
 
@@ -1002,22 +1041,22 @@ async function fetchSculpturePage({ baseUrl, path: pagePath = "/" }) {
   return html;
 }
 
-async function activateSculptureContext({ baseUrl, cid, pid = "", cookie }) {
+async function activateSculptureContext({ baseUrl, cid, pid = "", cookie, accountId = "" }) {
   try {
-    return await activateSculptureContextOnce({ baseUrl, cid, pid, cookie });
+    return await activateSculptureContextOnce({ baseUrl, cid, pid, cookie, accountId });
   } catch (error) {
     // La cookie de sesion (env o cache) puede estar vencida: reintentar una
     // vez con login fresco, igual que hace fetchSculpturePage.
-    if (!cookie && sculptureUsername && sculpturePassword) {
-      const freshCookie = await getSculptureCookie({ forceLogin: true, baseUrl });
-      return activateSculptureContextOnce({ baseUrl, cid, pid, cookie: freshCookie });
+    if (!cookie && sculptureAccountById(accountId)) {
+      const freshCookie = await getSculptureCookie({ forceLogin: true, baseUrl, accountId });
+      return activateSculptureContextOnce({ baseUrl, cid, pid, cookie: freshCookie, accountId });
     }
     throw error;
   }
 }
 
-async function activateSculptureContextOnce({ baseUrl, cid, pid = "", cookie }) {
-  let sessionCookie = cookie || (await getSculptureCookie({ baseUrl }));
+async function activateSculptureContextOnce({ baseUrl, cid, pid = "", cookie, accountId = "" }) {
+  let sessionCookie = cookie || (await getSculptureCookie({ baseUrl, accountId }));
   let referer = `${baseUrl}/`;
 
   const visit = async (pagePath) => {
@@ -1064,9 +1103,9 @@ async function activateSculptureContextOnce({ baseUrl, cid, pid = "", cookie }) 
   return { cookie: sessionCookie, html, referer };
 }
 
-async function fetchSculpturePeriodsForClient({ baseUrl, cid }) {
+async function fetchSculpturePeriodsForClient({ baseUrl, cid, accountId = "" }) {
   if (!configuredIdentifier(cid)) return [];
-  const { html, cookie, referer } = await activateSculptureContext({ baseUrl, cid });
+  const { html, cookie, referer } = await activateSculptureContext({ baseUrl, cid, accountId });
   const periods = new Map();
   const collect = (pageHtml) => {
     parseSculpturePeriodsFromHtml(pageHtml).forEach((period) => {
@@ -1097,22 +1136,30 @@ async function fetchSculpturePeriodsForClient({ baseUrl, cid }) {
 }
 
 async function discoverSculptureUnits() {
-  const targets = [
-    { area: "Food", baseUrl: sculptureFoodBaseUrl, paths: ["/", "/reports/variance/", "/requisition/"] },
-    { area: "Beverage", baseUrl: sculptureBeverageBaseUrl, paths: ["/", "/reports/variance/", "/requisition/"] },
-  ];
   const units = new Map();
   const periods = new Map();
   const errors = [];
 
-  for (const target of targets) {
-    for (const pagePath of target.paths) {
-      try {
-        const html = await fetchSculpturePage({ baseUrl: target.baseUrl, path: pagePath });
-        parseSculptureUnitsFromHtml(html, target).forEach((unit) => units.set(`${unit.sculptureCid}-${unit.area}`, unit));
-        parseSculpturePeriodsFromHtml(html).forEach((period) => periods.set(period.pid, period));
-      } catch (error) {
-        errors.push({ area: target.area, path: pagePath, error: error.message });
+  // Todas las cuentas configuradas aportan sus unidades al directorio; cada
+  // unidad queda marcada con la cuenta que la ve, para que los fetch
+  // posteriores usen esa sesion.
+  for (const account of sculptureAccounts()) {
+    const targets = account.areas.map((area) => ({
+      area,
+      baseUrl: baseUrlForSculptureArea(area),
+      paths: ["/", "/reports/variance/", "/requisition/"],
+    }));
+    for (const target of targets) {
+      for (const pagePath of target.paths) {
+        try {
+          const html = await fetchSculpturePage({ baseUrl: target.baseUrl, path: pagePath, accountId: account.id });
+          parseSculptureUnitsFromHtml(html, target).forEach((unit) => {
+            units.set(`${unit.sculptureCid}-${unit.area}-${account.id}`, { ...unit, sculptureAccountId: account.id });
+          });
+          parseSculpturePeriodsFromHtml(html).forEach((period) => periods.set(period.pid, period));
+        } catch (error) {
+          errors.push({ area: target.area, account: account.id, path: pagePath, error: error.message });
+        }
       }
     }
   }
@@ -2553,6 +2600,7 @@ function ensureClient(store, clientInput) {
       sculptureCid: clientInput.sculptureCid || clientInput.cid || "",
       sculptureBaseUrl: clientInput.sculptureBaseUrl || clientInput.baseUrl || "",
       area: clientInput.area || "Food",
+      sculptureAccountId: clientInput.sculptureAccountId || "",
       recipients: clientInput.recipients || [],
     };
     store.clients.push(client);
@@ -2565,6 +2613,7 @@ function ensureClient(store, clientInput) {
       sculptureCid: clientInput.sculptureCid || client.sculptureCid || clientInput.cid || client.cid,
       sculptureBaseUrl: clientInput.sculptureBaseUrl || clientInput.baseUrl || client.sculptureBaseUrl,
       area: clientInput.area || client.area,
+      sculptureAccountId: clientInput.sculptureAccountId || client.sculptureAccountId || "",
       recipients: clientInput.recipients || client.recipients,
     });
   }
@@ -3055,7 +3104,7 @@ function sculptureReportConfigs({ type, cid, pid }) {
   ]);
 }
 
-async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", baseUrl = baseUrlForSculptureArea(area) }) {
+async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", baseUrl = baseUrlForSculptureArea(area), accountId = "" }) {
   const reportConfigs = sculptureReportConfigs({ type, cid, pid });
 
   if (!reportConfigs.length) {
@@ -3085,15 +3134,15 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
     return { response, html, requestUrl };
   };
 
-  let cookie = await getSculptureCookie({ baseUrl });
+  let cookie = await getSculptureCookie({ baseUrl, accountId });
   try {
-    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie });
+    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie, accountId });
     cookie = context.cookie;
     referer = context.referer;
   } catch (error) {
-    if (!sculptureUsername || !sculpturePassword) throw error;
-    cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
-    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie });
+    if (!sculptureAccountById(accountId)) throw error;
+    cookie = await getSculptureCookie({ forceLogin: true, baseUrl, accountId });
+    const context = await activateSculptureContext({ baseUrl, cid, pid, cookie, accountId });
     cookie = context.cookie;
     referer = context.referer;
   }
@@ -3102,8 +3151,8 @@ async function fetchSculptureInternalReport({ type, cid, pid, area = "Food", bas
   for (const reportConfig of reportConfigs) {
     let { response, html, requestUrl } = await requestReport(cookie, reportConfig);
 
-    if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureUsername && sculpturePassword) {
-      cookie = await getSculptureCookie({ forceLogin: true, baseUrl });
+    if ((response.status === 401 || response.status === 403 || looksLikeSculptureLogin(html)) && sculptureAccountById(accountId)) {
+      cookie = await getSculptureCookie({ forceLogin: true, baseUrl, accountId });
       ({ response, html, requestUrl } = await requestReport(cookie, reportConfig));
     }
 
@@ -3434,7 +3483,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
   for (const type of ["varianceDetailed", "varianceSummary", "intelipar"]) {
     try {
-      const data = await fetchSculptureInternalReport({ type, cid, pid, area, baseUrl });
+      const data = await fetchSculptureInternalReport({ type, cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
       syncResults[type] = {
         ...data,
         cidSource,
@@ -6528,7 +6577,7 @@ app.get("/api/module1/sculpture-units/periods", requireAuth, async (request, res
   const baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(String(request.query.area || ""));
 
   try {
-    const periods = await fetchSculpturePeriodsForClient({ baseUrl, cid });
+    const periods = await fetchSculpturePeriodsForClient({ baseUrl, cid, accountId: String(request.query.accountId || "") });
     response.json({ periods });
   } catch (error) {
     console.error("[periods] activation failed:", error.status, error.message, String(error.details || "").slice(0, 300));
@@ -6616,6 +6665,7 @@ app.post("/api/module1/sculpture/query", requireAuth, async (request, response) 
     sculptureClientPeriods = await fetchSculpturePeriodsForClient({
       baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
       cid: sculptureCid,
+      accountId: client.sculptureAccountId || "",
     });
   } catch {
     sculptureClientPeriods = [];
@@ -6939,6 +6989,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
     clientPeriods = await fetchSculpturePeriodsForClient({
       baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
       cid: sculptureCid,
+      accountId: client.sculptureAccountId || "",
     });
   } catch {
     clientPeriods = [];
@@ -7571,7 +7622,7 @@ async function computeSuggestionItems({ client, period }) {
   try {
     const area = client?.area || "Food";
     const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
-    data = await fetchSculptureInternalReport({ type: "intelipar", cid, pid, area, baseUrl });
+    data = await fetchSculptureInternalReport({ type: "intelipar", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
   } catch (error) {
     console.error("[sugerencia] fallo:", error.message);
     const wrapped = new Error("Sculpture no respondió la sugerencia de compra. Intenta de nuevo en unos segundos.");
@@ -7594,7 +7645,7 @@ async function computeSuggestionItems({ client, period }) {
     try {
       const area = client?.area || "Food";
       const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(area);
-      const detailed = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl });
+      const detailed = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
       applyEffectiveInventory(data.rows, buildDetailedStockMap(detailed.rows), client);
     } catch (detailedError) {
       // Sin detailed se usa el stock del Intelipar tal cual.
@@ -7666,6 +7717,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
     clientPeriods = await fetchSculpturePeriodsForClient({
       baseUrl: client.sculptureBaseUrl || baseUrlForSculptureArea(client.area),
       cid: configuredIdentifier(client.sculptureCid, client.cid),
+      accountId: client.sculptureAccountId || "",
     });
   } catch {
     clientPeriods = [];
@@ -7678,10 +7730,15 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
   // stock 0 en toda la cocina y sugeriria el PAR completo (el bug del pulpo
   // procesado). Por eso se recorre hacia atras hasta encontrar un periodo
   // con conteos de cierre cargados.
-  const closedPeriods = clientPeriods.filter((period) => period.endsAt && period.endsAt < today).slice(0, 4);
-  if (!closedPeriods.length && clientPeriods[0]) closedPeriods.push(clientPeriods[0]);
+  // ?period=<pid>: el equipo elige la semana explicitamente (igual que en los
+  // reportes semanales); sin el parametro se usa la ultima semana AUDITADA.
+  const requestedPid = configuredIdentifier(request.query.period);
+  const closedPeriods = requestedPid
+    ? clientPeriods.filter((period) => String(period.pid) === requestedPid)
+    : clientPeriods.filter((period) => period.endsAt && period.endsAt < today).slice(0, 4);
+  if (!closedPeriods.length && !requestedPid && clientPeriods[0]) closedPeriods.push(clientPeriods[0]);
   if (!closedPeriods.length) {
-    response.status(404).json({ error: "El restaurante no tiene periodos cerrados en Sculpture." });
+    response.status(404).json({ error: requestedPid ? "Ese periodo no existe para este restaurante." : "El restaurante no tiene periodos cerrados en Sculpture." });
     return;
   }
   try {
@@ -7849,7 +7906,7 @@ async function buildVarianceCsvAttachment(store, report) {
     if (!pid) continue;
     let data;
     try {
-      data = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl });
+      data = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
     } catch (error) {
       console.error(`[variance-csv] ${period.id}: ${error.message}`);
       continue; // semana sin datos: el CSV sale con las que respondieron
