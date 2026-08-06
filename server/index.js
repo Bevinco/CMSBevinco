@@ -727,6 +727,12 @@ function sculptureAccounts() {
         username: item.username,
         password: item.password,
         areas: Array.isArray(item.areas) && item.areas.length ? item.areas : ["Food", "Beverage"],
+        // "Otras nubes": cuentas alojadas en portales distintos al principal.
+        // foodUrl/beverageUrl permiten apuntar cada area a su URL propia.
+        urls: {
+          Food: String(item.foodUrl || item.baseUrl || "").replace(/\/$/, "") || sculptureFoodBaseUrl,
+          Beverage: String(item.beverageUrl || item.baseUrl || "").replace(/\/$/, "") || sculptureBeverageBaseUrl,
+        },
       });
     }
   } catch {
@@ -1146,7 +1152,7 @@ async function discoverSculptureUnits() {
   for (const account of sculptureAccounts()) {
     const targets = account.areas.map((area) => ({
       area,
-      baseUrl: baseUrlForSculptureArea(area),
+      baseUrl: account.urls?.[area] || baseUrlForSculptureArea(area),
       paths: ["/", "/reports/variance/", "/requisition/"],
     }));
     for (const target of targets) {
@@ -6288,6 +6294,29 @@ app.get("/api/sculpture/requisition", requireAuth, async (request, response) => 
       details: error.details,
     });
   }
+});
+
+// Diagnostico de los accesos Sculpture configurados: para cada cuenta intenta
+// login + lectura del directorio y reporta cuantas unidades ve o el error
+// exacto. Es la forma rapida de validar SCULPTURE_EXTRA_ACCOUNTS.
+app.get("/api/module1/sculpture-accounts/status", requireAuth, async (_request, response) => {
+  const results = [];
+  for (const account of sculptureAccounts()) {
+    const masked = String(account.username).replace(/^(.{2}).*(@.*)$/, "$1***$2");
+    const info = { id: account.id, username: masked, areas: account.areas, units: [], errors: [] };
+    for (const area of account.areas) {
+      const baseUrl = account.urls?.[area] || baseUrlForSculptureArea(area);
+      try {
+        const html = await fetchSculpturePage({ baseUrl, path: "/", accountId: account.id });
+        const units = parseSculptureUnitsFromHtml(html, { area, baseUrl });
+        info.units.push({ area, baseUrl, count: units.length, nombres: units.slice(0, 12).map((unit) => unit.name) });
+      } catch (error) {
+        info.errors.push({ area, baseUrl, status: error.status || 0, error: error.message });
+      }
+    }
+    results.push(info);
+  }
+  response.json({ accounts: results });
 });
 
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
