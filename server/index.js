@@ -6491,6 +6491,49 @@ app.get("/api/module1/sculpture-inspect", requireAuth, async (request, response)
   }
 });
 
+// Configuracion de mezclas de barra por cliente: recetas editables en el CMS.
+app.get("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  response.json({ barMixes: client?.barMixes || [] });
+});
+
+app.patch("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request, response) => {
+  const store = await readStore();
+  let client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    // Local nunca sincronizado: se crea desde el directorio, igual que en el
+    // modulo de Compras.
+    try {
+      const directory = await discoverSculptureUnits();
+      const unit = (directory.units || []).find((candidate) => candidate.id === request.params.clientId);
+      if (unit) {
+        client = ensureClient(store, {
+          ...unit,
+          sculptureBaseUrl: unit.baseUrl || unit.sculptureBaseUrl || baseUrlForSculptureArea(unit.area),
+          recipients: [],
+        });
+      }
+    } catch {
+      // cae al 404
+    }
+  }
+  if (!client) {
+    response.status(404).json({ error: "No se encontró el restaurante." });
+    return;
+  }
+  const raw = Array.isArray(request.body?.barMixes) ? request.body.barMixes : [];
+  client.barMixes = raw.slice(0, 12).map((mix) => ({
+    nombre: String(mix?.nombre || "").trim().slice(0, 60),
+    componentes: (Array.isArray(mix?.componentes) ? mix.componentes : []).slice(0, 12).map((component) => ({
+      producto: String(component?.producto || "").trim().slice(0, 80),
+      botellasPorLitro: Math.max(0, Number(component?.botellasPorLitro) || 0),
+    })).filter((component) => component.producto && component.botellasPorLitro > 0),
+  })).filter((mix) => mix.nombre && mix.componentes.length);
+  await writeStore(store);
+  response.json({ barMixes: client.barMixes });
+});
+
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
@@ -7820,7 +7863,55 @@ app.get("/api/module1/reports/:reportId/pdf", requireAuth, async (request, respo
 // Calcula la sugerencia de compra vigente de un local para un periodo:
 // Intelipar fresco + inventario efectivo (cocinas) + PAR del equipo. Lo usan
 // el CSV del reporte y el modulo de Sugerencias de Compra.
-async function computeSuggestionItems({ client, period }) {
+// Mezclas de barra (sangria, mix de pisco): Sculpture no las registra como
+// Batch Mix, asi que la receta vive en el CMS (client.barMixes) y los litros
+// preparados se ingresan al calcular. Se convierten a botellas equivalentes y
+// se descuentan de la sugerencia de las botellas componentes (pedido del
+// equipo, reunion 06-ago: "van cambiando, setearlo directamente en el CMS").
+function applyBarMixInventory(rows, client, mixStock = {}) {
+  const mixes = Array.isArray(client?.barMixes) ? client.barMixes : [];
+  if (!mixes.length || !mixStock || typeof mixStock !== "object") return;
+  const normalize = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const stockByMix = new Map(Object.entries(mixStock).map(([key, value]) => [normalize(key), parseNumber(value)]));
+  const extraByProduct = new Map();
+  for (const mix of mixes) {
+    const liters = stockByMix.get(normalize(mix.nombre)) || 0;
+    if (!(liters > 0)) continue;
+    for (const component of mix.componentes || []) {
+      const key = normalize(component.producto);
+      const ratio = parseNumber(component.botellasPorLitro);
+      if (!key || !(ratio > 0)) continue;
+      extraByProduct.set(key, (extraByProduct.get(key) || 0) + liters * ratio);
+    }
+  }
+  if (!extraByProduct.size) return;
+  for (const row of rows) {
+    const record = row.record || {};
+    const name = normalize(
+      pickRecordValue(record, ["itemName", "item"], "") || pickRecordValueFuzzy(record, /nombreArt/i) || row.values?.[0],
+    );
+    if (!name) continue;
+    let extra = 0;
+    for (const [key, value] of extraByProduct) {
+      if (name === key || name.includes(key) || key.includes(name)) { extra = value; break; }
+    }
+    if (!(extra > 0)) continue;
+    const onHand = parseNumber(record.existencia);
+    const orden = parseNumber(record.orden);
+    const costoPedido = parseNumber(record.costoPedido);
+    record.existencia = String((onHand + extra).toFixed(2));
+    if (orden > 0) {
+      const newOrden = Math.max(Math.ceil(orden - extra), 0);
+      record.orden = String(newOrden);
+      record.costoPedido = String(orden ? Math.round((costoPedido * newOrden) / orden) : 0);
+    }
+    record.alertaCosto = [record.alertaCosto, `incluye mezcla preparada (+${extra.toFixed(2)} bot. equivalentes)`]
+      .filter(Boolean)
+      .join(" · ");
+  }
+}
+
+async function computeSuggestionItems({ client, period, mixStock }) {
   const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
   const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
   if (!cid || !pid) {
@@ -7861,6 +7952,8 @@ async function computeSuggestionItems({ client, period }) {
       // Sin detailed se usa el stock del Intelipar tal cual.
       console.error("[sugerencia-csv] detailed no disponible:", detailedError.message);
     }
+  } else {
+    applyBarMixInventory(data.rows, client, mixStock);
   }
   enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
 
@@ -7951,6 +8044,12 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
     response.status(404).json({ error: requestedPid ? "Ese periodo no existe para este restaurante." : "El restaurante no tiene periodos cerrados en Sculpture." });
     return;
   }
+  let mixStock = {};
+  try {
+    mixStock = JSON.parse(String(request.query.mixStock || "{}"));
+  } catch {
+    mixStock = {};
+  }
   try {
     let period = null;
     let items = null;
@@ -7960,7 +8059,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       if (!candidate) continue;
       let result;
       try {
-        result = await computeSuggestionItems({ client, period: candidate });
+        result = await computeSuggestionItems({ client, period: candidate, mixStock });
       } catch (candidateError) {
         if (firstResult) break;
         continue;
@@ -8046,6 +8145,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       client: { id: client.id, name: client.name, area: client.area },
       period: { id: period.id, label: period.label },
       purchaseRecipients: client.purchaseRecipients || [],
+      barMixes: client.barMixes || [],
       items,
     });
   } catch (error) {

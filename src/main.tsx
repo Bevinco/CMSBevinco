@@ -79,6 +79,8 @@ type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type ActiveView = "dashboard" | "module1" | "monthly" | "compras" | "tasks" | "reports" | "criteria" | "users";
 
+type BarMix = { nombre: string; componentes: Array<{ producto: string; botellasPorLitro: number }> };
+
 type SuggestionItem = {
   provider: string; name: string; size: string; unitCost: number; onHand: number;
   onHandCost: number; par: number; suggested: number; orderCost: number;
@@ -704,6 +706,79 @@ function SearchSelect({
   );
 }
 
+// Editor de mezclas de barra (sangria, mix de pisco): receta por local con
+// equivalencia botellas-por-litro. Vive en el CMS porque el equipo las cambia
+// seguido y Sculpture no las registra como Batch Mix.
+function MixEditor({ mixes, saving, onSave }: { mixes: BarMix[]; saving: boolean; onSave: (mixes: BarMix[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<BarMix[]>(mixes);
+  useEffect(() => {
+    setDraft(mixes);
+  }, [mixes]);
+
+  const setMix = (index: number, patch: Partial<BarMix>) =>
+    setDraft((current) => current.map((mix, mixIndex) => (mixIndex === index ? { ...mix, ...patch } : mix)));
+  const setComponent = (mixIndex: number, componentIndex: number, patch: Partial<BarMix["componentes"][number]>) =>
+    setDraft((current) => current.map((mix, index) => index === mixIndex
+      ? { ...mix, componentes: mix.componentes.map((component, ci) => (ci === componentIndex ? { ...component, ...patch } : component)) }
+      : mix));
+
+  return (
+    <div className="mix-editor">
+      <button className="secondary-button" type="button" onClick={() => setOpen((current) => !current)}>
+        {open ? "Cerrar mezclas" : `Configurar mezclas de este local (${mixes.length})`}
+      </button>
+      {open ? (
+        <div className="mix-editor-body">
+          {draft.map((mix, mixIndex) => (
+            <div className="mix-card" key={mixIndex}>
+              <div className="mix-card-head">
+                <input
+                  placeholder="Nombre de la mezcla (ej. Sangría)"
+                  value={mix.nombre}
+                  onChange={(event) => setMix(mixIndex, { nombre: event.target.value })}
+                />
+                <button type="button" aria-label="Eliminar mezcla" onClick={() => setDraft((current) => current.filter((_, index) => index !== mixIndex))}>×</button>
+              </div>
+              {mix.componentes.map((component, componentIndex) => (
+                <div className="mix-component" key={componentIndex}>
+                  <input
+                    placeholder="Producto tal como aparece en Sculpture (ej. Vino Tinto Misiones)"
+                    value={component.producto}
+                    onChange={(event) => setComponent(mixIndex, componentIndex, { producto: event.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.05"
+                    placeholder="bot./litro"
+                    title="Botellas de este producto por litro de mezcla"
+                    value={component.botellasPorLitro || ""}
+                    onChange={(event) => setComponent(mixIndex, componentIndex, { botellasPorLitro: Number(event.target.value) })}
+                  />
+                  <button type="button" aria-label="Quitar componente" onClick={() => setMix(mixIndex, { componentes: mix.componentes.filter((_, index) => index !== componentIndex) })}>×</button>
+                </div>
+              ))}
+              <button className="mix-add" type="button" onClick={() => setMix(mixIndex, { componentes: [...mix.componentes, { producto: "", botellasPorLitro: 0 }] })}>
+                + Agregar botella componente
+              </button>
+            </div>
+          ))}
+          <div className="mix-editor-actions">
+            <button className="mix-add" type="button" onClick={() => setDraft((current) => [...current, { nombre: "", componentes: [{ producto: "", botellasPorLitro: 0 }] }])}>
+              + Nueva mezcla
+            </button>
+            <button className="primary-button" disabled={saving} type="button" onClick={() => onSave(draft)}>
+              {saving ? "Guardando..." : "Guardar mezclas"}
+            </button>
+          </div>
+          <small className="mix-hint">La equivalencia es botellas por litro de mezcla (ej. sangría con 0,75 botellas de vino por litro). El producto debe llamarse igual que en Sculpture para que calce.</small>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SculptureMark() {
   return <img className="brand-logo" src="/logo.png" alt="Sculpture Hospitality" />;
 }
@@ -785,6 +860,9 @@ function App() {
   const [comprasPeriods, setComprasPeriods] = useState<Array<{ pid: string; label: string }>>([]);
   const [comprasPeriodPid, setComprasPeriodPid] = useState("");
   const [comprasRecipientsDraft, setComprasRecipientsDraft] = useState("");
+  const [comprasMixes, setComprasMixes] = useState<BarMix[]>([]);
+  const [comprasMixStock, setComprasMixStock] = useState<Record<string, string>>({});
+  const [comprasMixSaving, setComprasMixSaving] = useState(false);
   const [comprasLoading, setComprasLoading] = useState(false);
   const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
   const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
@@ -1389,9 +1467,54 @@ function App() {
     }
   }
 
+  async function loadComprasMixes(clientId: string) {
+    setComprasMixes([]);
+    setComprasMixStock({});
+    try {
+      const payload = await readJson<{ barMixes: BarMix[] }>(
+        await fetch(`/api/module1/clients/${clientId}/bar-mixes`),
+      );
+      setComprasMixes(payload.barMixes || []);
+    } catch {
+      setComprasMixes([]);
+    }
+  }
+
+  async function saveComprasMixes(clientId: string, mixes: BarMix[]) {
+    if (comprasMixSaving) return;
+    setComprasMixSaving(true);
+    try {
+      const payload = await readJson<{ barMixes: BarMix[] }>(
+        await fetch(`/api/module1/clients/${clientId}/bar-mixes`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ barMixes: mixes }),
+        }),
+      );
+      setComprasMixes(payload.barMixes || []);
+      setError(`Mezclas guardadas (${(payload.barMixes || []).length}). Ingresa los litros preparados antes de calcular.`);
+      setWorkStatus("ready");
+    } catch (mixError) {
+      setError(mixError instanceof Error ? mixError.message : "No se pudieron guardar las mezclas.");
+      setWorkStatus("error");
+    } finally {
+      setComprasMixSaving(false);
+    }
+  }
+
+  function comprasMixStockParam() {
+    const filled: Record<string, number> = {};
+    for (const mix of comprasMixes) {
+      const liters = Number(comprasMixStock[mix.nombre]);
+      if (Number.isFinite(liters) && liters > 0) filled[mix.nombre] = liters;
+    }
+    return Object.keys(filled).length ? encodeURIComponent(JSON.stringify(filled)) : "";
+  }
+
   async function loadComprasPeriods(clientId: string) {
     setComprasPeriods([]);
     setComprasPeriodPid("");
+    loadComprasMixes(clientId);
     const unit = sculptureUnits.find((item) => item.id === clientId);
     if (!unit) return;
     try {
@@ -1417,8 +1540,12 @@ function App() {
     setWorkStatus("loading");
     setError(comprasPeriodPid ? "Calculando la sugerencia de compra del periodo elegido..." : "Calculando la sugerencia de compra de la última semana auditada...");
     try {
-      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; items: SuggestionItem[] }>(
-        await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${comprasPeriodPid ? `?period=${encodeURIComponent(comprasPeriodPid)}` : ""}`),
+      const query = new URLSearchParams();
+      if (comprasPeriodPid) query.set("period", comprasPeriodPid);
+      const mixParam = comprasMixStockParam();
+      if (mixParam) query.set("mixStock", decodeURIComponent(mixParam));
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; items: SuggestionItem[] }>(
+        await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${query.toString() ? `?${query.toString()}` : ""}`),
       );
       setComprasData(payload);
       setComprasRecipientsDraft((payload.purchaseRecipients || []).join(", "));
@@ -3402,7 +3529,7 @@ function App() {
               </div>
               <div className="action-row wrap-actions">
                 {comprasData ? (
-                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}`} target="_blank" rel="noreferrer">
+                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
                     <Printer size={17} /> Descargar CSV para enviar
                   </a>
                 ) : null}
@@ -3440,7 +3567,29 @@ function App() {
                 </button>
               </div>
             </div>
-            <p className="muted-copy">Se calcula en vivo sobre la última semana cerrada de auditoría (PAR del equipo, inventario efectivo con productos procesados). Solo lista lo accionable: productos con pedido sugerido o con exceso de inventario.</p>
+            {comprasMixes.length ? (
+              <div className="mix-stock-row">
+                <strong>Mezclas preparadas hoy</strong>
+                {comprasMixes.map((mix) => (
+                  <label className="mix-stock-field" key={mix.nombre}>
+                    {mix.nombre} (litros)
+                    <input
+                      min="0"
+                      placeholder="0"
+                      step="0.5"
+                      type="number"
+                      value={comprasMixStock[mix.nombre] || ""}
+                      onChange={(event) => setComprasMixStock((current) => ({ ...current, [mix.nombre]: event.target.value }))}
+                    />
+                  </label>
+                ))}
+                <small>Se convierten a botellas con la receta y se descuentan de la sugerencia. En 0 si esta semana no hay preparadas.</small>
+              </div>
+            ) : null}
+            {comprasClientId ? (
+              <MixEditor mixes={comprasMixes} saving={comprasMixSaving} onSave={(mixes) => saveComprasMixes(comprasClientId, mixes)} />
+            ) : null}
+            <p className="muted-copy">Se calcula en vivo sobre la última semana cerrada de auditoría (PAR del equipo, inventario efectivo con productos procesados y mezclas de barra). Solo lista lo accionable: productos con pedido sugerido o con exceso de inventario.</p>
           </section>
 
           {comprasData ? (() => {
