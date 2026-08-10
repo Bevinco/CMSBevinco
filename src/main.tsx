@@ -2,6 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { createPortal } from "react-dom";
 import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
   BarChart3,
   Bell,
   Bot,
@@ -803,6 +814,115 @@ function MixEditor({ mixes, saving, onSave }: { mixes: BarMix[]; saving: boolean
   );
 }
 
+// ===== Kanban de pendientes con drag & drop (patron dnd-kit, como el
+// tablero de GoPoint que uso el equipo de referencia) =====
+const TASK_STATUS_COLORS: Record<string, string> = {
+  "Sin Iniciar": "#a6b3ae",
+  "Falta Información": "#d23f31",
+  "En Proceso": "#2e75b6",
+  "Gráficos Actualizados": "#8bc6c1",
+  "Comentarios Escritos": "#c98f0a",
+  "Listo para el Reporte": "#90bf4f",
+  "Reporte Enviado": "#0b2b4b",
+  "Cancelada": "#c9b26a",
+};
+
+function TaskCardContent({ task }: { task: NativeTask }) {
+  const priority = task.priority || "Normal";
+  return (
+    <>
+      <strong>{task.name}</strong>
+      <span className="kanban-card-meta">
+        {task.dueDate ? (
+          <i className="kanban-chip">{task.dueDate.slice(8, 10)}/{task.dueDate.slice(5, 7)}</i>
+        ) : null}
+        {priority !== "Normal" ? (
+          <i className={`kanban-chip kanban-priority-${priority.toLowerCase()}`}>{priority}</i>
+        ) : null}
+        {(task.comments || []).length ? <i className="kanban-chip">💬 {(task.comments || []).length}</i> : null}
+        <span className="week-avatars">
+          {(task.assignees || []).slice(0, 3).map((person) => (
+            <b key={person} style={{ backgroundColor: "#054372" }} title={person}>
+              {person.slice(0, 2).toUpperCase()}
+            </b>
+          ))}
+        </span>
+      </span>
+    </>
+  );
+}
+
+function KanbanCard({ task, onOpen }: { task: NativeTask; onOpen: (taskId: string) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });
+  return (
+    <div
+      className={`kanban-card ${isDragging ? "is-dragging" : ""}`}
+      ref={setNodeRef}
+      style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
+      onClick={() => onOpen(task.id)}
+      {...listeners}
+      {...attributes}
+    >
+      <TaskCardContent task={task} />
+    </div>
+  );
+}
+
+function KanbanColumn({ status, tasks, onOpen }: { status: string; tasks: NativeTask[]; onOpen: (taskId: string) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  return (
+    <div className={`kanban-col ${isOver ? "is-over" : ""}`} ref={setNodeRef}>
+      <header>
+        <span className="workflow-dot" style={{ background: TASK_STATUS_COLORS[status] || "#9db0aa" }} />
+        <strong title={status}>{status}</strong>
+        <span className="workflow-count">{tasks.length}</span>
+      </header>
+      <div className="kanban-col-body">
+        {tasks.map((task) => <KanbanCard key={task.id} task={task} onOpen={onOpen} />)}
+        {!tasks.length ? <p className="kanban-empty">Suelta aquí</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function TaskKanban({ tasks, onMove, onOpen }: {
+  tasks: NativeTask[];
+  onMove: (taskId: string, status: string) => void;
+  onOpen: (taskId: string) => void;
+}) {
+  // distance 6: distingue el click (abre el detalle) del arrastre (mueve).
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const activeTask = tasks.find((task) => task.id === activeTaskId) || null;
+  return (
+    <DndContext
+      sensors={sensors}
+      onDragStart={(event: DragStartEvent) => setActiveTaskId(String(event.active.id))}
+      onDragCancel={() => setActiveTaskId(null)}
+      onDragEnd={(event: DragEndEvent) => {
+        const targetStatus = event.over ? String(event.over.id) : "";
+        const taskId = String(event.active.id);
+        setActiveTaskId(null);
+        const task = tasks.find((item) => item.id === taskId);
+        if (targetStatus && task && task.status !== targetStatus) onMove(taskId, targetStatus);
+      }}
+    >
+      <div className="kanban-board">
+        {NATIVE_TASK_STATUSES.map((status) => (
+          <KanbanColumn key={status} status={status} tasks={tasks.filter((task) => task.status === status)} onOpen={onOpen} />
+        ))}
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeTask ? (
+          <div className="kanban-card is-overlay">
+            <TaskCardContent task={activeTask} />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
 function SculptureMark() {
   return <img className="brand-logo" src="/logo.png" alt="Sculpture Hospitality" />;
 }
@@ -1455,6 +1575,7 @@ function App() {
   const [taskDetailId, setTaskDetailId] = useState("");
   const [taskCommentDraft, setTaskCommentDraft] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
+  const [taskViewMode, setTaskViewMode] = useState<"kanban" | "tabla">("kanban");
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
   const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
@@ -3935,17 +4056,33 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Listado</p>
+                  <p className="eyebrow">Tablero</p>
                   <h2>Todas las tareas</h2>
                 </div>
                 <div className="task-toolbar">
-                  <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
-                    <option value="all">Todos los estados</option>
-                    {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                  </select>
+                  <div className="view-toggle" role="tablist">
+                    <button className={taskViewMode === "kanban" ? "active" : ""} type="button" onClick={() => setTaskViewMode("kanban")}>Kanban</button>
+                    <button className={taskViewMode === "tabla" ? "active" : ""} type="button" onClick={() => setTaskViewMode("tabla")}>Tabla</button>
+                  </div>
+                  {taskViewMode === "tabla" ? (
+                    <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
+                      <option value="all">Todos los estados</option>
+                      {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                  ) : null}
                 </div>
               </div>
-              {nativeTasks.length ? (
+              {nativeTasks.length && taskViewMode === "kanban" ? (
+                <>
+                  <TaskKanban
+                    tasks={nativeTasks}
+                    onMove={(taskId, status) => patchNativeTask(taskId, { status })}
+                    onOpen={setTaskDetailId}
+                  />
+                  <p className="muted-copy">Arrastra las tarjetas entre columnas para cambiar el estado, o haz click para abrir el detalle.</p>
+                </>
+              ) : null}
+              {nativeTasks.length && taskViewMode === "tabla" ? (
                 <div className="tasks-table-wrap">
                   <table className="tasks-table">
                     <thead>
@@ -3983,12 +4120,13 @@ function App() {
                     </tbody>
                   </table>
                 </div>
-              ) : (
+              ) : null}
+              {!nativeTasks.length ? (
                 <div className="empty-state">
                   <strong>Aún no hay pendientes en el CMS</strong>
                   <small>Usa "Generar tareas de la semana" para crear una por local, o crea la primera a mano.</small>
                 </div>
-              )}
+              ) : null}
             </section>
 
             <section className="panel">
