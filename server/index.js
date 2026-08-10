@@ -7736,8 +7736,9 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
     "",
     varianceDetailText
       ? [
-          "VARIANCE DETALLADO COMPLETO — obtenido AUTOMATICAMENTE desde Sculpture para este cliente y periodo. ES TU FUENTE PRIMARIA y tienes acceso total a el: NUNCA digas que no tienes acceso al variance ni pidas que te lo peguen.",
+          "VARIANCE DETALLADO COMPLETO — obtenido AUTOMATICAMENTE desde Sculpture para este cliente y periodo. ES TU FUENTE PRIMARIA y tienes acceso total a el: NUNCA digas que no tienes acceso al variance, NUNCA digas que esta 'pegado en el chat' (nadie lo pego: llega solo, siempre), y NUNCA pidas que te peguen datos. Si en mensajes anteriores de esta conversacion dijiste que no tenias acceso, eso era un error ya corregido: ignoralo.",
           "Notas de lectura: cada fila es un producto bajo su categoria ('Categoria:' encabeza y 'Total Categoria:' cierra). Las 'familias' del extracto de arriba son agrupaciones del CMS sobre estas categorias (usa mapaCategoriaFamilia para cruzar; lo que no aparece en el mapa cae en 'Otros'). Para calculos por familia (cobertura, inventario, usado) agrega las filas del detalle segun ese mapa.",
+          "Si una familia del extracto (p. ej. 'Otros') no tiene categorias en este detalle, significa que esa familia no tuvo productos en el variance de la semana (suele venir solo del Intelipar de compras): dilo tal cual, en una linea, y sigue; ese dato NO existe en ninguna otra parte, no lo pidas.",
           varianceDetailText,
         ].join("\n")
       : "VARIANCE DETALLADO COMPLETO: no disponible en este momento (Sculpture no respondió); usa el extracto de arriba y acláralo si te preguntan por un SKU que no aparece.",
