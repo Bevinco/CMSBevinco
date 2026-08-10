@@ -1576,6 +1576,14 @@ function App() {
   const [taskCommentDraft, setTaskCommentDraft] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
   const [taskViewMode, setTaskViewMode] = useState<"kanban" | "tabla">("kanban");
+  const [taskSearch, setTaskSearch] = useState("");
+  const visibleTasks = useMemo(() => {
+    const query = taskSearch.trim().toLowerCase();
+    if (!query) return nativeTasks;
+    return nativeTasks.filter((task) =>
+      task.name.toLowerCase().includes(query) ||
+      (task.assignees || []).some((person) => person.toLowerCase().includes(query)));
+  }, [nativeTasks, taskSearch]);
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
   const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
@@ -4041,7 +4049,10 @@ function App() {
                   <small className="clickup-list-note">{nativeTasks.length} tarea(s) en el CMS · sin depender de ClickUp</small>
                 </div>
                 <div className="action-row wrap-actions">
-                  <input className="task-week-input" title="Fecha de auditoría de la semana" type="date" value={generateWeekDate} onChange={(event) => setGenerateWeekDate(event.target.value)} />
+                  <label className="task-week-field">
+                    Semana de auditoría
+                    <input className="task-week-input" type="date" value={generateWeekDate} onChange={(event) => setGenerateWeekDate(event.target.value)} />
+                  </label>
                   <button className="primary-button" disabled={!generateWeekDate || workStatus === "loading"} onClick={generateWeekTasks} type="button">
                     <CalendarDays size={17} /> Generar tareas de la semana
                   </button>
@@ -4060,6 +4071,12 @@ function App() {
                   <h2>Todas las tareas</h2>
                 </div>
                 <div className="task-toolbar">
+                  <input
+                    className="task-search"
+                    placeholder="Buscar tarea o responsable..."
+                    value={taskSearch}
+                    onChange={(event) => setTaskSearch(event.target.value)}
+                  />
                   <div className="view-toggle" role="tablist">
                     <button className={taskViewMode === "kanban" ? "active" : ""} type="button" onClick={() => setTaskViewMode("kanban")}>Kanban</button>
                     <button className={taskViewMode === "tabla" ? "active" : ""} type="button" onClick={() => setTaskViewMode("tabla")}>Tabla</button>
@@ -4075,7 +4092,7 @@ function App() {
               {nativeTasks.length && taskViewMode === "kanban" ? (
                 <>
                   <TaskKanban
-                    tasks={nativeTasks}
+                    tasks={visibleTasks}
                     onMove={(taskId, status) => patchNativeTask(taskId, { status })}
                     onOpen={setTaskDetailId}
                   />
@@ -4089,7 +4106,7 @@ function App() {
                       <tr><th>Tarea</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Responsables</th><th className="num">💬</th><th></th></tr>
                     </thead>
                     <tbody>
-                      {nativeTasks
+                      {visibleTasks
                         .filter((task) => taskStatusFilter === "all" || task.status === taskStatusFilter)
                         .sort((left, right) => String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999")))
                         .map((task) => (
@@ -4098,7 +4115,12 @@ function App() {
                               <button className="task-name-link" type="button" onClick={() => setTaskDetailId(task.id)}>{task.name}</button>
                             </td>
                             <td>
-                              <select className="task-inline-select" value={task.status} onChange={(event) => patchNativeTask(task.id, { status: event.target.value })}>
+                              <select
+                                className="task-inline-select task-status-select"
+                                style={{ borderColor: TASK_STATUS_COLORS[task.status] || undefined, color: TASK_STATUS_COLORS[task.status] === "#a6b3ae" ? undefined : TASK_STATUS_COLORS[task.status] }}
+                                value={task.status}
+                                onChange={(event) => patchNativeTask(task.id, { status: event.target.value })}
+                              >
                                 {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                               </select>
                             </td>
