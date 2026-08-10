@@ -2708,7 +2708,12 @@ function ensureClient(store, clientInput) {
       sculptureBaseUrl: clientInput.sculptureBaseUrl || clientInput.baseUrl || client.sculptureBaseUrl,
       area: clientInput.area || client.area,
       sculptureAccountId: clientInput.sculptureAccountId || client.sculptureAccountId || "",
-      recipients: clientInput.recipients || client.recipients,
+      // OJO: [] es truthy. Los callers pasan recipients: [] al re-asegurar el
+      // cliente (generar reporte, compras) y eso BORRABA la lista guardada.
+      // Solo una lista con contenido puede reemplazar a la existente.
+      recipients: (Array.isArray(clientInput.recipients) && clientInput.recipients.length
+        ? clientInput.recipients
+        : client.recipients) || [],
     });
   }
 
