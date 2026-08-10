@@ -876,6 +876,7 @@ function TaskCardContent({ task }: { task: NativeTask }) {
         {priority !== "Normal" ? (
           <i className={`kanban-chip kanban-priority-${priority.toLowerCase()}`}>{priority}</i>
         ) : null}
+        {(task.tags || []).slice(0, 2).map((tag) => <i className="kanban-chip kanban-tag" key={tag}>{tag}</i>)}
         {(task.comments || []).length ? <i className="kanban-chip">💬 {(task.comments || []).length}</i> : null}
         <span className="week-avatars">
           {(task.assignees || []).slice(0, 3).map((person) => (
@@ -1620,7 +1621,8 @@ function App() {
     if (!query) return nativeTasks;
     return nativeTasks.filter((task) =>
       task.name.toLowerCase().includes(query) ||
-      (task.assignees || []).some((person) => person.toLowerCase().includes(query)));
+      (task.assignees || []).some((person) => person.toLowerCase().includes(query)) ||
+      (task.tags || []).some((tag) => tag.toLowerCase().includes(query)));
   }, [nativeTasks, taskSearch]);
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);

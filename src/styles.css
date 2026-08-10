@@ -4889,3 +4889,11 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 :root[data-theme="dark"] .task-tag { background: rgba(46, 117, 182, 0.18); color: #9cc4e8; }
 :root[data-theme="dark"] .task-tags input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
 :root[data-theme="dark"] .task-done-check { background: var(--surface-soft); border-color: var(--line); }
+
+/* Alineacion del grid del modal y etiquetas utiles */
+.task-modal-grid { align-items: start; }
+.task-modal-grid label { align-content: start; }
+.task-tags { align-content: start; min-height: 38px; }
+.task-tags input { min-height: 34px; }
+.kanban-chip.kanban-tag { background: #eef4f9; color: #2e5f8a; }
+:root[data-theme="dark"] .kanban-chip.kanban-tag { background: rgba(46, 117, 182, 0.18); color: #9cc4e8; }
