@@ -6966,44 +6966,109 @@ app.get("/api/module1/clickup-emails/preview", requireAuth, async (request, resp
       return;
     }
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    const normalize = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-    const rows = [];
+    // Comparacion compactada: sin tildes, minusculas y SOLO alfanumerico, para
+    // que "De La Ostia - Barra" calce con "De la ostia barra".
+    const compact = (value) => String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "");
+    const moduleOfName = (name) => {
+      const lower = String(name).toLowerCase();
+      if (/cocina/.test(lower)) return "Cocina";
+      if (/barra|\bbar\b/.test(lower) && !/^bar valdivia$/i.test(String(name).trim())) return "Barra";
+      return "";
+    };
+
+    // Candidatos: clientes ya guardados + unidades del directorio (las que no
+    // existan como cliente se crean recien al aplicar).
+    let candidates = store.clients.map((client) => ({
+      id: client.id,
+      nombre: client.name,
+      moduleName: client.moduleName || (/barra|beverage/i.test(client.area || "") ? "Barra" : "Cocina"),
+      key: compact((client.accountName || client.name || "").replace(/\s*[-·]\s*(barra|cocina|bar)$/i, "")),
+      unit: null,
+    }));
+    try {
+      const directory = await discoverSculptureUnits();
+      for (const unit of directory.units || []) {
+        if (candidates.some((candidate) => candidate.id === unit.id)) continue;
+        candidates.push({
+          id: unit.id,
+          nombre: unit.name,
+          moduleName: unit.moduleName || (/beverage/i.test(unit.area || "") ? "Barra" : "Cocina"),
+          key: compact(unit.accountName || unit.name),
+          unit,
+        });
+      }
+    } catch {
+      // sin directorio: se matchea solo contra clientes guardados
+    }
+
+    // Escaneo con dedupe: por nombre de tarea gana la version MAS RECIENTE
+    // (las semanas cerradas viejas traen listas desactualizadas).
+    const latestByTask = new Map();
     let page = 0;
     while (page < 6) {
       const { payload } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task?page=${page}&include_closed=true`);
       const tasks = payload.tasks || [];
       if (!tasks.length) break;
       for (const task of tasks) {
-        const haystack = [
-          task.name,
-          task.text_content || "",
-          ...(task.custom_fields || []).map((field) => `${field.name}: ${typeof field.value === "object" ? JSON.stringify(field.value ?? "") : field.value ?? ""}`),
-        ].join("\n");
-        const emails = [...new Set((haystack.match(emailRegex) || []).map((email) => email.toLowerCase()))]
-          .filter((email) => !email.endsWith("@tasks.clickup.com"));
-        if (!emails.length) continue;
-        const taskKey = normalize(task.name);
-        const matched = store.clients.filter((client) => {
-          const account = normalize(client.accountName || client.name).split(" - ")[0];
-          return account.length > 3 && (taskKey.includes(account) || account.includes(taskKey));
-        });
-        rows.push({
-          tarea: task.name,
-          estado: task.status?.status || "",
-          correos: emails,
-          clientes: matched.map((client) => ({ id: client.id, nombre: client.name })),
-        });
+        const key = compact(task.name);
+        const updated = Number(task.date_updated || 0);
+        const current = latestByTask.get(key);
+        if (!current || updated > current.updated) latestByTask.set(key, { task, updated });
       }
       if (payload.last_page) break;
       page += 1;
     }
 
-    // apply=1: guardar la union en client.recipients (y purchaseRecipients si van vacios)
+    const rows = [];
+    for (const { task } of latestByTask.values()) {
+      const haystack = [
+        task.name,
+        task.text_content || "",
+        ...(task.custom_fields || []).map((field) => `${field.name}: ${typeof field.value === "object" ? JSON.stringify(field.value ?? "") : field.value ?? ""}`),
+      ].join("\n");
+      const emails = [...new Set((haystack.match(emailRegex) || []).map((email) => email.toLowerCase()))]
+        .filter((email) => !email.endsWith("@tasks.clickup.com"));
+      if (!emails.length) continue;
+      const taskModule = moduleOfName(task.name);
+      const taskKey = compact(String(task.name).replace(/\s*[-·]\s*(barra|cocina|bar)\s*$/i, ""));
+      const matched = candidates.filter((candidate) => {
+        if (candidate.key.length < 4 || taskKey.length < 4) return false;
+        // Las unidades AFM (fin de mes) solo calzan con tareas AFM, y viceversa.
+        if (candidate.key.includes("afm") !== taskKey.includes("afm")) return false;
+        const nameMatch = candidate.key === taskKey || candidate.key.includes(taskKey) || taskKey.includes(candidate.key);
+        if (!nameMatch) return false;
+        // El modulo de la tarea manda: "X - Cocina" solo calza clientes Cocina.
+        return !taskModule || candidate.moduleName === taskModule;
+      });
+      rows.push({
+        tarea: task.name,
+        estado: task.status?.status || "",
+        actualizada: task.date_updated ? new Date(Number(task.date_updated)).toISOString().slice(0, 10) : "",
+        correos: emails,
+        clientes: matched.map((candidate) => ({ id: candidate.id, nombre: candidate.nombre })),
+        _matched: matched,
+      });
+    }
+    rows.sort((left, right) => left.tarea.localeCompare(right.tarea, "es"));
+
+    // apply=1: guardar (union) en client.recipients; crea el cliente desde el
+    // directorio si aun no existe en el CMS.
     let applied = 0;
     if (String(request.query.apply || "") === "1") {
       for (const row of rows) {
-        for (const target of row.clientes) {
-          const client = store.clients.find((candidate) => candidate.id === target.id);
+        for (const candidate of row._matched) {
+          let client = store.clients.find((item) => item.id === candidate.id);
+          if (!client && candidate.unit) {
+            client = ensureClient(store, {
+              ...candidate.unit,
+              sculptureBaseUrl: candidate.unit.baseUrl || candidate.unit.sculptureBaseUrl || baseUrlForSculptureArea(candidate.unit.area),
+              recipients: [],
+            });
+          }
           if (!client) continue;
           const merged = [...new Set([...(client.recipients || []), ...row.correos])].slice(0, 30);
           if (merged.length !== (client.recipients || []).length) {
@@ -7015,10 +7080,12 @@ app.get("/api/module1/clickup-emails/preview", requireAuth, async (request, resp
       }
       if (applied) await writeStore(store);
     }
+    for (const row of rows) delete row._matched;
 
     response.json({
       lista: listId,
       tareasConCorreos: rows.length,
+      sinCliente: rows.filter((row) => !row.clientes.length).map((row) => row.tarea),
       aplicado: String(request.query.apply || "") === "1" ? `${applied} cliente(s) actualizados` : "no (agrega &apply=1 para guardar)",
       filas: rows,
     });
