@@ -5789,7 +5789,7 @@ function renderDynamicReportHtml(store, report) {
     .grid-var > * { min-width: 0; }
     .side-kpis { display: flex; flex-direction: column; gap: 14px; }
     .side-kpis .kpi-card { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-    .comments-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .comments-grid { align-items: start; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .comment-card h3 { color: #5c8f1e; font-size: 13.5px; font-weight: 800; margin: 0 0 9px; }
     .comment-card p { color: var(--text-light); font-size: 13px; line-height: 1.65; margin: 0 0 8px; }
     .comment-card p b { color: var(--text); }
@@ -5893,6 +5893,11 @@ function renderDynamicReportHtml(store, report) {
         </table>
       </div>
     </div>
+  </section>
+
+  <section class="section" id="stockSection" hidden>
+    <h2 class="section-title"><span class="num">07</span> Eficiencia de stock y compra <span class="hint">Cobertura, compra vs consumo y sugerencias</span></h2>
+    <div class="comments-grid" id="commentsStock"></div>
   </section>
 </main>
 
@@ -6143,12 +6148,19 @@ function renderDynamicReportHtml(store, report) {
   function renderComments(data) {
     var blocks = [
       { title: "Lo mejor de la semana", items: data.analysis.bestOfWeek },
-      { title: "Los desafíos de la semana", items: data.analysis.weeklyChallenges },
-      { title: "Eficiencia de stock y compra", items: data.analysis.stockEfficiency }
+      { title: "Los desafíos de la semana", items: data.analysis.weeklyChallenges }
     ].filter(function (block) { return block.items && block.items.length; });
     document.getElementById("comments").innerHTML = blocks.map(function (block) {
       return '<div class="card comment-card"><h3>' + block.title + "</h3>" + richItems(block.items) + "</div>";
     }).join("") || '<div class="card comment-card"><p>Sin comentarios para este período.</p></div>';
+    // Eficiencia de stock y compra va en su propia seccion, despues del Top 10
+    // (pedido del equipo, 10-ago): asi Lo mejor y Desafios quedan lado a lado.
+    var stockItems = data.analysis.stockEfficiency || [];
+    var stockSection = document.getElementById("stockSection");
+    stockSection.hidden = !stockItems.length;
+    document.getElementById("commentsStock").innerHTML = stockItems.length
+      ? '<div class="card comment-card">' + richItems(stockItems) + "</div>"
+      : "";
   }
 
   function renderProducts(data) {
