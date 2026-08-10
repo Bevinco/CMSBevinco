@@ -8285,11 +8285,22 @@ async function varianceDetailForChat(store, report) {
     const attachment = await buildVarianceCsvAttachment(store, report);
     text = String(attachment?.text || "").slice(0, 60000);
   } catch (error) {
-    console.error("[chat] variance detallado no disponible:", error.message);
+    console.error(`[chat] variance detallado no disponible (${report.id}):`, error.message);
   }
-  varianceChatCache.set(report.id, { at: Date.now(), text });
-  if (varianceChatCache.size > 12) varianceChatCache.delete(varianceChatCache.keys().next().value);
-  return text;
+  if (text) {
+    // Solo se cachea contenido REAL: cachear un fallo dejaba el chat "ciego"
+    // 10 minutos aunque Sculpture se recuperara al instante.
+    varianceChatCache.set(report.id, { at: Date.now(), text });
+    if (varianceChatCache.size > 12) varianceChatCache.delete(varianceChatCache.keys().next().value);
+    return text;
+  }
+  // Fetch fallido: mejor el ultimo detalle bueno conocido (aunque tenga mas
+  // de 10 minutos) que nada.
+  if (cached?.text) {
+    console.error(`[chat] usando variance en cache antigua para ${report.id}`);
+    return cached.text;
+  }
+  return "";
 }
 
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
