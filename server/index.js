@@ -6929,6 +6929,104 @@ app.patch("/api/module1/notifications/read", requireAuth, async (request, respon
   response.json({ notifications: store.notifications.filter((item) => item.user === me || item.user === request.session?.name) });
 });
 
+// ===== Importar correos de clientes desde ClickUp (reunion 10-ago) =====
+// Explora ClickUp con la conexion del CMS, extrae correos de las tareas
+// (nombre, descripcion y campos personalizados) y los propone como lista de
+// distribucion del cliente que calce por nombre. Con apply=1 los guarda
+// (union con los existentes, sin borrar nada).
+app.get("/api/module1/clickup-emails/preview", requireAuth, async (request, response) => {
+  try {
+    // tree=1: arbol de espacios y listas, para ubicar donde viven los correos.
+    if (String(request.query.tree || "") === "1") {
+      const { payload: teams } = await clickupRequest("/team");
+      const tree = [];
+      for (const team of teams.teams || []) {
+        const teamNode = { team: team.name, spaces: [] };
+        const { payload: spaces } = await clickupRequest(`/team/${team.id}/space`);
+        for (const space of spaces.spaces || []) {
+          const spaceNode = { space: space.name, lists: [] };
+          const { payload: folders } = await clickupRequest(`/space/${space.id}/folder`);
+          for (const folder of folders.folders || []) {
+            for (const list of folder.lists || []) spaceNode.lists.push({ folder: folder.name, list: list.name, id: list.id, tareas: list.task_count });
+          }
+          const { payload: loose } = await clickupRequest(`/space/${space.id}/list`);
+          for (const list of loose.lists || []) spaceNode.lists.push({ list: list.name, id: list.id, tareas: list.task_count });
+          teamNode.spaces.push(spaceNode);
+        }
+        tree.push(teamNode);
+      }
+      response.json({ tree });
+      return;
+    }
+
+    const store = await readStore();
+    const listId = String(request.query.listId || "") || clickupListId;
+    if (!listId) {
+      response.status(400).json({ error: "No hay lista de ClickUp configurada; indica ?listId=." });
+      return;
+    }
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const normalize = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+    const rows = [];
+    let page = 0;
+    while (page < 6) {
+      const { payload } = await clickupRequest(`/list/${encodeURIComponent(listId)}/task?page=${page}&include_closed=true`);
+      const tasks = payload.tasks || [];
+      if (!tasks.length) break;
+      for (const task of tasks) {
+        const haystack = [
+          task.name,
+          task.text_content || "",
+          ...(task.custom_fields || []).map((field) => `${field.name}: ${typeof field.value === "object" ? JSON.stringify(field.value ?? "") : field.value ?? ""}`),
+        ].join("\n");
+        const emails = [...new Set((haystack.match(emailRegex) || []).map((email) => email.toLowerCase()))]
+          .filter((email) => !email.endsWith("@tasks.clickup.com"));
+        if (!emails.length) continue;
+        const taskKey = normalize(task.name);
+        const matched = store.clients.filter((client) => {
+          const account = normalize(client.accountName || client.name).split(" - ")[0];
+          return account.length > 3 && (taskKey.includes(account) || account.includes(taskKey));
+        });
+        rows.push({
+          tarea: task.name,
+          estado: task.status?.status || "",
+          correos: emails,
+          clientes: matched.map((client) => ({ id: client.id, nombre: client.name })),
+        });
+      }
+      if (payload.last_page) break;
+      page += 1;
+    }
+
+    // apply=1: guardar la union en client.recipients (y purchaseRecipients si van vacios)
+    let applied = 0;
+    if (String(request.query.apply || "") === "1") {
+      for (const row of rows) {
+        for (const target of row.clientes) {
+          const client = store.clients.find((candidate) => candidate.id === target.id);
+          if (!client) continue;
+          const merged = [...new Set([...(client.recipients || []), ...row.correos])].slice(0, 30);
+          if (merged.length !== (client.recipients || []).length) {
+            client.recipients = merged;
+            applied += 1;
+          }
+          if (!(client.purchaseRecipients || []).length) client.purchaseRecipients = merged;
+        }
+      }
+      if (applied) await writeStore(store);
+    }
+
+    response.json({
+      lista: listId,
+      tareasConCorreos: rows.length,
+      aplicado: String(request.query.apply || "") === "1" ? `${applied} cliente(s) actualizados` : "no (agrega &apply=1 para guardar)",
+      filas: rows,
+    });
+  } catch (error) {
+    response.status(error.status || 502).json({ error: error.message });
+  }
+});
+
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
