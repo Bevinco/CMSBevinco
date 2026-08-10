@@ -4905,3 +4905,7 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .client-emails-input { border: 1px solid #e2dcc9; border-radius: 9px; font-size: 0.78rem; line-height: 1.5; min-width: 260px; padding: 8px 10px; resize: vertical; width: 100%; }
 .client-emails-input:focus { border-color: var(--sculpture-green); box-shadow: 0 0 0 3px rgba(144, 191, 79, 0.14); outline: none; }
 :root[data-theme="dark"] .client-emails-input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+
+/* Chips de CC: tono neutro para distinguirlos de los destinatarios */
+.email-chip-cc { background: #f1ede0 !important; color: #6d7a72 !important; }
+:root[data-theme="dark"] .email-chip-cc { background: var(--surface-muted) !important; color: var(--text-muted) !important; }

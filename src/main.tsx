@@ -1073,6 +1073,8 @@ function App() {
   const [monthlyReport, setMonthlyReport] = useState<Report | null>(null);
   const [monthlyGenerating, setMonthlyGenerating] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+  const [emailCc, setEmailCc] = useState<string[]>([]);
+  const [emailCcInput, setEmailCcInput] = useState("");
   const [emailRecipientInput, setEmailRecipientInput] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailSending, setEmailSending] = useState(false);
@@ -1792,16 +1794,17 @@ function App() {
 
   const [savingDistribution, setSavingDistribution] = useState(false);
   const [clientsSearch, setClientsSearch] = useState("");
-  const [clientDrafts, setClientDrafts] = useState<Record<string, { rep: string; buy: string }>>({});
+  const [clientDrafts, setClientDrafts] = useState<Record<string, { rep: string; buy: string; cc: string }>>({});
   const clientDraftFor = (client: Client) => clientDrafts[client.id] || {
     rep: (client.recipients || []).join(", "),
     buy: ((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(", "),
+    cc: ((client as { ccRecipients?: string[] }).ccRecipients || []).join(", "),
   };
-  async function saveClientDistribution(clientId: string, patch: { recipients?: string[]; purchaseRecipients?: string[] }) {
+  async function saveClientDistribution(clientId: string, patch: { recipients?: string[]; purchaseRecipients?: string[]; ccRecipients?: string[] }) {
     if (!clientId || savingDistribution) return;
     setSavingDistribution(true);
     try {
-      const payload = await readJson<{ recipients: string[]; purchaseRecipients: string[] }>(
+      const payload = await readJson<{ recipients: string[]; purchaseRecipients: string[]; ccRecipients?: string[] }>(
         await fetch(`/api/module1/clients/${clientId}/distribution`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -1810,7 +1813,7 @@ function App() {
       );
       setError(`Lista de distribución guardada (${(patch.recipients ? payload.recipients : payload.purchaseRecipients).length} correo(s)). Queda para los próximos envíos de este cliente.`);
       setClients((current) => current.map((client) => client.id === clientId
-        ? { ...client, recipients: payload.recipients, purchaseRecipients: payload.purchaseRecipients }
+        ? { ...client, recipients: payload.recipients, purchaseRecipients: payload.purchaseRecipients, ccRecipients: payload.ccRecipients }
         : client));
       setWorkStatus("ready");
       return payload;
@@ -2427,6 +2430,18 @@ function App() {
     setEmailRecipientInput("");
   }
 
+  function addEmailCc(raw?: string) {
+    const value = (raw ?? emailCcInput).trim().toLowerCase().replace(/[,;]+$/, "");
+    if (!value) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      setError(`"${value}" no parece un correo válido.`);
+      setWorkStatus("error");
+      return;
+    }
+    setEmailCc((current) => (current.includes(value) ? current : [...current, value]));
+    setEmailCcInput("");
+  }
+
   async function sendReportEmail() {
     if (!selectedReport || emailSending) return;
     if (!emailRecipients.length) {
@@ -2450,7 +2465,7 @@ function App() {
         await fetch(`/api/module1/reports/${selectedReport.id}/email`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ recipients: emailRecipients, subject: emailSubject }),
+          body: JSON.stringify({ recipients: emailRecipients, cc: emailCc, subject: emailSubject }),
         }),
       );
       if (payload.report) {
@@ -2637,6 +2652,11 @@ function App() {
   useEffect(() => {
     setChatMessages(selectedReport?.chat || []);
     setEmailRecipients(selectedReport?.emailLog?.recipients || selectedReport?.client?.recipients || []);
+    setEmailCc(
+      (selectedReport?.emailLog as { cc?: string[] } | undefined)?.cc ||
+      (selectedReport?.client as { ccRecipients?: string[] } | undefined)?.ccRecipients ||
+      [],
+    );
     setEmailSubject(
       selectedReport?.emailLog?.subject ||
         `Reporte ${selectedReport?.monthly ? "mensual" : "semanal"} Bevinco - ${selectedReport?.client?.name || ""}`.trim(),
@@ -3537,6 +3557,30 @@ function App() {
                 <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
               </label>
               <label>
+                CC (en copia)
+                <div className="email-recipients">
+                  {emailCc.map((email) => (
+                    <span className="email-chip email-chip-cc" key={email}>
+                      {email}
+                      <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailCc((current) => current.filter((item) => item !== email))}>×</button>
+                    </span>
+                  ))}
+                  <input
+                    placeholder={emailCc.length ? "Agregar otro..." : "equipo@sculpture..."}
+                    value={emailCcInput}
+                    onChange={(event) => setEmailCcInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === "," || event.key === ";") {
+                        event.preventDefault();
+                        addEmailCc();
+                      }
+                    }}
+                    onBlur={() => emailCcInput.trim() && addEmailCc()}
+                  />
+                </div>
+                <small className="email-hint">Reciben copia visible del correo (equipo interno).</small>
+              </label>
+              <label>
                 Asunto
                 <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
               </label>
@@ -3563,7 +3607,7 @@ function App() {
                 className="secondary-button"
                 disabled={!selectedReport || savingDistribution || !emailRecipients.length}
                 type="button"
-                onClick={() => selectedReport && saveClientDistribution(selectedReport.clientId, { recipients: emailRecipients })}
+                onClick={() => selectedReport && saveClientDistribution(selectedReport.clientId, { recipients: emailRecipients, ccRecipients: emailCc })}
               >
                 <Mail size={16} /> Guardar como lista del cliente
               </button>
@@ -4111,7 +4155,7 @@ function App() {
             <div className="clients-table-wrap">
               <table className="tasks-table clients-table">
                 <thead>
-                  <tr><th>Cliente</th><th>Área</th><th>Correos del reporte</th><th>Correos de compras</th><th></th></tr>
+                  <tr><th>Cliente</th><th>Área</th><th>Correos del reporte</th><th>CC (en copia)</th><th>Correos de compras</th><th></th></tr>
                 </thead>
                 <tbody>
                   {clients
@@ -4140,6 +4184,14 @@ function App() {
                             <textarea
                               className="client-emails-input"
                               rows={2}
+                              value={draft.cc}
+                              onChange={(event) => setClientDrafts((current) => ({ ...current, [client.id]: { ...draft, cc: event.target.value } }))}
+                            />
+                          </td>
+                          <td>
+                            <textarea
+                              className="client-emails-input"
+                              rows={2}
                               value={draft.buy}
                               onChange={(event) => setClientDrafts((current) => ({ ...current, [client.id]: { ...draft, buy: event.target.value } }))}
                             />
@@ -4153,6 +4205,7 @@ function App() {
                                 await saveClientDistribution(client.id, {
                                   recipients: draft.rep.split(/[,;\s]+/).filter(Boolean),
                                   purchaseRecipients: draft.buy.split(/[,;\s]+/).filter(Boolean),
+                                  ccRecipients: draft.cc.split(/[,;\s]+/).filter(Boolean),
                                 });
                                 setClientDrafts((current) => {
                                   const next = { ...current };

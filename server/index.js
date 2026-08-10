@@ -6471,11 +6471,13 @@ app.patch("/api/module1/clients/:clientId/distribution", requireAuth, async (req
   )].slice(0, 30);
   if (request.body?.recipients !== undefined) client.recipients = cleanList(request.body.recipients);
   if (request.body?.purchaseRecipients !== undefined) client.purchaseRecipients = cleanList(request.body.purchaseRecipients);
+  if (request.body?.ccRecipients !== undefined) client.ccRecipients = cleanList(request.body.ccRecipients);
   await writeStore(store);
   response.json({
     id: client.id,
     recipients: client.recipients || [],
     purchaseRecipients: client.purchaseRecipients || [],
+    ccRecipients: client.ccRecipients || [],
   });
 });
 
@@ -9005,6 +9007,10 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     ? request.body.recipients
     : client?.recipients || [];
   const recipients = [...new Set(rawRecipients.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^s@]+@[^s@]+.[^s@]+$/.test(email)))];
+  // CC: contactos en copia (equipo interno). Se excluye lo que ya va en Para.
+  const rawCc = Array.isArray(request.body?.cc) ? request.body.cc : (client?.ccRecipients || []);
+  const cc = [...new Set(rawCc.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^s@]+@[^s@]+.[^s@]+$/.test(email)))]
+    .filter((email) => !recipients.includes(email));
 
   if (!recipients.length && process.env.RESEND_API_KEY) {
     response.status(400).json({ error: "Agrega al menos un destinatario válido antes de enviar." });
@@ -9053,6 +9059,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       await transport.sendMail({
         from: process.env.REPORTS_FROM_EMAIL || `Bevinco Reportes <${gmailUser}>`,
         to: recipients.join(", "),
+        ...(cc.length ? { cc: cc.join(", ") } : {}),
         replyTo: process.env.REPORTS_REPLY_TO || gmailUser,
         subject,
         html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
@@ -9072,9 +9079,12 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     }
 
     report.status = "Enviado";
-    report.emailLog = { sentAt: new Date().toISOString(), recipients, subject };
+    report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject };
     report.updatedAt = new Date().toISOString();
-    if (client) client.recipients = recipients;
+    if (client) {
+      client.recipients = recipients;
+      client.ccRecipients = cc;
+    }
     await writeStore(store);
     response.json({ sent: true, via: "gmail", report: buildReportPayload(store, report) });
     return;
@@ -9089,6 +9099,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     body: JSON.stringify({
       from: process.env.REPORTS_FROM_EMAIL || "reportes@bevinco.local",
       to: recipients,
+      ...(cc.length ? { cc } : {}),
       // Las respuestas del cliente llegan al equipo aunque el remitente sea
       // un dominio de envio (Resend) distinto.
       reply_to: process.env.REPORTS_REPLY_TO || undefined,
