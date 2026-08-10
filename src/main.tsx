@@ -299,8 +299,11 @@ type NativeTask = {
   priority?: string;
   dueDate: string;
   assignees: string[];
+  tags?: string[];
   comments: Array<{ id: string; author: string; text: string; at: string }>;
+  activity?: Array<{ id: string; author: string; text: string; at: string }>;
   createdBy?: string;
+  createdAt?: string;
   updatedAt?: string;
 };
 
@@ -826,6 +829,31 @@ const TASK_STATUS_COLORS: Record<string, string> = {
   "Reporte Enviado": "#0b2b4b",
   "Cancelada": "#c9b26a",
 };
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "ahora";
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `hace ${days} día${days === 1 ? "" : "s"}`;
+  return new Date(iso).toLocaleDateString("es-CL");
+}
+
+function relativeDue(dueDate: string) {
+  if (!dueDate) return "";
+  const due = new Date(`${dueDate}T12:00:00`);
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const days = Math.round((due.getTime() - now.getTime()) / 86400000);
+  if (days === 0) return "vence hoy";
+  if (days === 1) return "vence mañana";
+  if (days > 1) return `en ${days} días`;
+  if (days === -1) return "venció ayer";
+  return `venció hace ${Math.abs(days)} días`;
+}
 
 function isTaskOverdue(task: NativeTask) {
   if (!task.dueDate) return false;
@@ -1583,6 +1611,7 @@ function App() {
   const [taskNotifications, setTaskNotifications] = useState<TaskNotification[]>([]);
   const [taskDetailId, setTaskDetailId] = useState("");
   const [taskCommentDraft, setTaskCommentDraft] = useState("");
+  const [taskTagDraft, setTaskTagDraft] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
   const [taskViewMode, setTaskViewMode] = useState<"kanban" | "tabla">("kanban");
   const [taskSearch, setTaskSearch] = useState("");
@@ -4213,77 +4242,150 @@ function App() {
 
             {taskDetail ? (
               <div className="task-modal-backdrop" onClick={() => setTaskDetailId("")}>
-                <div className="task-modal" onClick={(event) => event.stopPropagation()}>
-                  <header className="task-modal-head">
-                    <input value={taskDetail.name} onChange={(event) => patchNativeTask(taskDetail.id, { name: event.target.value })} />
-                    <button aria-label="Cerrar" type="button" onClick={() => setTaskDetailId("")}>×</button>
-                  </header>
-                  <div className="task-modal-grid">
-                    <label>
-                      Estado
-                      <select value={taskDetail.status} onChange={(event) => patchNativeTask(taskDetail.id, { status: event.target.value })}>
-                        {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                      </select>
-                    </label>
-                    <label>
-                      Fecha límite
-                      <input type="date" value={taskDetail.dueDate || ""} onChange={(event) => patchNativeTask(taskDetail.id, { dueDate: event.target.value })} />
-                    </label>
-                    <label>
-                      Prioridad
-                      <select value={taskDetail.priority || "Normal"} onChange={(event) => patchNativeTask(taskDetail.id, { priority: event.target.value })}>
-                        {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                  <label className="task-modal-field">
-                    Responsables
-                    <div className="task-assignees">
-                      {taskUsers.map((user) => {
-                        const key = user.email || user.name;
-                        const active = (taskDetail.assignees || []).includes(key);
-                        return (
-                          <button
-                            className={`task-assignee-chip ${active ? "active" : ""}`}
-                            key={key}
-                            type="button"
-                            onClick={() => patchNativeTask(taskDetail.id, {
-                              assignees: active
-                                ? (taskDetail.assignees || []).filter((item) => item !== key)
-                                : [...(taskDetail.assignees || []), key],
-                            })}
-                          >
-                            {user.name}
-                          </button>
-                        );
-                      })}
-                      {!taskUsers.length ? <small>Crea usuarios en el módulo Usuarios para poder asignar y mencionar.</small> : null}
+                <div className="task-modal task-modal-wide" onClick={(event) => event.stopPropagation()}>
+                  <div className="task-modal-main">
+                    <header className="task-modal-head">
+                      <button
+                        className={`task-done-check ${taskDetail.status === "Reporte Enviado" ? "done" : ""}`}
+                        title={taskDetail.status === "Reporte Enviado" ? "Reabrir (volver a Sin Iniciar)" : "Marcar como Reporte Enviado"}
+                        type="button"
+                        onClick={() => patchNativeTask(taskDetail.id, { status: taskDetail.status === "Reporte Enviado" ? "Sin Iniciar" : "Reporte Enviado" })}
+                      >✓</button>
+                      <input
+                        key={`${taskDetail.id}-name`}
+                        defaultValue={taskDetail.name}
+                        onBlur={(event) => {
+                          const value = event.target.value.trim();
+                          if (value && value !== taskDetail.name) patchNativeTask(taskDetail.id, { name: value });
+                        }}
+                      />
+                    </header>
+                    <div className="task-modal-grid">
+                      <label>
+                        Estado
+                        <select
+                          style={{ borderColor: TASK_STATUS_COLORS[taskDetail.status] || undefined, color: TASK_STATUS_COLORS[taskDetail.status] === "#a6b3ae" ? undefined : TASK_STATUS_COLORS[taskDetail.status], fontWeight: 700 }}
+                          value={taskDetail.status}
+                          onChange={(event) => patchNativeTask(taskDetail.id, { status: event.target.value })}
+                        >
+                          {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Prioridad
+                        <select value={taskDetail.priority || "Normal"} onChange={(event) => patchNativeTask(taskDetail.id, { priority: event.target.value })}>
+                          {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Fecha límite
+                        <input type="date" value={taskDetail.dueDate || ""} onChange={(event) => patchNativeTask(taskDetail.id, { dueDate: event.target.value })} />
+                        {taskDetail.dueDate ? (
+                          <small className={`task-due-hint ${isTaskOverdue(taskDetail) ? "is-overdue" : ""}`}>{relativeDue(taskDetail.dueDate)}</small>
+                        ) : null}
+                      </label>
+                      <label>
+                        Etiquetas
+                        <div className="task-tags">
+                          {(taskDetail.tags || []).map((tag) => (
+                            <span className="task-tag" key={tag}>
+                              {tag}
+                              <button aria-label={`Quitar ${tag}`} type="button" onClick={() => patchNativeTask(taskDetail.id, { tags: (taskDetail.tags || []).filter((item) => item !== tag) })}>×</button>
+                            </span>
+                          ))}
+                          <input
+                            placeholder="+ etiqueta"
+                            value={taskTagDraft}
+                            onChange={(event) => setTaskTagDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && taskTagDraft.trim()) {
+                                event.preventDefault();
+                                patchNativeTask(taskDetail.id, { tags: [...(taskDetail.tags || []), taskTagDraft.trim()] });
+                                setTaskTagDraft("");
+                              }
+                            }}
+                          />
+                        </div>
+                      </label>
                     </div>
-                  </label>
-                  <label className="task-modal-field">
-                    Descripción
-                    <textarea rows={3} value={taskDetail.description || ""} onChange={(event) => patchNativeTask(taskDetail.id, { description: event.target.value })} />
-                  </label>
-                  <div className="task-comments">
-                    <strong>Comentarios</strong>
-                    {(taskDetail.comments || []).length ? (taskDetail.comments || []).map((comment) => (
-                      <div className="task-comment" key={comment.id}>
-                        <header>
-                          <b>{comment.author}</b>
-                          <small>{new Date(comment.at).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
-                        </header>
-                        <p>{comment.text}</p>
+                    <label className="task-modal-field">
+                      Responsables
+                      <div className="task-assignees">
+                        {taskUsers.map((user) => {
+                          const key = user.email || user.name;
+                          const active = (taskDetail.assignees || []).includes(key);
+                          return (
+                            <button
+                              className={`task-assignee-chip ${active ? "active" : ""}`}
+                              key={key}
+                              type="button"
+                              onClick={() => patchNativeTask(taskDetail.id, {
+                                assignees: active
+                                  ? (taskDetail.assignees || []).filter((item) => item !== key)
+                                  : [...(taskDetail.assignees || []), key],
+                              })}
+                            >
+                              {user.name}
+                            </button>
+                          );
+                        })}
+                        {!taskUsers.length ? <small>Crea usuarios en el módulo Usuarios para poder asignar y mencionar.</small> : null}
                       </div>
-                    )) : <p className="notif-empty">Sin comentarios todavía.</p>}
+                    </label>
+                    <label className="task-modal-field">
+                      Descripción
+                      <textarea
+                        key={`${taskDetail.id}-desc`}
+                        defaultValue={taskDetail.description || ""}
+                        placeholder="Contexto operativo, acuerdos de la auditoría, links..."
+                        rows={4}
+                        onBlur={(event) => {
+                          if (event.target.value !== (taskDetail.description || "")) patchNativeTask(taskDetail.id, { description: event.target.value });
+                        }}
+                      />
+                    </label>
+                    <footer className="task-modal-foot">
+                      <button className="managed-client-delete" type="button" onClick={() => deleteNativeTask(taskDetail.id)}>Eliminar tarea</button>
+                      <small>Creada por {taskDetail.createdBy || "el equipo"}{taskDetail.createdAt ? ` · ${timeAgo(taskDetail.createdAt)}` : ""}</small>
+                    </footer>
+                  </div>
+                  <div className="task-modal-side">
+                    <header className="task-side-head">
+                      <strong>Actividad</strong>
+                      <button aria-label="Cerrar" type="button" onClick={() => setTaskDetailId("")}>×</button>
+                    </header>
+                    <div className="task-feed">
+                      {[
+                        ...(taskDetail.activity || []).map((item) => ({ ...item, kind: "event" as const })),
+                        ...(taskDetail.comments || []).map((item) => ({ ...item, kind: "comment" as const })),
+                      ]
+                        .sort((left, right) => left.at.localeCompare(right.at))
+                        .map((item) => item.kind === "event" ? (
+                          <p className="task-feed-event" key={item.id}>
+                            <b>{item.author}</b> {item.text} <small>{timeAgo(item.at)}</small>
+                          </p>
+                        ) : (
+                          <div className="task-comment" key={item.id}>
+                            <header>
+                              <b>{item.author}</b>
+                              <small>{timeAgo(item.at)}</small>
+                            </header>
+                            <p>{item.text}</p>
+                          </div>
+                        ))}
+                      {!(taskDetail.activity || []).length && !(taskDetail.comments || []).length ? (
+                        <p className="notif-empty">Sin actividad todavía.</p>
+                      ) : null}
+                    </div>
                     <div className="task-comment-composer">
                       <textarea
-                        placeholder="Escribe un comentario... usa @Nombre para notificar a alguien del equipo."
+                        placeholder="Escribe un comentario... usa @Nombre para notificar."
                         rows={2}
                         value={taskCommentDraft}
                         onChange={(event) => setTaskCommentDraft(event.target.value)}
                       />
                       <div className="task-mention-row">
-                        {taskUsers.slice(0, 6).map((user) => (
+                        {taskUsers.slice(0, 5).map((user) => (
                           <button className="task-mention-chip" key={user.email || user.name} type="button" onClick={() => setTaskCommentDraft((current) => `${current}${current.endsWith(" ") || !current ? "" : " "}@${user.name} `)}>
                             @{user.name}
                           </button>
@@ -4294,10 +4396,6 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  <footer className="task-modal-foot">
-                    <button className="managed-client-delete" type="button" onClick={() => deleteNativeTask(taskDetail.id)}>Eliminar tarea</button>
-                    <small>Los cambios se guardan automáticamente.</small>
-                  </footer>
                 </div>
               </div>
             ) : null}

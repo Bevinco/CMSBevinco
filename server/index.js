@@ -6655,7 +6655,18 @@ function cleanTaskPatch(body = {}) {
     const priority = String(body.priority);
     patch.priority = ["Urgente", "Alta", "Normal", "Baja"].includes(priority) ? priority : "Normal";
   }
+  if (body.tags !== undefined) {
+    patch.tags = (Array.isArray(body.tags) ? body.tags : [])
+      .map((tag) => String(tag).trim().slice(0, 24))
+      .filter(Boolean)
+      .slice(0, 8);
+  }
   return patch;
+}
+
+// Bitacora de la tarea (como el Activity de ClickUp): quien hizo que y cuando.
+function taskEvent(author, text) {
+  return { id: crypto.randomUUID(), author: String(author || "Equipo"), text: String(text).slice(0, 200), at: new Date().toISOString() };
 }
 
 function notifyUsers(store, { users, text, taskId, author }) {
@@ -6754,7 +6765,9 @@ app.post("/api/module1/tasks", requireAuth, async (request, response) => {
     priority: patch.priority || "Normal",
     dueDate: patch.dueDate || "",
     assignees: patch.assignees || [],
+    tags: patch.tags || [],
     comments: [],
+    activity: [taskEvent(request.session?.name || request.session?.username, "creó esta tarea")],
     createdBy: request.session?.name || request.session?.username || "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -6805,7 +6818,9 @@ app.post("/api/module1/tasks/generate-week", requireAuth, async (request, respon
       status: "Sin Iniciar",
       dueDate,
       assignees: [],
+      tags: [],
       comments: [],
+      activity: [taskEvent(request.session?.name, "creó esta tarea (generación semanal)")],
       createdBy: request.session?.name || "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -6825,6 +6840,26 @@ app.patch("/api/module1/tasks/:taskId", requireAuth, async (request, response) =
   }
   const patch = cleanTaskPatch(request.body || {});
   const previousAssignees = new Set(task.assignees || []);
+  const author = request.session?.name || request.session?.username || "";
+  task.activity = task.activity || [];
+  if (patch.status !== undefined && patch.status !== task.status) {
+    task.activity.push(taskEvent(author, `cambió el estado de "${task.status}" a "${patch.status}"`));
+  }
+  if (patch.dueDate !== undefined && patch.dueDate !== task.dueDate) {
+    task.activity.push(taskEvent(author, patch.dueDate ? `cambió la fecha límite al ${patch.dueDate}` : "quitó la fecha límite"));
+  }
+  if (patch.priority !== undefined && patch.priority !== (task.priority || "Normal")) {
+    task.activity.push(taskEvent(author, `cambió la prioridad a ${patch.priority}`));
+  }
+  if (patch.name !== undefined && patch.name !== task.name) {
+    task.activity.push(taskEvent(author, `renombró la tarea a "${patch.name}"`));
+  }
+  if (patch.assignees !== undefined) {
+    const next = new Set(patch.assignees);
+    for (const person of patch.assignees) if (!previousAssignees.has(person)) task.activity.push(taskEvent(author, `asignó a ${person}`));
+    for (const person of previousAssignees) if (!next.has(person)) task.activity.push(taskEvent(author, `quitó a ${person}`));
+  }
+  task.activity = task.activity.slice(-80);
   Object.assign(task, patch, { updatedAt: new Date().toISOString() });
   const newAssignees = (task.assignees || []).filter((user) => !previousAssignees.has(user));
   if (newAssignees.length) {
