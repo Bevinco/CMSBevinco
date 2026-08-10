@@ -5398,7 +5398,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
     /* Lo mejor | Desafios lado a lado (pedido de Paulina/Pedro, 10-ago):
        lectura mas comoda, especialmente en celular. */
-    .bv-comments-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+    /* align-items:start — cada caja mide solo su contenido: sin esto, la
+       columna con pocos comentarios se estiraba a la altura de la larga y
+       quedaba un vacio enorme. */
+    .bv-comments-grid { align-items: start; display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
     .bv-comments-grid .bv-comments { margin-bottom: 0; }
     .bv-ctitle { color: #76a73e; font-size: 16px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
