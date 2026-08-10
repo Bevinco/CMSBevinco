@@ -285,6 +285,7 @@ type NativeTask = {
   description: string;
   clientId: string;
   status: string;
+  priority?: string;
   dueDate: string;
   assignees: string[];
   comments: Array<{ id: string; author: string; text: string; at: string }>;
@@ -1456,7 +1457,7 @@ function App() {
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "" });
+  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
 
   const taskDetail = nativeTasks.find((task) => task.id === taskDetailId) || null;
   const unreadNotifications = taskNotifications.filter((item) => !item.read);
@@ -1521,13 +1522,14 @@ function App() {
             name: newTask.name,
             description: newTask.description,
             status: newTask.status,
+            priority: newTask.priority,
             dueDate: newTask.dueDate,
             assignees: newTask.assignee ? [newTask.assignee] : [],
           }),
         }),
       );
       setNativeTasks(payload.tasks || []);
-      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "" });
+      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
       setError("Pendiente creado.");
       setWorkStatus("ready");
     } catch (taskError) {
@@ -2691,7 +2693,7 @@ function App() {
     module1: ["Operación semanal", "Reportes semanales"],
     monthly: ["Operación mensual", "Reportes mensuales"],
     compras: ["Operación de compras", "Sugerencias de compra"],
-    tasks: ["Gestión operativa", "Pendientes ClickUp"],
+    tasks: ["Gestión operativa", "Pendientes del equipo"],
     reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
     users: ["Administración", "Usuarios y permisos"],
@@ -2733,33 +2735,6 @@ function App() {
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
           {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
-        <div className="sidebar-notif">
-          <button className="notif-bell" type="button" onClick={() => { setNotifOpen((current) => !current); }}>
-            <Bell size={16} /> Notificaciones
-            {unreadNotifications.length ? <span className="notif-badge">{unreadNotifications.length}</span> : null}
-          </button>
-          {notifOpen ? (
-            <div className="notif-panel">
-              <header>
-                <strong>Notificaciones</strong>
-                {unreadNotifications.length ? (
-                  <button type="button" onClick={markNotificationsRead}>Marcar leídas</button>
-                ) : null}
-              </header>
-              {taskNotifications.length ? taskNotifications.slice(0, 20).map((item) => (
-                <button
-                  className={`notif-item ${item.read ? "" : "is-unread"}`}
-                  key={item.id}
-                  type="button"
-                  onClick={() => { setNotifOpen(false); openTaskFromBoard(item.taskId); }}
-                >
-                  <span>{item.text}</span>
-                  <small>{new Date(item.at).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
-                </button>
-              )) : <p className="notif-empty">Sin notificaciones. Te avisaremos cuando te mencionen o asignen una tarea.</p>}
-            </div>
-          ) : null}
-        </div>
         <div className="sidebar-user">
           {userMenuOpen ? (
             <div className="user-menu" role="menu">
@@ -2810,6 +2785,33 @@ function App() {
           <div>
             <p className="eyebrow">{viewMeta[0]}</p>
             <h1>{viewMeta[1]}</h1>
+          </div>
+          <div className="topbar-notif">
+            <button className="notif-bell" title="Notificaciones" type="button" onClick={() => setNotifOpen((current) => !current)}>
+              <Bell size={17} />
+              {unreadNotifications.length ? <span className="notif-badge">{unreadNotifications.length}</span> : null}
+            </button>
+            {notifOpen ? (
+              <div className="notif-panel">
+                <header>
+                  <strong>Notificaciones</strong>
+                  {unreadNotifications.length ? (
+                    <button type="button" onClick={markNotificationsRead}>Marcar leídas</button>
+                  ) : null}
+                </header>
+                {taskNotifications.length ? taskNotifications.slice(0, 20).map((item) => (
+                  <button
+                    className={`notif-item ${item.read ? "" : "is-unread"}`}
+                    key={item.id}
+                    type="button"
+                    onClick={() => { setNotifOpen(false); openTaskFromBoard(item.taskId); }}
+                  >
+                    <span>{item.text}</span>
+                    <small>{new Date(item.at).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
+                  </button>
+                )) : <p className="notif-empty">Sin notificaciones. Te avisaremos cuando te mencionen o asignen una tarea.</p>}
+              </div>
+            ) : null}
           </div>
         </header>
 
@@ -3933,6 +3935,65 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div>
+                  <p className="eyebrow">Listado</p>
+                  <h2>Todas las tareas</h2>
+                </div>
+                <div className="task-toolbar">
+                  <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
+                    <option value="all">Todos los estados</option>
+                    {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </div>
+              </div>
+              {nativeTasks.length ? (
+                <div className="tasks-table-wrap">
+                  <table className="tasks-table">
+                    <thead>
+                      <tr><th>Tarea</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Responsables</th><th className="num">💬</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {nativeTasks
+                        .filter((task) => taskStatusFilter === "all" || task.status === taskStatusFilter)
+                        .sort((left, right) => String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999")))
+                        .map((task) => (
+                          <tr key={task.id}>
+                            <td>
+                              <button className="task-name-link" type="button" onClick={() => setTaskDetailId(task.id)}>{task.name}</button>
+                            </td>
+                            <td>
+                              <select className="task-inline-select" value={task.status} onChange={(event) => patchNativeTask(task.id, { status: event.target.value })}>
+                                {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                              </select>
+                            </td>
+                            <td>
+                              <select className={`task-inline-select task-priority-${(task.priority || "Normal").toLowerCase()}`} value={task.priority || "Normal"} onChange={(event) => patchNativeTask(task.id, { priority: event.target.value })}>
+                                {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                              </select>
+                            </td>
+                            <td>
+                              <input className="task-inline-date" type="date" value={task.dueDate || ""} onChange={(event) => patchNativeTask(task.id, { dueDate: event.target.value })} />
+                            </td>
+                            <td>{(task.assignees || []).join(", ") || "—"}</td>
+                            <td className="num">{(task.comments || []).length || ""}</td>
+                            <td className="task-row-actions">
+                              <button className="secondary-button" type="button" onClick={() => setTaskDetailId(task.id)}>Abrir</button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <strong>Aún no hay pendientes en el CMS</strong>
+                  <small>Usa "Generar tareas de la semana" para crear una por local, o crea la primera a mano.</small>
+                </div>
+              )}
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div>
                   <p className="eyebrow">Nuevo pendiente</p>
                   <h2>Crear tarea</h2>
                 </div>
@@ -3964,64 +4025,16 @@ function App() {
                   Fecha límite
                   <input type="date" value={newTask.dueDate} onChange={(event) => setNewTask((current) => ({ ...current, dueDate: event.target.value }))} />
                 </label>
+                <label>
+                  Prioridad
+                  <select value={newTask.priority} onChange={(event) => setNewTask((current) => ({ ...current, priority: event.target.value }))}>
+                    {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                  </select>
+                </label>
                 <button className="primary-button" disabled={workStatus === "loading"} type="submit">
                   <Plus size={17} /> Crear pendiente
                 </button>
               </form>
-            </section>
-
-            <section className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Listado</p>
-                  <h2>Todas las tareas</h2>
-                </div>
-                <div className="task-toolbar">
-                  <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
-                    <option value="all">Todos los estados</option>
-                    {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                  </select>
-                </div>
-              </div>
-              {nativeTasks.length ? (
-                <div className="tasks-table-wrap">
-                  <table className="tasks-table">
-                    <thead>
-                      <tr><th>Tarea</th><th>Estado</th><th>Fecha</th><th>Responsables</th><th className="num">💬</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                      {nativeTasks
-                        .filter((task) => taskStatusFilter === "all" || task.status === taskStatusFilter)
-                        .sort((left, right) => String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999")))
-                        .map((task) => (
-                          <tr key={task.id}>
-                            <td>
-                              <button className="task-name-link" type="button" onClick={() => setTaskDetailId(task.id)}>{task.name}</button>
-                            </td>
-                            <td>
-                              <select className="task-inline-select" value={task.status} onChange={(event) => patchNativeTask(task.id, { status: event.target.value })}>
-                                {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                              </select>
-                            </td>
-                            <td>
-                              <input className="task-inline-date" type="date" value={task.dueDate || ""} onChange={(event) => patchNativeTask(task.id, { dueDate: event.target.value })} />
-                            </td>
-                            <td>{(task.assignees || []).join(", ") || "—"}</td>
-                            <td className="num">{(task.comments || []).length || ""}</td>
-                            <td className="task-row-actions">
-                              <button className="secondary-button" type="button" onClick={() => setTaskDetailId(task.id)}>Abrir</button>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <strong>Aún no hay pendientes en el CMS</strong>
-                  <small>Usa "Generar tareas de la semana" para crear una por local, o crea la primera a mano.</small>
-                </div>
-              )}
             </section>
 
             {taskDetail ? (
@@ -4041,6 +4054,12 @@ function App() {
                     <label>
                       Fecha límite
                       <input type="date" value={taskDetail.dueDate || ""} onChange={(event) => patchNativeTask(taskDetail.id, { dueDate: event.target.value })} />
+                    </label>
+                    <label>
+                      Prioridad
+                      <select value={taskDetail.priority || "Normal"} onChange={(event) => patchNativeTask(taskDetail.id, { priority: event.target.value })}>
+                        {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                      </select>
                     </label>
                   </div>
                   <label className="task-modal-field">

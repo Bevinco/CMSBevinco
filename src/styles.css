@@ -4803,3 +4803,14 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 :root[data-theme="dark"] .task-mention-chip { background: rgba(144, 191, 79, 0.12); border-color: rgba(144, 191, 79, 0.3); color: #b9d98a; }
 :root[data-theme="dark"] .task-week-input, :root[data-theme="dark"] .task-inline-select, :root[data-theme="dark"] .task-inline-date,
 :root[data-theme="dark"] .task-modal select, :root[data-theme="dark"] .task-modal input, :root[data-theme="dark"] .task-modal textarea { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+
+/* Campana en el topbar + prioridades de tareas */
+.topbar { align-items: center; display: flex; justify-content: space-between; }
+.topbar-notif { position: relative; }
+.topbar-notif .notif-bell { background: var(--surface); border: 1px solid #e2dcc9; border-radius: 100px; color: var(--sculpture-charcoal); margin-bottom: 0; min-height: 42px; padding: 0 14px; width: auto; }
+.topbar-notif .notif-bell:hover { border-color: var(--sculpture-green); }
+.topbar-notif .notif-panel { bottom: auto; left: auto; right: 0; top: 110%; }
+.task-priority-urgente { border-color: #f0b9b0 !important; color: #c2371f !important; font-weight: 700; }
+.task-priority-alta { border-color: #ecd9a8 !important; color: #b4750a !important; font-weight: 700; }
+.task-priority-baja { color: var(--text-muted) !important; }
+:root[data-theme="dark"] .topbar-notif .notif-bell { background: var(--surface-soft); border-color: var(--line); color: var(--text); }

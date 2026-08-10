@@ -6651,6 +6651,10 @@ function cleanTaskPatch(body = {}) {
       .slice(0, 8);
   }
   if (body.clientId !== undefined) patch.clientId = String(body.clientId || "");
+  if (body.priority !== undefined) {
+    const priority = String(body.priority);
+    patch.priority = ["Urgente", "Alta", "Normal", "Baja"].includes(priority) ? priority : "Normal";
+  }
   return patch;
 }
 
@@ -6712,6 +6716,7 @@ app.post("/api/module1/tasks", requireAuth, async (request, response) => {
     description: patch.description || "",
     clientId: patch.clientId || "",
     status: patch.status || "Sin Iniciar",
+    priority: patch.priority || "Normal",
     dueDate: patch.dueDate || "",
     assignees: patch.assignees || [],
     comments: [],
