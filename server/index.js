@@ -7725,13 +7725,21 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
       compraPorFamilia: payload.familyPurchases || [],
       sugerenciaPorFamilia: payload.familySuggested || [],
+      // Diccionario para cruzar el detalle (categorias de Sculpture) con las
+      // familias del extracto: sin el, el agente no podia agregar el variance
+      // detallado "por familia" y respondia que le faltaban datos.
+      mapaCategoriaFamilia: payload.client?.categoryFamilies || {},
       sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 10),
       historico: (payload.history || []).slice(0, 4),
     }),
     "",
     "",
     varianceDetailText
-      ? "VARIANCE DETALLADO COMPLETO (todas las filas por producto, separadas por ';'; misma fuente que el archivo 'detailed' de Sculpture):\n" + varianceDetailText
+      ? [
+          "VARIANCE DETALLADO COMPLETO — obtenido AUTOMATICAMENTE desde Sculpture para este cliente y periodo. ES TU FUENTE PRIMARIA y tienes acceso total a el: NUNCA digas que no tienes acceso al variance ni pidas que te lo peguen.",
+          "Notas de lectura: cada fila es un producto bajo su categoria ('Categoria:' encabeza y 'Total Categoria:' cierra). Las 'familias' del extracto de arriba son agrupaciones del CMS sobre estas categorias (usa mapaCategoriaFamilia para cruzar; lo que no aparece en el mapa cae en 'Otros'). Para calculos por familia (cobertura, inventario, usado) agrega las filas del detalle segun ese mapa.",
+          varianceDetailText,
+        ].join("\n")
       : "VARIANCE DETALLADO COMPLETO: no disponible en este momento (Sculpture no respondió); usa el extracto de arriba y acláralo si te preguntan por un SKU que no aparece.",
     "",
     "Análisis/resumen actual del reporte (el usuario puede pedir ajustarlo):",
