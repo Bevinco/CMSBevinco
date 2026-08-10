@@ -5396,6 +5396,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-kpi-value { color: #1a1a1a; font-size: 28px; font-weight: 700; padding: 7px 6px; text-align: center; }
     .bv-arrow { position: absolute; right: -14px; top: 146px; }
     .bv-comments { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 14px; }
+    /* Lo mejor | Desafios lado a lado (pedido de Paulina/Pedro, 10-ago):
+       lectura mas comoda, especialmente en celular. */
+    .bv-comments-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+    .bv-comments-grid .bv-comments { margin-bottom: 0; }
     .bv-ctitle { color: #76a73e; font-size: 16px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
     .bv-citem span { color: #333; }
@@ -5452,7 +5456,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .web-footer { color: ${NAVY}; font-size: 14px; font-weight: 700; margin: 26px auto 0; max-width: 800px; text-align: center; }
     .web-footer b { color: #6b8f2f; }
     @media (max-width: 760px) {
-      .bv-row, .bv-grid2, .bv-stockeff { grid-template-columns: 1fr; }
+      .bv-row, .bv-grid2, .bv-stockeff, .bv-comments-grid { grid-template-columns: 1fr; }
       .bv-head { gap: 8px; grid-template-columns: 1fr; justify-items: center; }
       .bv-arrow { display: none; }
       .bv-title h1 { font-size: 26px; }
@@ -5506,9 +5510,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         ${kpiArrow}
       </aside>
     </section>
-    <section class="bv-comments">
-      ${commentBlock("Lo mejor de la semana:", analysis.bestOfWeek)}
-      ${commentBlock("Los desafíos de la semana:", analysis.weeklyChallenges)}
+    <section class="bv-comments-grid">
+      <div class="bv-comments">
+        ${commentBlock("Lo mejor de la semana:", analysis.bestOfWeek)}
+      </div>
+      <div class="bv-comments">
+        ${commentBlock("Los desafíos de la semana:", analysis.weeklyChallenges)}
+      </div>
     </section>
     <table class="bv-table">
       <thead>
@@ -5621,8 +5629,20 @@ function dynamicReportData(store, report) {
         realCostPercent: 0,
       }))).slice(0, 10);
   const lastHistory = history[history.length - 1] || {};
+  // Sugerencia emitida la semana ANTERIOR a la primera del historico: llena el
+  // primer punto de la linea "Compra sugerida" del grafico web (antes quedaba
+  // vacio; pedido de Pedro, reunion 10-ago).
+  const firstEndsAt = String(history[0]?.endsAt || "");
+  const priorForLine = firstEndsAt
+    ? (store.reports || [])
+        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && (candidate.summary?.suggestedCost || 0) > 0)
+        .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
+        .filter(({ period }) => period?.endsAt && String(period.endsAt) < firstEndsAt && !String(period.id || "").startsWith("mensual-"))
+        .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]
+    : null;
   return {
     reportId: report.id,
+    prevSuggestedCost: priorForLine?.candidate.summary?.suggestedCost || 0,
     monthly: Boolean(report.monthly || payload.isAccumulated),
     client: {
       name: payload.client?.accountName || payload.client?.name || report.clientId,
@@ -6040,7 +6060,7 @@ function renderDynamicReportHtml(store, report) {
     var h = data.history;
     var labels = h.map(function (p) { return ddmm(p.endsAt) || p.label; });
     var purchased = h.map(function (p) { return p.purchasedCost || null; });
-    var suggested = [null].concat(h.slice(0, -1).map(function (p) { return p.suggestedCost || null; }));
+    var suggested = [data.prevSuggestedCost || null].concat(h.slice(0, -1).map(function (p) { return p.suggestedCost || null; }));
     var nextSuggested = h.length && h[h.length - 1].suggestedCost ? h[h.length - 1].suggestedCost : null;
     if (nextSuggested) { labels = labels.concat(["Próx. semana"]); purchased = purchased.concat([null]); suggested = suggested.concat([nextSuggested]); }
     charts.buy = new Chart(document.getElementById("buyChart"), {
@@ -8138,7 +8158,124 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       period = firstResult.period;
       items = firstResult.items;
     }
-    if (String(request.query.format || "") === "csv") {
+    const exportFormat = String(request.query.format || "");
+    if (exportFormat === "xlsx") {
+      // Excel con estilos (decision de la reunion 10-ago: reemplaza al CSV
+      // plano). Carga perezosa de exceljs para no gastar memoria en el boot.
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Sugerencia", { views: [{ showGridLines: false }] });
+      const NAVY_X = "FF001E43";
+      const GREEN_X = "FF90BF4F";
+      const CREAM_X = "FFF7F4EA";
+      const RED_X = "FFC2371F";
+      const money0 = '"$"#,##0';
+      sheet.columns = [
+        { width: 34 }, { width: 38 }, { width: 14 }, { width: 14 }, { width: 12 },
+        { width: 10 }, { width: 15 }, { width: 18 }, { width: 15 }, { width: 26 },
+      ];
+      const titleRow = sheet.addRow([`SUGERENCIA DE COMPRA · ${client.name || client.id} · ${period.label || period.id}`]);
+      sheet.mergeCells(titleRow.number, 1, titleRow.number, 10);
+      titleRow.height = 26;
+      titleRow.getCell(1).style = {
+        font: { bold: true, size: 13, color: { argb: NAVY_X } },
+        fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF5E5" } },
+        alignment: { vertical: "middle", horizontal: "left", indent: 1 },
+      };
+      sheet.addRow([]);
+      const headerCells = ["Proveedor", "Producto", "Tamaño", "Costo unit.", "Inventario", "PAR", "Compra sugerida", "Costo de la compra", "Días de inventario", "Alerta"];
+      const addHeader = (labels) => {
+        const row = sheet.addRow(labels);
+        row.height = 20;
+        row.eachCell((cell) => {
+          cell.style = {
+            font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } },
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: NAVY_X } },
+            alignment: { vertical: "middle", horizontal: "center", wrapText: true },
+          };
+        });
+        return row;
+      };
+      addHeader(headerCells);
+      const toBuy = items.filter((item) => item.suggested > 0);
+      const withExcess = items.filter((item) => !(item.suggested > 0) && item.excessCost > 0);
+      const moneyCell = (cell) => { cell.numFmt = money0; cell.alignment = { horizontal: "right" }; };
+      let lastProvider = "";
+      let providerTotal = 0;
+      let orderTotal = 0;
+      let zebra = false;
+      const pushSubtotal = () => {
+        if (!lastProvider) return;
+        const row = sheet.addRow(["", `Subtotal ${lastProvider}`, "", "", "", "", "", providerTotal, "", ""]);
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.style = { font: { bold: true, size: 10, color: { argb: NAVY_X } }, fill: { type: "pattern", pattern: "solid", fgColor: { argb: CREAM_X } } };
+        });
+        moneyCell(row.getCell(8));
+        row.getCell(8).font = { bold: true, color: { argb: NAVY_X } };
+      };
+      for (const item of toBuy) {
+        if (item.provider !== lastProvider) {
+          pushSubtotal();
+          providerTotal = 0;
+          zebra = false;
+        }
+        const row = sheet.addRow([
+          item.provider !== lastProvider ? item.provider : "",
+          item.name, item.size, Math.round(item.unitCost || 0), Number((item.onHand || 0).toFixed(2)),
+          Number((item.par || 0).toFixed(2)), Number((item.suggested || 0).toFixed(2)), Math.round(item.orderCost || 0),
+          Number((item.inventoryDays || 0).toFixed(1)), item.alerta || "",
+        ]);
+        if (zebra) row.eachCell({ includeEmpty: true }, (cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFBF9F3" } }; });
+        zebra = !zebra;
+        row.getCell(1).font = { bold: true, size: 10 };
+        row.getCell(7).font = { bold: true };
+        moneyCell(row.getCell(4));
+        moneyCell(row.getCell(8));
+        row.getCell(10).font = { size: 9, color: { argb: RED_X } };
+        lastProvider = item.provider;
+        providerTotal += item.orderCost || 0;
+        orderTotal += item.orderCost || 0;
+      }
+      pushSubtotal();
+      const totalRow = sheet.addRow(["", "TOTAL DEL PEDIDO", "", "", "", "", "", orderTotal, "", ""]);
+      totalRow.height = 22;
+      totalRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.style = { font: { bold: true, size: 11, color: { argb: NAVY_X } }, fill: { type: "pattern", pattern: "solid", fgColor: { argb: GREEN_X } }, alignment: { vertical: "middle" } };
+      });
+      moneyCell(totalRow.getCell(8));
+      totalRow.getCell(8).font = { bold: true, size: 11, color: { argb: NAVY_X } };
+      if (withExcess.length) {
+        sheet.addRow([]);
+        const excessTitle = sheet.addRow(["EXCESO DE INVENTARIO (capital inmovilizado — no comprar)"]);
+        sheet.mergeCells(excessTitle.number, 1, excessTitle.number, 10);
+        excessTitle.getCell(1).style = { font: { bold: true, size: 11, color: { argb: RED_X } } };
+        const excessHeader = sheet.addRow(["Proveedor", "Producto", "Tamaño", "Inventario", "Inventario al costo", "Días de inventario", "Exceso ($)"]);
+        excessHeader.eachCell((cell) => {
+          cell.style = {
+            font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } },
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF64796F" } },
+            alignment: { vertical: "middle", horizontal: "center" },
+          };
+        });
+        for (const item of withExcess) {
+          const row = sheet.addRow([
+            item.provider, item.name, item.size, Number((item.onHand || 0).toFixed(2)),
+            Math.round(item.onHandCost || 0), Number((item.inventoryDays || 0).toFixed(1)), Math.round(item.excessCost || 0),
+          ]);
+          moneyCell(row.getCell(5));
+          moneyCell(row.getCell(7));
+          row.getCell(7).font = { bold: true, color: { argb: RED_X } };
+        }
+      }
+      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}`
+        .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
+      const buffer = await workbook.xlsx.writeBuffer();
+      response.setHeader("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      response.setHeader("content-disposition", `attachment; filename="${fileName}.xlsx"`);
+      response.send(Buffer.from(buffer));
+      return;
+    }
+    if (exportFormat === "csv") {
       const escapeCsv = (value) => {
         const text = String(value ?? "");
         return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;

@@ -3529,8 +3529,8 @@ function App() {
               </div>
               <div className="action-row wrap-actions">
                 {comprasData ? (
-                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=csv${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
-                    <Printer size={17} /> Descargar CSV para enviar
+                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=xlsx${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
+                    <FileSpreadsheet size={17} /> Descargar Excel para enviar
                   </a>
                 ) : null}
               </div>
