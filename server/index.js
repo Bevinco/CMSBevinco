@@ -6692,8 +6692,43 @@ function notifyUsers(store, { users, text, taskId, author }) {
   }
 }
 
+// Fecha "hoy" en horario de Chile: el servidor corre en UTC y marcaria las
+// tareas como vencidas 4 horas antes de la medianoche real del equipo.
+function todayInChile() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(new Date());
+}
+
+// Tareas vencidas: al detectarse por primera vez se notifica a los
+// responsables (campana + correo si esta configurado), una sola vez por
+// vencimiento; si la fecha se mueve al futuro, la alerta se rearma.
+function checkOverdueTasks(store) {
+  const today = todayInChile();
+  let changed = false;
+  for (const task of store.tasks || []) {
+    const overdue = Boolean(task.dueDate) && task.dueDate < today && !["Reporte Enviado", "Cancelada"].includes(task.status);
+    if (overdue && !task.overdueNotifiedAt) {
+      task.overdueNotifiedAt = new Date().toISOString();
+      if ((task.assignees || []).length) {
+        notifyUsers(store, {
+          users: task.assignees,
+          text: `Tarea VENCIDA: "${task.name}" (vencía el ${task.dueDate})`,
+          taskId: task.id,
+          author: "",
+        });
+      }
+      changed = true;
+    }
+    if (!overdue && task.overdueNotifiedAt) {
+      task.overdueNotifiedAt = "";
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 app.get("/api/module1/tasks", requireAuth, async (request, response) => {
   const store = await readStore();
+  if (checkOverdueTasks(store)) await writeStore(store);
   const me = request.session?.email || request.session?.username || "";
   response.json({
     tasks: store.tasks,

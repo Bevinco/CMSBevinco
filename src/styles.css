@@ -4853,3 +4853,9 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .task-status-select { font-weight: 700; }
 .kanban-board { margin-top: 4px; }
 :root[data-theme="dark"] .task-search { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+
+/* Tareas vencidas: chip rojo, contador y fecha marcada */
+.kanban-chip.kanban-overdue { background: #fdeae7; color: #c2371f; }
+.overdue-pill { background: #fdeae7; border-radius: 999px; color: #c2371f; font-weight: 800; margin-left: 8px; padding: 2px 10px; }
+.task-inline-date.is-overdue { border-color: #f0b9b0; color: #c2371f; font-weight: 700; }
+:root[data-theme="dark"] .kanban-chip.kanban-overdue, :root[data-theme="dark"] .overdue-pill { background: rgba(210, 63, 49, 0.16); color: #f08a7c; }

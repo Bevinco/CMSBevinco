@@ -827,14 +827,23 @@ const TASK_STATUS_COLORS: Record<string, string> = {
   "Cancelada": "#c9b26a",
 };
 
+function isTaskOverdue(task: NativeTask) {
+  if (!task.dueDate) return false;
+  if (["Reporte Enviado", "Cancelada"].includes(task.status)) return false;
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return task.dueDate < today;
+}
+
 function TaskCardContent({ task }: { task: NativeTask }) {
   const priority = task.priority || "Normal";
+  const overdue = isTaskOverdue(task);
   return (
     <>
       <strong>{task.name}</strong>
       <span className="kanban-card-meta">
         {task.dueDate ? (
-          <i className="kanban-chip">{task.dueDate.slice(8, 10)}/{task.dueDate.slice(5, 7)}</i>
+          <i className={`kanban-chip ${overdue ? "kanban-overdue" : ""}`}>{overdue ? "Vencida · " : ""}{task.dueDate.slice(8, 10)}/{task.dueDate.slice(5, 7)}</i>
         ) : null}
         {priority !== "Normal" ? (
           <i className={`kanban-chip kanban-priority-${priority.toLowerCase()}`}>{priority}</i>
@@ -4046,7 +4055,12 @@ function App() {
                 <div>
                   <p className="eyebrow">Equipo Bevinco</p>
                   <h2>Pendientes de auditoría</h2>
-                  <small className="clickup-list-note">{nativeTasks.length} tarea(s) en el CMS · sin depender de ClickUp</small>
+                  <small className="clickup-list-note">
+                    {nativeTasks.length} tarea(s) en el CMS
+                    {nativeTasks.filter(isTaskOverdue).length ? (
+                      <span className="overdue-pill">{nativeTasks.filter(isTaskOverdue).length} vencida(s)</span>
+                    ) : null}
+                  </small>
                 </div>
                 <div className="action-row wrap-actions">
                   <label className="task-week-field">
@@ -4130,7 +4144,7 @@ function App() {
                               </select>
                             </td>
                             <td>
-                              <input className="task-inline-date" type="date" value={task.dueDate || ""} onChange={(event) => patchNativeTask(task.id, { dueDate: event.target.value })} />
+                              <input className={`task-inline-date ${isTaskOverdue(task) ? "is-overdue" : ""}`} type="date" value={task.dueDate || ""} onChange={(event) => patchNativeTask(task.id, { dueDate: event.target.value })} />
                             </td>
                             <td>{(task.assignees || []).join(", ") || "—"}</td>
                             <td className="num">{(task.comments || []).length || ""}</td>
