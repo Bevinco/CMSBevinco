@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createPortal } from "react-dom";
 import {
   BarChart3,
+  Bell,
   Bot,
   Building2,
   CalendarDays,
@@ -274,7 +275,29 @@ type ClickupTask = {
   tagDetails?: Array<{ name: string; bg?: string; fg?: string }>;
   subtasks: number;
   dateUpdated?: number | null;
+  // Tareas del modulo de pendientes nativo mostradas en el mismo tablero.
+  native?: boolean;
 };
+
+type NativeTask = {
+  id: string;
+  name: string;
+  description: string;
+  clientId: string;
+  status: string;
+  dueDate: string;
+  assignees: string[];
+  comments: Array<{ id: string; author: string; text: string; at: string }>;
+  createdBy?: string;
+  updatedAt?: string;
+};
+
+type TaskNotification = { id: string; user: string; text: string; taskId: string; at: string; read: boolean };
+
+const NATIVE_TASK_STATUSES = [
+  "Sin Iniciar", "Falta Información", "En Proceso", "Gráficos Actualizados",
+  "Comentarios Escritos", "Listo para el Reporte", "Reporte Enviado", "Cancelada",
+];
 
 type ClickupMember = { id?: number; username?: string; email?: string; initials?: string; color?: string };
 type ClickupListStatus = { id?: string; status: string; color?: string; type?: string };
@@ -1046,6 +1069,7 @@ function App() {
   function applyBootstrapPayload(payload: BootstrapPayload) {
     if (payload.backupStatus) setBackupStatus(payload.backupStatus);
     if ((payload as { aiModels?: { reports?: string; chat?: string } }).aiModels) setAiModels((payload as { aiModels?: { reports?: string; chat?: string } }).aiModels || null);
+    loadNativeTasks();
     setClients(payload.clients);
     setPeriods(payload.periods);
     setReports(payload.reports);
@@ -1421,6 +1445,178 @@ function App() {
     } finally {
       setDistilling(false);
     }
+  }
+
+  // ===== Modulo de pendientes nativo =====
+  const [nativeTasks, setNativeTasks] = useState<NativeTask[]>([]);
+  const [taskUsers, setTaskUsers] = useState<Array<{ name: string; email: string }>>([]);
+  const [taskNotifications, setTaskNotifications] = useState<TaskNotification[]>([]);
+  const [taskDetailId, setTaskDetailId] = useState("");
+  const [taskCommentDraft, setTaskCommentDraft] = useState("");
+  const [taskStatusFilter, setTaskStatusFilter] = useState("all");
+  const [generateWeekDate, setGenerateWeekDate] = useState("");
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "" });
+
+  const taskDetail = nativeTasks.find((task) => task.id === taskDetailId) || null;
+  const unreadNotifications = taskNotifications.filter((item) => !item.read);
+
+  const nativeBoardTasks = useMemo<ClickupTask[]>(() => nativeTasks
+    .filter((task) => task.status !== "Cancelada")
+    .map((task) => ({
+      id: task.id,
+      name: task.name,
+      status: task.status,
+      statusColor: WORKFLOW_COLUMNS.find((column) => column.title === task.status)?.color || "#9db0aa",
+      assignees: (task.assignees || []).map((person) => ({ username: person, initials: person.slice(0, 2) })),
+      dueDate: task.dueDate ? new Date(`${task.dueDate}T12:00:00`).getTime() : null,
+      tags: [],
+      tagDetails: [],
+      subtasks: 0,
+      native: true,
+    })), [nativeTasks]);
+
+  async function loadNativeTasks() {
+    try {
+      const payload = await readJson<{ tasks: NativeTask[]; users: Array<{ name: string; email: string }>; notifications: TaskNotification[] }>(
+        await fetch("/api/module1/tasks"),
+      );
+      setNativeTasks(payload.tasks || []);
+      setTaskUsers(payload.users || []);
+      setTaskNotifications((payload.notifications || []).sort((a, b) => b.at.localeCompare(a.at)));
+    } catch {
+      // sin tareas nativas: el tablero cae a ClickUp
+    }
+  }
+
+  async function patchNativeTask(taskId: string, patch: Partial<NativeTask>) {
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch(`/api/module1/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(patch),
+        }),
+      );
+      setNativeTasks(payload.tasks || []);
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "No se pudo actualizar la tarea.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function createNativeTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newTask.name.trim()) {
+      setError("El pendiente necesita un nombre.");
+      setWorkStatus("error");
+      return;
+    }
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch("/api/module1/tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: newTask.name,
+            description: newTask.description,
+            status: newTask.status,
+            dueDate: newTask.dueDate,
+            assignees: newTask.assignee ? [newTask.assignee] : [],
+          }),
+        }),
+      );
+      setNativeTasks(payload.tasks || []);
+      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "" });
+      setError("Pendiente creado.");
+      setWorkStatus("ready");
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "No se pudo crear la tarea.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function generateWeekTasks() {
+    if (!generateWeekDate) return;
+    setWorkStatus("loading");
+    setError("Generando las tareas de la semana (una por local activo)...");
+    try {
+      const payload = await readJson<{ created: number; tasks: NativeTask[] }>(
+        await fetch("/api/module1/tasks/generate-week", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ dueDate: generateWeekDate }),
+        }),
+      );
+      setNativeTasks(payload.tasks || []);
+      setError(`${payload.created} tarea(s) creadas para la semana del ${generateWeekDate}.`);
+      setWorkStatus("ready");
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "No se pudieron generar las tareas.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function deleteNativeTask(taskId: string) {
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch(`/api/module1/tasks/${taskId}`, { method: "DELETE" }),
+      );
+      setNativeTasks(payload.tasks || []);
+      if (taskDetailId === taskId) setTaskDetailId("");
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "No se pudo eliminar la tarea.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function sendTaskComment(taskId: string) {
+    const text = taskCommentDraft.trim();
+    if (!text) return;
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch(`/api/module1/tasks/${taskId}/comments`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text }),
+        }),
+      );
+      setNativeTasks(payload.tasks || []);
+      setTaskCommentDraft("");
+    } catch (commentError) {
+      setError(commentError instanceof Error ? commentError.message : "No se pudo enviar el comentario.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function markNotificationsRead() {
+    const ids = unreadNotifications.map((item) => item.id);
+    if (!ids.length) return;
+    try {
+      const payload = await readJson<{ notifications: TaskNotification[] }>(
+        await fetch("/api/module1/notifications/read", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids }),
+        }),
+      );
+      setTaskNotifications((payload.notifications || []).sort((a, b) => b.at.localeCompare(a.at)));
+    } catch {
+      // silencioso: se reintenta al recargar
+    }
+  }
+
+  async function moveBoardTask(task: ClickupTask, statusTitle: string) {
+    if (task.native) {
+      await patchNativeTask(task.id, { status: statusTitle });
+      return;
+    }
+    moveClickupTask(task, statusTitle);
+  }
+
+  function openTaskFromBoard(taskId: string) {
+    setTaskDetailId(taskId);
+    navigateTo("tasks");
   }
 
   const [savingDistribution, setSavingDistribution] = useState(false);
@@ -2537,6 +2733,33 @@ function App() {
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
           {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
         </nav>
+        <div className="sidebar-notif">
+          <button className="notif-bell" type="button" onClick={() => { setNotifOpen((current) => !current); }}>
+            <Bell size={16} /> Notificaciones
+            {unreadNotifications.length ? <span className="notif-badge">{unreadNotifications.length}</span> : null}
+          </button>
+          {notifOpen ? (
+            <div className="notif-panel">
+              <header>
+                <strong>Notificaciones</strong>
+                {unreadNotifications.length ? (
+                  <button type="button" onClick={markNotificationsRead}>Marcar leídas</button>
+                ) : null}
+              </header>
+              {taskNotifications.length ? taskNotifications.slice(0, 20).map((item) => (
+                <button
+                  className={`notif-item ${item.read ? "" : "is-unread"}`}
+                  key={item.id}
+                  type="button"
+                  onClick={() => { setNotifOpen(false); openTaskFromBoard(item.taskId); }}
+                >
+                  <span>{item.text}</span>
+                  <small>{new Date(item.at).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
+                </button>
+              )) : <p className="notif-empty">Sin notificaciones. Te avisaremos cuando te mencionen o asignen una tarea.</p>}
+            </div>
+          ) : null}
+        </div>
         <div className="sidebar-user">
           {userMenuOpen ? (
             <div className="user-menu" role="menu">
@@ -2644,7 +2867,9 @@ function App() {
               </div>
               {(() => {
                 const windowStart = Date.now() - WORKFLOW_WINDOW_DAYS * 86400000;
-                const boardTasks = (calendarTasks.length ? calendarTasks : clickupTasks)
+                // Fuente del tablero: tareas NATIVAS del CMS; ClickUp queda de
+                // respaldo mientras dura la transicion (reunion 10-ago).
+                const boardTasks = (nativeBoardTasks.length ? nativeBoardTasks : calendarTasks.length ? calendarTasks : clickupTasks)
                   .filter((task) => !WORKFLOW_HIDDEN_STATUS.test(task.status || ""))
                   .filter((task) => !task.dueDate || task.dueDate >= windowStart);
                 // Cada tarea cae en UNA sola columna: la primera cuyo regex
@@ -2678,10 +2903,17 @@ function App() {
                               const dueTone = !due ? "" : due < todayStart ? "overdue" : due < todayStart + 2 * 86400000 ? "soon" : "";
                               return (
                                 <article className="workflow-card" key={task.id}>
-                                  <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
-                                    <strong>{task.name}</strong>
-                                    <ExternalLink size={13} />
-                                  </a>
+                                  {task.native ? (
+                                    <button className="workflow-card-open workflow-card-native" type="button" title="Abrir pendiente" onClick={() => openTaskFromBoard(task.id)}>
+                                      <strong>{task.name}</strong>
+                                      <ListChecks size={13} />
+                                    </button>
+                                  ) : (
+                                    <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
+                                      <strong>{task.name}</strong>
+                                      <ExternalLink size={13} />
+                                    </a>
+                                  )}
                                   <div className="workflow-card-meta">
                                     <span className={`workflow-due ${dueTone}`}>
                                       {due ? `${dueTone === "overdue" ? "Atrasada · " : ""}${shortDate(due)}` : "Sin fecha"}
@@ -2690,7 +2922,7 @@ function App() {
                                   <select
                                     aria-label={`Mover ${task.name} de estado`}
                                     value={column.match ? column.title : ""}
-                                    onChange={(event) => moveClickupTask(task, event.target.value)}
+                                    onChange={(event) => moveBoardTask(task, event.target.value)}
                                   >
                                     {/* "Otros" es el catch-all: no es un estado de ClickUp
                                         y por lo tanto no es un destino valido. Se muestra
@@ -2756,7 +2988,7 @@ function App() {
                     const day = new Date(monday);
                     day.setDate(monday.getDate() + index);
                     const dayKey = day.toDateString();
-                    const sourceTasks = calendarTasks.length ? calendarTasks : clickupTasks;
+                    const sourceTasks = nativeBoardTasks.length ? nativeBoardTasks : calendarTasks.length ? calendarTasks : clickupTasks;
                     const dayTasks = sourceTasks.filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey);
                     const isToday = dayKey === today.toDateString();
                     return (
@@ -2767,8 +2999,8 @@ function App() {
                         </header>
                         {dayTasks.length ? dayTasks.map((task) => {
                           const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
-                          return (
-                            <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer" style={{ borderLeftColor: accent }}>
+                          const inner = (
+                            <>
                               <strong>{task.name}</strong>
                               <span className="week-task-tags">
                                 {(task.tagDetails || []).slice(0, 3).map((tag) => (
@@ -2788,6 +3020,15 @@ function App() {
                                   ))}
                                 </span>
                               </span>
+                            </>
+                          );
+                          return task.native ? (
+                            <button className="week-task week-task-native" key={task.id} type="button" style={{ borderLeftColor: accent }} onClick={() => openTaskFromBoard(task.id)}>
+                              {inner}
+                            </button>
+                          ) : (
+                            <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer" style={{ borderLeftColor: accent }}>
+                              {inner}
                             </a>
                           );
                         }) : <p className="workflow-empty">—</p>}
@@ -3669,86 +3910,59 @@ function App() {
 
         {activeView === "tasks" ? (
           <section className="tasks-module">
-
-            <section className="panel clickup-panel">
+            <section className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">ClickUp</p>
-                  <h2>Pendientes de auditoría y reportes</h2>
-                  <small className="clickup-list-note">
-                    Lista: {clickupMeta.list?.name || "Auditorias Chile"} · {clickupTasks.length} tarea(s)
-                  </small>
+                  <p className="eyebrow">Equipo Bevinco</p>
+                  <h2>Pendientes de auditoría</h2>
+                  <small className="clickup-list-note">{nativeTasks.length} tarea(s) en el CMS · sin depender de ClickUp</small>
                 </div>
                 <div className="action-row wrap-actions">
-                  <button className="secondary-button" disabled={workStatus === "loading"} onClick={() => loadClickupTasks(clickupPage, clickupStatusFilter)}>
-                    <RefreshCw size={17} /> Actualizar
+                  <input className="task-week-input" title="Fecha de auditoría de la semana" type="date" value={generateWeekDate} onChange={(event) => setGenerateWeekDate(event.target.value)} />
+                  <button className="primary-button" disabled={!generateWeekDate || workStatus === "loading"} onClick={generateWeekTasks} type="button">
+                    <CalendarDays size={17} /> Generar tareas de la semana
                   </button>
-                  <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={createClickupTask}>
-                    <Plus size={17} /> Crear tarea del reporte
+                  <button className="secondary-button" type="button" onClick={loadNativeTasks}>
+                    <RefreshCw size={17} /> Actualizar
                   </button>
                 </div>
               </div>
-              {!clickupStatus?.connected ? (
-                <p className="query-note">ClickUp aún no está conectado. Avisa al administrador para activarlo.</p>
-              ) : null}
+              <p className="muted-copy">"Generar" crea una tarea por cada local activo con la fecha elegida (no duplica semanas ya creadas). El tablero del Inicio y el calendario se alimentan de estas tareas; los comentarios con @nombre notifican a esa persona.</p>
             </section>
 
             <section className="panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Nuevo pendiente</p>
-                  <h2>Crear tarea en ClickUp</h2>
+                  <h2>Crear tarea</h2>
                 </div>
                 <Plus size={22} />
               </div>
-              <form className="pending-form" onSubmit={createManualClickupTask}>
+              <form className="pending-form" onSubmit={createNativeTask}>
                 <label>
                   Nombre del pendiente
-                  <input
-                    placeholder="Ej. Revisar reporte Bardot - Barra"
-                    value={newPending.name}
-                    onChange={(event) => setNewPending((current) => ({ ...current, name: event.target.value }))}
-                  />
+                  <input placeholder="Ej. Revisar reporte Bardot - Barra" value={newTask.name} onChange={(event) => setNewTask((current) => ({ ...current, name: event.target.value }))} />
                 </label>
                 <label className="wide-field">
                   Descripción
-                  <textarea
-                    placeholder="Detalle operativo, contexto, links o criterios para resolverlo."
-                    value={newPending.description}
-                    onChange={(event) => setNewPending((current) => ({ ...current, description: event.target.value }))}
-                  />
+                  <textarea placeholder="Detalle operativo, contexto o criterios para resolverlo." value={newTask.description} onChange={(event) => setNewTask((current) => ({ ...current, description: event.target.value }))} />
                 </label>
                 <label>
                   Estado
-                  <select value={newPending.status} onChange={(event) => setNewPending((current) => ({ ...current, status: event.target.value }))}>
-                    {clickupStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                  <select value={newTask.status} onChange={(event) => setNewTask((current) => ({ ...current, status: event.target.value }))}>
+                    {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
                 </label>
                 <label>
                   Responsable
-                  <select value={newPending.assignee} onChange={(event) => setNewPending((current) => ({ ...current, assignee: event.target.value }))}>
+                  <select value={newTask.assignee} onChange={(event) => setNewTask((current) => ({ ...current, assignee: event.target.value }))}>
                     <option value="">Sin responsable</option>
-                    {clickupMeta.members.map((member) => (
-                      <option key={member.id || member.email} value={member.id}>{member.username || member.email}</option>
-                    ))}
+                    {taskUsers.map((user) => <option key={user.email || user.name} value={user.email || user.name}>{user.name}</option>)}
                   </select>
                 </label>
                 <label>
                   Fecha límite
-                  <input type="date" value={newPending.dueDate} onChange={(event) => setNewPending((current) => ({ ...current, dueDate: event.target.value }))} />
-                </label>
-                <label>
-                  Hora
-                  <input type="time" value={newPending.dueTime} onChange={(event) => setNewPending((current) => ({ ...current, dueTime: event.target.value }))} />
-                </label>
-                <label>
-                  Prioridad
-                  <select value={newPending.priority} onChange={(event) => setNewPending((current) => ({ ...current, priority: event.target.value }))}>
-                    <option value="1">Urgente</option>
-                    <option value="2">Alta</option>
-                    <option value="3">Normal</option>
-                    <option value="4">Baja</option>
-                  </select>
+                  <input type="date" value={newTask.dueDate} onChange={(event) => setNewTask((current) => ({ ...current, dueDate: event.target.value }))} />
                 </label>
                 <button className="primary-button" disabled={workStatus === "loading"} type="submit">
                   <Plus size={17} /> Crear pendiente
@@ -3759,100 +3973,141 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Flujo ClickUp</p>
-                  <h2>Tablero de pendientes</h2>
+                  <p className="eyebrow">Listado</p>
+                  <h2>Todas las tareas</h2>
                 </div>
                 <div className="task-toolbar">
-                  <select
-                    value={clickupStatusFilter}
-                    onChange={(event) => {
-                      setClickupStatusFilter(event.target.value);
-                      loadClickupTasks(0, event.target.value);
-                    }}
-                  >
-                    <option value="important">Estados operativos</option>
+                  <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
                     <option value="all">Todos los estados</option>
-                    {clickupStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                    {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
-                  <span className="board-page-note">5 por columna</span>
                 </div>
               </div>
-              <p className="muted-copy">Estados recomendados para ver hoy: falta informacion, auditoria en proceso, graficos actualizados, listo para reporte, comentarios escritos, reporte enviado y cancelado. Inactiva queda fuera del filtro operativo porque suele acumular ruido.</p>
-              {clickupTasksByStatus.length ? (
-                <div className="clickup-board">
-                  {clickupTasksByStatus.map(([status, tasks]) => (
-                    <article className="clickup-column" key={status}>
-                      <div className="clickup-column-header">
-                        <span>{status}</span>
-                        <strong>{tasks.length}</strong>
-                      </div>
-                      <div className="clickup-task-list">
-                        {tasks
-                          .slice(
-                            (clickupColumnPages[status] || 0) * tasksPerColumn,
-                            ((clickupColumnPages[status] || 0) + 1) * tasksPerColumn,
-                          )
-                          .map((task) => {
-                          const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
-                          return (
-                          <a className="week-task" href={task.url} key={task.id} target="_blank" rel="noreferrer" style={{ borderLeftColor: accent }}>
-                            <strong>{task.name}</strong>
-                            <span className="week-task-tags">
-                              {(task.tagDetails || []).slice(0, 3).map((tag) => (
-                                <i className="week-tag" key={tag.name} style={{ backgroundColor: tag.bg ? `${tag.bg}22` : undefined, color: tag.bg || undefined }}>
-                                  {tag.name}
-                                </i>
-                              ))}
-                            </span>
-                            <span className="week-task-foot">
-                              <i className="week-status-dot" style={{ backgroundColor: task.statusColor || "#9db0aa" }} />
-                              <small>{task.dueDate ? shortDate(task.dueDate) : task.status}</small>
-                              <span className="week-avatars">
-                                {(task.assignees || []).slice(0, 3).map((person) => (
-                                  <b key={`${task.id}-${person.id || person.initials || person.email}`} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
-                                    {(person.initials || person.username || "?").slice(0, 2).toUpperCase()}
-                                  </b>
-                                ))}
-                              </span>
-                            </span>
-                          </a>
-                          );
-                        })}
-                      </div>
-                      {tasks.length > tasksPerColumn ? (
-                        <div className="column-pager">
-                          <button
-                            className="secondary-button"
-                            disabled={(clickupColumnPages[status] || 0) === 0}
-                            onClick={() => setClickupColumnPages((current) => ({
-                              ...current,
-                              [status]: Math.max(0, (current[status] || 0) - 1),
-                            }))}
-                          >
-                            Anterior
-                          </button>
-                          <span>
-                            {(clickupColumnPages[status] || 0) + 1} / {Math.ceil(tasks.length / tasksPerColumn)}
-                          </span>
-                          <button
-                            className="secondary-button"
-                            disabled={(clickupColumnPages[status] || 0) >= Math.ceil(tasks.length / tasksPerColumn) - 1}
-                            onClick={() => setClickupColumnPages((current) => ({
-                              ...current,
-                              [status]: Math.min(Math.ceil(tasks.length / tasksPerColumn) - 1, (current[status] || 0) + 1),
-                            }))}
-                          >
-                            Siguiente
-                          </button>
-                        </div>
-                      ) : null}
-                    </article>
-                  ))}
+              {nativeTasks.length ? (
+                <div className="tasks-table-wrap">
+                  <table className="tasks-table">
+                    <thead>
+                      <tr><th>Tarea</th><th>Estado</th><th>Fecha</th><th>Responsables</th><th className="num">💬</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {nativeTasks
+                        .filter((task) => taskStatusFilter === "all" || task.status === taskStatusFilter)
+                        .sort((left, right) => String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999")))
+                        .map((task) => (
+                          <tr key={task.id}>
+                            <td>
+                              <button className="task-name-link" type="button" onClick={() => setTaskDetailId(task.id)}>{task.name}</button>
+                            </td>
+                            <td>
+                              <select className="task-inline-select" value={task.status} onChange={(event) => patchNativeTask(task.id, { status: event.target.value })}>
+                                {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                              </select>
+                            </td>
+                            <td>
+                              <input className="task-inline-date" type="date" value={task.dueDate || ""} onChange={(event) => patchNativeTask(task.id, { dueDate: event.target.value })} />
+                            </td>
+                            <td>{(task.assignees || []).join(", ") || "—"}</td>
+                            <td className="num">{(task.comments || []).length || ""}</td>
+                            <td className="task-row-actions">
+                              <button className="secondary-button" type="button" onClick={() => setTaskDetailId(task.id)}>Abrir</button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
-                <p className="muted-copy">Aun no hay tareas cargadas desde ClickUp. Verifica la conexion y actualiza tareas.</p>
+                <div className="empty-state">
+                  <strong>Aún no hay pendientes en el CMS</strong>
+                  <small>Usa "Generar tareas de la semana" para crear una por local, o crea la primera a mano.</small>
+                </div>
               )}
             </section>
+
+            {taskDetail ? (
+              <div className="task-modal-backdrop" onClick={() => setTaskDetailId("")}>
+                <div className="task-modal" onClick={(event) => event.stopPropagation()}>
+                  <header className="task-modal-head">
+                    <input value={taskDetail.name} onChange={(event) => patchNativeTask(taskDetail.id, { name: event.target.value })} />
+                    <button aria-label="Cerrar" type="button" onClick={() => setTaskDetailId("")}>×</button>
+                  </header>
+                  <div className="task-modal-grid">
+                    <label>
+                      Estado
+                      <select value={taskDetail.status} onChange={(event) => patchNativeTask(taskDetail.id, { status: event.target.value })}>
+                        {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Fecha límite
+                      <input type="date" value={taskDetail.dueDate || ""} onChange={(event) => patchNativeTask(taskDetail.id, { dueDate: event.target.value })} />
+                    </label>
+                  </div>
+                  <label className="task-modal-field">
+                    Responsables
+                    <div className="task-assignees">
+                      {taskUsers.map((user) => {
+                        const key = user.email || user.name;
+                        const active = (taskDetail.assignees || []).includes(key);
+                        return (
+                          <button
+                            className={`task-assignee-chip ${active ? "active" : ""}`}
+                            key={key}
+                            type="button"
+                            onClick={() => patchNativeTask(taskDetail.id, {
+                              assignees: active
+                                ? (taskDetail.assignees || []).filter((item) => item !== key)
+                                : [...(taskDetail.assignees || []), key],
+                            })}
+                          >
+                            {user.name}
+                          </button>
+                        );
+                      })}
+                      {!taskUsers.length ? <small>Crea usuarios en el módulo Usuarios para poder asignar y mencionar.</small> : null}
+                    </div>
+                  </label>
+                  <label className="task-modal-field">
+                    Descripción
+                    <textarea rows={3} value={taskDetail.description || ""} onChange={(event) => patchNativeTask(taskDetail.id, { description: event.target.value })} />
+                  </label>
+                  <div className="task-comments">
+                    <strong>Comentarios</strong>
+                    {(taskDetail.comments || []).length ? (taskDetail.comments || []).map((comment) => (
+                      <div className="task-comment" key={comment.id}>
+                        <header>
+                          <b>{comment.author}</b>
+                          <small>{new Date(comment.at).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
+                        </header>
+                        <p>{comment.text}</p>
+                      </div>
+                    )) : <p className="notif-empty">Sin comentarios todavía.</p>}
+                    <div className="task-comment-composer">
+                      <textarea
+                        placeholder="Escribe un comentario... usa @Nombre para notificar a alguien del equipo."
+                        rows={2}
+                        value={taskCommentDraft}
+                        onChange={(event) => setTaskCommentDraft(event.target.value)}
+                      />
+                      <div className="task-mention-row">
+                        {taskUsers.slice(0, 6).map((user) => (
+                          <button className="task-mention-chip" key={user.email || user.name} type="button" onClick={() => setTaskCommentDraft((current) => `${current}${current.endsWith(" ") || !current ? "" : " "}@${user.name} `)}>
+                            @{user.name}
+                          </button>
+                        ))}
+                        <button className="primary-button" disabled={!taskCommentDraft.trim()} type="button" onClick={() => sendTaskComment(taskDetail.id)}>
+                          <Send size={15} /> Comentar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <footer className="task-modal-foot">
+                    <button className="managed-client-delete" type="button" onClick={() => deleteNativeTask(taskDetail.id)}>Eliminar tarea</button>
+                    <small>Los cambios se guardan automáticamente.</small>
+                  </footer>
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : null}
 

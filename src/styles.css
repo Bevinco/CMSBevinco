@@ -4746,3 +4746,60 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 :root[data-theme="dark"] .mix-stock-row { background: rgba(144, 191, 79, 0.10); border-color: rgba(144, 191, 79, 0.30); }
 :root[data-theme="dark"] .mix-stock-row > strong, :root[data-theme="dark"] .mix-stock-field { color: #b9d98a; }
 :root[data-theme="dark"] .mix-stock-field input, :root[data-theme="dark"] .mix-card-head input, :root[data-theme="dark"] .mix-component input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
+
+/* ===== Modulo de pendientes nativo ===== */
+.task-week-input { border: 1px solid #e2dcc9; border-radius: 9px; min-height: 40px; padding: 0 10px; }
+.tasks-table-wrap { border: 1px solid var(--line-soft); border-radius: 12px; max-height: 60vh; overflow: auto; }
+.tasks-table { border-collapse: separate; border-spacing: 0; width: 100%; }
+.tasks-table th { background: var(--sculpture-navy); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 9px 12px; position: sticky; text-align: left; top: 0; z-index: 2; }
+.tasks-table th.num, .tasks-table td.num { text-align: center; }
+.tasks-table td { border-bottom: 1px solid var(--line-soft); font-size: 0.82rem; padding: 7px 12px; vertical-align: middle; }
+.tasks-table tbody tr:nth-child(even) td { background: var(--surface-soft); }
+.task-name-link { background: none; border: 0; color: var(--sculpture-charcoal); cursor: pointer; font-weight: 700; padding: 0; text-align: left; }
+.task-name-link:hover { color: #5c8f1e; }
+.task-inline-select { background-position: right 6px center; background-size: 12px; border: 1px solid var(--line-soft); border-radius: 8px; font-size: 0.76rem; min-height: 32px; padding: 0 24px 0 8px; }
+.task-inline-date { border: 1px solid var(--line-soft); border-radius: 8px; font-size: 0.76rem; min-height: 32px; padding: 0 8px; }
+.task-row-actions .secondary-button { font-size: 0.74rem; min-height: 30px; padding: 0 12px; }
+.task-modal-backdrop { align-items: center; background: rgba(9, 20, 16, 0.45); display: flex; inset: 0; justify-content: center; padding: 20px; position: fixed; z-index: 80; }
+.task-modal { background: var(--surface); border-radius: 18px; box-shadow: 0 30px 80px rgba(0, 30, 67, 0.3); display: grid; gap: 14px; max-height: 90vh; max-width: 640px; overflow-y: auto; padding: 20px 22px; width: 100%; }
+.task-modal-head { align-items: center; display: flex; gap: 10px; }
+.task-modal-head input { border: 1px solid transparent; border-radius: 8px; flex: 1; font-size: 1.05rem; font-weight: 800; min-height: 40px; padding: 0 8px; }
+.task-modal-head input:hover, .task-modal-head input:focus { border-color: #e2dcc9; outline: none; }
+.task-modal-head button { background: var(--surface-muted); border: 0; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: 800; min-height: 34px; min-width: 34px; }
+.task-modal-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.task-modal-grid label, .task-modal-field { display: grid; font-size: 0.78rem; font-weight: 700; gap: 5px; }
+.task-modal select, .task-modal input[type="date"], .task-modal textarea { border: 1px solid #e2dcc9; border-radius: 9px; font: inherit; min-height: 38px; padding: 6px 10px; }
+.task-assignees { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-assignee-chip { background: var(--surface-muted); border: 1px solid var(--line-soft); border-radius: 999px; cursor: pointer; font-size: 0.76rem; font-weight: 700; padding: 6px 13px; }
+.task-assignee-chip.active { background: var(--sculpture-navy); border-color: var(--sculpture-navy); color: #fff; }
+.task-comments { display: grid; gap: 10px; }
+.task-comments > strong { font-size: 0.85rem; }
+.task-comment { background: var(--surface-soft); border-radius: 10px; padding: 9px 12px; }
+.task-comment header { display: flex; gap: 8px; justify-content: space-between; }
+.task-comment b { font-size: 0.78rem; }
+.task-comment small { color: var(--text-muted); font-size: 0.7rem; }
+.task-comment p { font-size: 0.82rem; margin: 4px 0 0; white-space: pre-wrap; }
+.task-comment-composer { display: grid; gap: 8px; }
+.task-mention-row { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.task-mention-row .primary-button { margin-left: auto; min-height: 34px; padding: 0 14px; }
+.task-mention-chip { background: #f2f8ec; border: 1px solid #d8e8c8; border-radius: 999px; color: #4f7d17; cursor: pointer; font-size: 0.72rem; font-weight: 700; padding: 5px 10px; }
+.task-modal-foot { align-items: center; display: flex; justify-content: space-between; }
+.task-modal-foot small { color: var(--text-muted); }
+.workflow-card-native { background: none; border: 0; cursor: pointer; padding: 0; }
+.week-task-native { cursor: pointer; font: inherit; text-align: left; }
+.sidebar-notif { position: relative; }
+.notif-bell { align-items: center; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; color: rgba(255, 255, 255, 0.85); cursor: pointer; display: flex; font-size: 0.8rem; font-weight: 700; gap: 8px; margin-bottom: 10px; padding: 9px 12px; width: 100%; }
+.notif-badge { background: var(--sculpture-green); border-radius: 999px; color: #0b2415; font-size: 0.7rem; font-weight: 800; margin-left: auto; min-width: 20px; padding: 2px 7px; text-align: center; }
+.notif-panel { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; bottom: 110%; box-shadow: 0 20px 50px rgba(0, 30, 67, 0.28); display: grid; gap: 4px; left: 0; max-height: 50vh; overflow-y: auto; padding: 10px; position: absolute; width: 300px; z-index: 70; }
+.notif-panel header { align-items: center; color: var(--text); display: flex; justify-content: space-between; padding: 2px 4px 6px; }
+.notif-panel header button { background: none; border: 0; color: #5c8f1e; cursor: pointer; font-size: 0.72rem; font-weight: 700; }
+.notif-item { background: none; border: 0; border-radius: 9px; color: var(--text); cursor: pointer; display: grid; gap: 2px; padding: 8px 10px; text-align: left; }
+.notif-item:hover { background: var(--surface-soft); }
+.notif-item.is-unread { background: #f2f8ec; }
+.notif-item span { font-size: 0.78rem; line-height: 1.4; }
+.notif-item small { color: var(--text-muted); font-size: 0.68rem; }
+.notif-empty { color: var(--text-muted); font-size: 0.78rem; margin: 6px 4px; }
+:root[data-theme="dark"] .notif-item.is-unread { background: rgba(144, 191, 79, 0.12); }
+:root[data-theme="dark"] .task-mention-chip { background: rgba(144, 191, 79, 0.12); border-color: rgba(144, 191, 79, 0.3); color: #b9d98a; }
+:root[data-theme="dark"] .task-week-input, :root[data-theme="dark"] .task-inline-select, :root[data-theme="dark"] .task-inline-date,
+:root[data-theme="dark"] .task-modal select, :root[data-theme="dark"] .task-modal input, :root[data-theme="dark"] .task-modal textarea { background: var(--surface-soft); border-color: var(--line); color: var(--text); }

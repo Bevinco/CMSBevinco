@@ -1299,6 +1299,8 @@ async function loadStore() {
   store.users ||= [];
   store.hiddenSculptureUnits ||= [];
   store.presence ||= {};
+  store.tasks ||= [];
+  store.notifications ||= [];
   migrateSculptureModuleNames(store);
   cachedStore = store;
   return store;
@@ -6621,6 +6623,235 @@ app.get("/api/module1/diagnostico-chat", requireAuth, async (request, response) 
     },
     criteriosQueVeElAgente: criteria.map((document) => document.name),
   });
+});
+
+// ===== Modulo de pendientes NATIVO (decision reunion 10-ago: sin ClickUp) ==
+// Tareas de auditoria por local con estado, fecha, responsables, comentarios
+// con @menciones y notificaciones (campana in-app + correo si esta
+// configurado). El tablero y el calendario del inicio leen de aqui.
+
+const NATIVE_TASK_STATUSES = [
+  "Sin Iniciar", "Falta Información", "En Proceso", "Gráficos Actualizados",
+  "Comentarios Escritos", "Listo para el Reporte", "Reporte Enviado", "Cancelada",
+];
+
+function cleanTaskPatch(body = {}) {
+  const patch = {};
+  if (body.name !== undefined) patch.name = String(body.name).trim().slice(0, 120);
+  if (body.description !== undefined) patch.description = String(body.description).trim().slice(0, 2000);
+  if (body.status !== undefined && NATIVE_TASK_STATUSES.includes(String(body.status))) patch.status = String(body.status);
+  if (body.dueDate !== undefined) {
+    const date = String(body.dueDate || "").slice(0, 10);
+    patch.dueDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
+  }
+  if (body.assignees !== undefined) {
+    patch.assignees = (Array.isArray(body.assignees) ? body.assignees : [])
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+  if (body.clientId !== undefined) patch.clientId = String(body.clientId || "");
+  return patch;
+}
+
+function notifyUsers(store, { users, text, taskId, author }) {
+  const targets = [...new Set(users.filter((user) => user && user !== author))];
+  for (const user of targets) {
+    store.notifications.push({
+      id: `${Date.now()}-${crypto.randomUUID()}`,
+      user,
+      text: String(text).slice(0, 300),
+      taskId,
+      at: new Date().toISOString(),
+      read: false,
+    });
+  }
+  store.notifications = store.notifications.slice(-400);
+  // Correo (si esta configurado): aviso simple, sin bloquear la respuesta.
+  if (gmailConfigured && targets.length) {
+    (async () => {
+      try {
+        const task = store.tasks.find((item) => item.id === taskId);
+        const emails = targets.filter((target) => /@/.test(target));
+        if (!emails.length) return;
+        const transport = await getGmailTransport();
+        await transport.sendMail({
+          from: `Bevinco CMS <${gmailUser}>`,
+          to: emails.join(", "),
+          subject: `Te mencionaron en: ${task?.name || "una tarea"}`,
+          text: `${author} escribió:\n\n${text}\n\nEntra al CMS (módulo Pendientes) para responder.`,
+        });
+      } catch (error) {
+        console.error("[tareas] correo de mencion fallo:", error.message);
+      }
+    })();
+  }
+}
+
+app.get("/api/module1/tasks", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const me = request.session?.email || request.session?.username || "";
+  response.json({
+    tasks: store.tasks,
+    statuses: NATIVE_TASK_STATUSES,
+    users: (store.users || []).map((user) => ({ name: user.name || user.email, email: user.email || "" })),
+    notifications: store.notifications.filter((item) => item.user === me || item.user === request.session?.name),
+  });
+});
+
+app.post("/api/module1/tasks", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const patch = cleanTaskPatch(request.body || {});
+  if (!patch.name) {
+    response.status(400).json({ error: "La tarea necesita un nombre." });
+    return;
+  }
+  const task = {
+    id: `${Date.now()}-${crypto.randomUUID()}`,
+    name: patch.name,
+    description: patch.description || "",
+    clientId: patch.clientId || "",
+    status: patch.status || "Sin Iniciar",
+    dueDate: patch.dueDate || "",
+    assignees: patch.assignees || [],
+    comments: [],
+    createdBy: request.session?.name || request.session?.username || "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  store.tasks.push(task);
+  if (task.assignees.length) {
+    notifyUsers(store, { users: task.assignees, text: `Te asignaron la tarea "${task.name}"`, taskId: task.id, author: task.createdBy });
+  }
+  await writeStore(store);
+  response.json({ task, tasks: store.tasks });
+});
+
+// Genera las tareas de la semana: una por unidad visible del directorio, con
+// la fecha de auditoria indicada. Idempotente: no duplica si ya existe una
+// tarea del mismo local en la misma semana.
+app.post("/api/module1/tasks/generate-week", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const dueDate = String(request.body?.dueDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    response.status(400).json({ error: "Indica la fecha de la semana (YYYY-MM-DD)." });
+    return;
+  }
+  let units = [];
+  try {
+    const directory = await discoverSculptureUnits();
+    const hidden = new Set(store.hiddenSculptureUnits || []);
+    units = (directory.units || []).filter((unit) => !hidden.has(unit.id));
+  } catch {
+    units = store.clients.map((client) => ({ id: client.id, name: client.name }));
+  }
+  const weekStart = new Date(`${dueDate}T00:00:00Z`);
+  weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7)); // lunes
+  const sameWeek = (date) => {
+    if (!date) return false;
+    const day = new Date(`${date}T00:00:00Z`);
+    const diff = (day - weekStart) / 86400000;
+    return diff >= 0 && diff < 7;
+  };
+  let created = 0;
+  for (const unit of units) {
+    const exists = store.tasks.some((task) => task.clientId === unit.id && sameWeek(task.dueDate));
+    if (exists) continue;
+    store.tasks.push({
+      id: `${Date.now()}-${crypto.randomUUID()}`,
+      name: unit.name,
+      description: "",
+      clientId: unit.id,
+      status: "Sin Iniciar",
+      dueDate,
+      assignees: [],
+      comments: [],
+      createdBy: request.session?.name || "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    created += 1;
+  }
+  await writeStore(store);
+  response.json({ created, tasks: store.tasks });
+});
+
+app.patch("/api/module1/tasks/:taskId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const task = store.tasks.find((item) => item.id === request.params.taskId);
+  if (!task) {
+    response.status(404).json({ error: "No se encontró la tarea." });
+    return;
+  }
+  const patch = cleanTaskPatch(request.body || {});
+  const previousAssignees = new Set(task.assignees || []);
+  Object.assign(task, patch, { updatedAt: new Date().toISOString() });
+  const newAssignees = (task.assignees || []).filter((user) => !previousAssignees.has(user));
+  if (newAssignees.length) {
+    notifyUsers(store, { users: newAssignees, text: `Te asignaron la tarea "${task.name}"`, taskId: task.id, author: request.session?.name || "" });
+  }
+  await writeStore(store);
+  response.json({ task, tasks: store.tasks });
+});
+
+app.delete("/api/module1/tasks/:taskId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const before = store.tasks.length;
+  store.tasks = store.tasks.filter((item) => item.id !== request.params.taskId);
+  if (store.tasks.length === before) {
+    response.status(404).json({ error: "No se encontró la tarea." });
+    return;
+  }
+  await writeStore(store);
+  response.json({ tasks: store.tasks });
+});
+
+app.post("/api/module1/tasks/:taskId/comments", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const task = store.tasks.find((item) => item.id === request.params.taskId);
+  if (!task) {
+    response.status(404).json({ error: "No se encontró la tarea." });
+    return;
+  }
+  const text = String(request.body?.text || "").trim().slice(0, 1500);
+  if (!text) {
+    response.status(400).json({ error: "Escribe un comentario." });
+    return;
+  }
+  const author = request.session?.name || request.session?.username || "Equipo";
+  task.comments = [...(task.comments || []), {
+    id: `${Date.now()}-${crypto.randomUUID()}`,
+    author,
+    text,
+    at: new Date().toISOString(),
+  }].slice(-60);
+  task.updatedAt = new Date().toISOString();
+  // @menciones: se notifica a los usuarios cuyo nombre o correo aparezca
+  // mencionado en el texto, mas los responsables de la tarea.
+  const mentioned = (store.users || [])
+    .filter((user) => {
+      const name = String(user.name || "").trim();
+      const email = String(user.email || "").trim();
+      return (name && text.toLowerCase().includes(`@${name.toLowerCase()}`)) || (email && text.toLowerCase().includes(email.toLowerCase()));
+    })
+    .map((user) => user.email || user.name);
+  const targets = [...new Set([...mentioned, ...(task.assignees || [])])];
+  if (targets.length) {
+    notifyUsers(store, { users: targets, text: `${author} en "${task.name}": ${text}`, taskId: task.id, author });
+  }
+  await writeStore(store);
+  response.json({ task, tasks: store.tasks });
+});
+
+app.patch("/api/module1/notifications/read", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const ids = new Set(Array.isArray(request.body?.ids) ? request.body.ids : []);
+  for (const item of store.notifications) {
+    if (ids.has(item.id)) item.read = true;
+  }
+  await writeStore(store);
+  const me = request.session?.email || request.session?.username || "";
+  response.json({ notifications: store.notifications.filter((item) => item.user === me || item.user === request.session?.name) });
 });
 
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
