@@ -6534,6 +6534,59 @@ app.patch("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (reques
   response.json({ barMixes: client.barMixes });
 });
 
+// Diagnostico del contexto del chat: muestra QUE recibe el agente para un
+// reporte (variance completo, extracto, criterios) sin pasar por OpenAI.
+// Uso: /api/module1/diagnostico-chat?cliente=tambo&periodo=jul 20
+app.get("/api/module1/diagnostico-chat", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const clientQuery = String(request.query.cliente || "").toLowerCase().trim();
+  const periodQuery = String(request.query.periodo || "").toLowerCase().trim();
+  if (!clientQuery) {
+    response.status(400).json({ error: "Indica ?cliente=nombre (y opcionalmente &periodo=texto del rango)." });
+    return;
+  }
+  const normalize = (value) => String(value || "").toLowerCase();
+  const matches = store.reports
+    .map((report) => ({
+      report,
+      client: store.clients.find((candidate) => candidate.id === report.clientId),
+      period: store.periods.find((candidate) => candidate.id === report.periodId),
+    }))
+    .filter(({ client, period }) => normalize(client?.name).includes(clientQuery) && (!periodQuery || normalize(period?.label).includes(periodQuery)))
+    .sort((left, right) => String(right.period?.endsAt || "").localeCompare(String(left.period?.endsAt || "")));
+  if (!matches.length) {
+    response.status(404).json({
+      error: "No hay reporte generado que calce con esa búsqueda.",
+      pista: "El chat trabaja sobre reportes GENERADOS: si no existe, generarlo primero en Reportes semanales.",
+    });
+    return;
+  }
+  const { report, client, period } = matches[0];
+  const varianceText = await varianceDetailForChat(store, report);
+  const varianceLines = varianceText ? varianceText.split("\n").filter((line) => line.trim()) : [];
+  const payload = buildReportPayload(store, report, { includeKnowledge: true });
+  const criteria = criteriaForClient(payload.criteriaDocuments || [], client?.name || report.clientId, client?.id || report.clientId, payload.allClientNames || []);
+  response.json({
+    reporte: report.id,
+    cliente: client?.name || report.clientId,
+    periodo: period?.label || report.periodId,
+    varianceDetalladoCompleto: {
+      disponible: Boolean(varianceText),
+      filas: Math.max(varianceLines.length - 1, 0),
+      caracteres: varianceText.length,
+      primerasFilas: varianceLines.slice(0, 8),
+    },
+    extractoEstructurado: {
+      familias: (payload.familyVariances || []).map((item) => item.family),
+      categorias: (payload.categoryVariances || []).length,
+      productos: (payload.topProducts || []).length,
+      productosMayorUso: (payload.topUsageProducts || []).length,
+      mermaReportada: payload.summary?.wasteCost || 0,
+    },
+    criteriosQueVeElAgente: criteria.map((document) => document.name),
+  });
+});
+
 app.get("/api/module1/bootstrap", requireAuth, async (_request, response) => {
   const store = await readStore();
   // Abrir el panel debe ser una lectura barata y predecible. La sincronizacion
