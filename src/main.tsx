@@ -89,7 +89,7 @@ const WORKFLOW_HIDDEN_STATUS = /^cerrad/i;
 const WORKFLOW_WINDOW_DAYS = 30;
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "monthly" | "compras" | "tasks" | "reports" | "criteria" | "users";
+type ActiveView = "dashboard" | "module1" | "monthly" | "compras" | "clientes" | "tasks" | "reports" | "criteria" | "users";
 
 type BarMix = { nombre: string; componentes: Array<{ producto: string; botellasPorLitro: number }> };
 
@@ -1791,6 +1791,12 @@ function App() {
   }
 
   const [savingDistribution, setSavingDistribution] = useState(false);
+  const [clientsSearch, setClientsSearch] = useState("");
+  const [clientDrafts, setClientDrafts] = useState<Record<string, { rep: string; buy: string }>>({});
+  const clientDraftFor = (client: Client) => clientDrafts[client.id] || {
+    rep: (client.recipients || []).join(", "),
+    buy: ((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(", "),
+  };
   async function saveClientDistribution(clientId: string, patch: { recipients?: string[]; purchaseRecipients?: string[] }) {
     if (!clientId || savingDistribution) return;
     setSavingDistribution(true);
@@ -1803,6 +1809,9 @@ function App() {
         }),
       );
       setError(`Lista de distribución guardada (${(patch.recipients ? payload.recipients : payload.purchaseRecipients).length} correo(s)). Queda para los próximos envíos de este cliente.`);
+      setClients((current) => current.map((client) => client.id === clientId
+        ? { ...client, recipients: payload.recipients, purchaseRecipients: payload.purchaseRecipients }
+        : client));
       setWorkStatus("ready");
       return payload;
     } catch (saveError) {
@@ -2862,6 +2871,7 @@ function App() {
     module1: ["Operación semanal", "Reportes semanales"],
     monthly: ["Operación mensual", "Reportes mensuales"],
     compras: ["Operación de compras", "Sugerencias de compra"],
+    clientes: ["Directorio", "Clientes y correos"],
     tasks: ["Gestión operativa", "Pendientes del equipo"],
     reports: ["Historial", "Reportes generados"],
     criteria: ["Base de conocimiento", "Criterios para el agente de reportes"],
@@ -2899,6 +2909,7 @@ function App() {
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "compras" ? "active" : ""} onClick={() => navigateTo("compras")}><ShoppingCart size={18} /> Compras</button> : null}
+          {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "clientes" ? "active" : ""} onClick={() => navigateTo("clientes")}><Building2 size={18} /> Clientes</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -4077,6 +4088,95 @@ function App() {
             );
           })() : null}
           </>
+        ) : null}
+
+        {activeView === "clientes" ? (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Directorio</p>
+                <h2>Clientes y sus correos</h2>
+                <small className="clickup-list-note">{clients.length} cliente(s) · las listas alimentan la pestaña Enviar y el módulo Compras</small>
+              </div>
+              <div className="task-toolbar">
+                <input
+                  className="task-search"
+                  placeholder="Buscar cliente o correo..."
+                  value={clientsSearch}
+                  onChange={(event) => setClientsSearch(event.target.value)}
+                />
+              </div>
+            </div>
+            <p className="muted-copy">Correos separados por coma. "Reporte" recibe el PDF semanal/mensual; "Compras" recibe la sugerencia de compra. Al abrir un reporte, la pestaña Enviar ya viene con la lista del cliente (editable para ese envío puntual sin tocar la lista guardada).</p>
+            <div className="clients-table-wrap">
+              <table className="tasks-table clients-table">
+                <thead>
+                  <tr><th>Cliente</th><th>Área</th><th>Correos del reporte</th><th>Correos de compras</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {clients
+                    .filter((client) => {
+                      const query = clientsSearch.trim().toLowerCase();
+                      if (!query) return true;
+                      const haystack = `${clientDisplayName(client)} ${(client.recipients || []).join(" ")} ${((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(" ")}`.toLowerCase();
+                      return haystack.includes(query);
+                    })
+                    .sort((left, right) => clientDisplayName(left).localeCompare(clientDisplayName(right), "es"))
+                    .map((client) => {
+                      const draft = clientDraftFor(client);
+                      return (
+                        <tr key={client.id}>
+                          <td><strong>{clientDisplayName(client)}</strong></td>
+                          <td>{/barra|beverage/i.test(client.area || "") ? "Barra" : "Cocina"}</td>
+                          <td>
+                            <textarea
+                              className="client-emails-input"
+                              rows={2}
+                              value={draft.rep}
+                              onChange={(event) => setClientDrafts((current) => ({ ...current, [client.id]: { ...draft, rep: event.target.value } }))}
+                            />
+                          </td>
+                          <td>
+                            <textarea
+                              className="client-emails-input"
+                              rows={2}
+                              value={draft.buy}
+                              onChange={(event) => setClientDrafts((current) => ({ ...current, [client.id]: { ...draft, buy: event.target.value } }))}
+                            />
+                          </td>
+                          <td className="task-row-actions">
+                            <button
+                              className="secondary-button"
+                              disabled={savingDistribution}
+                              type="button"
+                              onClick={async () => {
+                                await saveClientDistribution(client.id, {
+                                  recipients: draft.rep.split(/[,;\s]+/).filter(Boolean),
+                                  purchaseRecipients: draft.buy.split(/[,;\s]+/).filter(Boolean),
+                                });
+                                setClientDrafts((current) => {
+                                  const next = { ...current };
+                                  delete next[client.id];
+                                  return next;
+                                });
+                              }}
+                            >
+                              Guardar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            {!clients.length ? (
+              <div className="empty-state">
+                <strong>Aún no hay clientes guardados</strong>
+                <small>Los clientes se crean al generar su primer reporte o al importar sus correos desde ClickUp.</small>
+              </div>
+            ) : null}
+          </section>
         ) : null}
 
         {activeView === "tasks" ? (

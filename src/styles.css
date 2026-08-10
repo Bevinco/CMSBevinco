@@ -4897,3 +4897,11 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .task-tags input { min-height: 34px; }
 .kanban-chip.kanban-tag { background: #eef4f9; color: #2e5f8a; }
 :root[data-theme="dark"] .kanban-chip.kanban-tag { background: rgba(46, 117, 182, 0.18); color: #9cc4e8; }
+
+/* Modulo Clientes: directorio con listas de correos */
+.clients-table-wrap { border: 1px solid var(--line-soft); border-radius: 12px; margin-top: 4px; max-height: 65vh; overflow: auto; }
+.clients-table td { vertical-align: top; }
+.clients-table td:first-child { min-width: 170px; padding-top: 14px; }
+.client-emails-input { border: 1px solid #e2dcc9; border-radius: 9px; font-size: 0.78rem; line-height: 1.5; min-width: 260px; padding: 8px 10px; resize: vertical; width: 100%; }
+.client-emails-input:focus { border-color: var(--sculpture-green); box-shadow: 0 0 0 3px rgba(144, 191, 79, 0.14); outline: none; }
+:root[data-theme="dark"] .client-emails-input { background: var(--surface-soft); border-color: var(--line); color: var(--text); }
