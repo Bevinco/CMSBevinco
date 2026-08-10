@@ -6574,7 +6574,8 @@ app.get("/api/module1/diagnostico-chat", requireAuth, async (request, response) 
       disponible: Boolean(varianceText),
       filas: Math.max(varianceLines.length - 1, 0),
       caracteres: varianceText.length,
-      primerasFilas: varianceLines.slice(0, 8),
+      // full=1 devuelve el detalle completo (para auditar cifras del agente).
+      primerasFilas: String(request.query.full || "") === "1" ? varianceLines.slice(0, 400) : varianceLines.slice(0, 8),
     },
     extractoEstructurado: {
       familias: (payload.familyVariances || []).map((item) => item.family),
