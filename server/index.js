@@ -8017,7 +8017,9 @@ async function computeSuggestionItems({ client, period, mixStock }) {
       const name = pickRecordValue(record, ["itemName", "item"], "") ||
         pickRecordValueFuzzy(record, /nombreArt/i) ||
         row.values?.[0] || "";
-      if (!name || isTotalRow(name) || /:\s*$/.test(name)) return null;
+      // "GRAND TOTAL" viene sin dos puntos y sin "Total X:" y se colaba como
+      // producto con exceso, duplicando el capital inmovilizado del modulo.
+      if (!name || isTotalRow(name) || /:\s*$/.test(name) || /^grand\s+total$/i.test(String(name).trim())) return null;
       return {
         provider: String(pickRecordValue(record, ["proveedor", "provider", "vendor"], "") || pickRecordValueFuzzy(record, /proveedor|vendor/i) || "Por validar").trim(),
         name: String(name).trim(),
