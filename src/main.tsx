@@ -188,7 +188,8 @@ type Report = {
   isAccumulated?: boolean;
   backfill?: boolean;
   monthly?: boolean;
-  emailLog?: { sentAt: string; recipients: string[]; subject: string };
+  emailLog?: { sentAt: string; recipients: string[]; subject: string; cc?: string[] };
+  auditTask?: { id: string; name: string; status: string; dueDate: string } | null;
   chat?: Array<{ role: "user" | "assistant"; content: string }>;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
@@ -300,6 +301,7 @@ type NativeTask = {
   dueDate: string;
   assignees: string[];
   tags?: string[];
+  recurring?: boolean;
   comments: Array<{ id: string; author: string; text: string; at: string }>;
   activity?: Array<{ id: string; author: string; text: string; at: string }>;
   createdBy?: string;
@@ -1628,9 +1630,14 @@ function App() {
   }, [nativeTasks, taskSearch]);
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
+  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false });
 
   const taskDetail = nativeTasks.find((task) => task.id === taskDetailId) || null;
+  // Estado de la auditoria (Pendientes) del reporte abierto: manda sobre los
+  // comentarios y el envio (logica pedida por Pedro, 12-ago-2026).
+  const auditTask = selectedReport?.auditTask || null;
+  const auditLocked = Boolean(auditTask && ["Reporte Enviado", "Cancelada"].includes(auditTask.status));
+  const auditReady = !auditTask || auditTask.status === "Listo para el Reporte";
   const unreadNotifications = taskNotifications.filter((item) => !item.read);
 
   const nativeBoardTasks = useMemo<ClickupTask[]>(() => nativeTasks
@@ -1696,11 +1703,12 @@ function App() {
             priority: newTask.priority,
             dueDate: newTask.dueDate,
             assignees: newTask.assignee ? [newTask.assignee] : [],
+            recurring: newTask.recurring,
           }),
         }),
       );
       setNativeTasks(payload.tasks || []);
-      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal" });
+      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false });
       setError("Pendiente creado.");
       setWorkStatus("ready");
     } catch (taskError) {
@@ -2273,6 +2281,11 @@ function App() {
   };
 
   async function applyChatAsSummary(content: string, messageIndex?: number) {
+    if (auditLocked) {
+      setError(`La auditoría está en "${auditTask?.status}": los comentarios están bloqueados. Reábrela en Pendientes para modificarlos.`);
+      setWorkStatus("error");
+      return;
+    }
     if (!selectedReport) return;
     let parsed = parseAnalysisFromText(content);
     // Sin encabezados en la respuesta (el agente contesta solo los bullets):
@@ -2408,6 +2421,17 @@ function App() {
     }
   }
 
+  async function setAuditTaskStatus(status: string) {
+    const linked = selectedReport?.auditTask;
+    if (!linked) return;
+    await patchNativeTask(linked.id, { status });
+    const patchReport = (report: Report): Report => (report.auditTask && report.auditTask.id === linked.id
+      ? { ...report, auditTask: { ...report.auditTask, status } }
+      : report);
+    setSelectedReport((current) => (current ? patchReport(current) : current));
+    setReports((current) => current.map(patchReport));
+  }
+
   function openMonthlyReport() {
     if (!monthlyReport) return;
     setSelectedClientId(monthlyReport.clientId);
@@ -2447,6 +2471,14 @@ function App() {
     if (!emailRecipients.length) {
       setError("Agrega al menos un destinatario antes de enviar.");
       setWorkStatus("error");
+      return;
+    }
+    if (auditLocked) {
+      setError(`La auditoría está en "${auditTask?.status}": el envío está bloqueado. Cambia su estado en Pendientes si necesitas reenviar.`);
+      setWorkStatus("error");
+      return;
+    }
+    if (auditTask && !auditReady && !window.confirm(`⚠️ La auditoría está en "${auditTask.status}" y debería estar "Listo para el Reporte". ¿Enviar de todos modos?`)) {
       return;
     }
 
@@ -2534,6 +2566,11 @@ function App() {
   }
 
   async function generateSummary() {
+    if (auditLocked) {
+      setError(`La auditoría está en "${auditTask?.status}": los comentarios están bloqueados. Reábrela en Pendientes para modificarlos.`);
+      setWorkStatus("error");
+      return;
+    }
     if (!selectedReport) return;
     setWorkStatus("loading");
     setError("Actualizando los datos de la semana antes de generar el reporte...");
@@ -3269,7 +3306,25 @@ function App() {
               </article>
               <article>
                 <span>Estado</span>
-                {selectedReport ? (
+                {selectedReport && auditTask ? (
+                  <>
+                    <select
+                      className="unit-state-select"
+                      aria-label="Estado de la auditoría"
+                      value={auditTask.status}
+                      onChange={(event) => setAuditTaskStatus(event.target.value)}
+                    >
+                      {NATIVE_TASK_STATUSES.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                    {auditLocked ? (
+                      <small className="audit-state-hint is-locked">Auditoría cerrada: comentarios y envío bloqueados</small>
+                    ) : !auditReady ? (
+                      <small className="audit-state-hint is-warning">Para enviar debe estar "Listo para el Reporte"</small>
+                    ) : (
+                      <small className="audit-state-hint is-ready">Lista para comentar y enviar</small>
+                    )}
+                  </>
+                ) : selectedReport ? (
                   <select
                     className="unit-state-select"
                     aria-label="Estado del flujo de trabajo"
@@ -3404,7 +3459,7 @@ function App() {
                   ✦ {aiModels.chat || aiModels.reports}
                 </span>
               ) : null}
-              <button className="primary-button" disabled={!selectedReport || workStatus === "loading"} onClick={generateSummary}>
+              <button className="primary-button" disabled={!selectedReport || workStatus === "loading" || auditLocked} onClick={generateSummary}>
                 {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
                 {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
               </button>
@@ -3598,8 +3653,13 @@ function App() {
               <strong>Se enviará:</strong>
               <span>este cuerpo + el PDF del reporte y el variance detallado adjuntos.</span>
             </div>
+            {auditTask && auditLocked ? (
+              <p className="audit-lock-note is-locked">La auditoría de este periodo está en "{auditTask.status}": el envío y los comentarios quedan bloqueados. Reábrela en Pendientes si necesitas reenviar.</p>
+            ) : auditTask && !auditReady ? (
+              <p className="audit-lock-note is-warning">La auditoría está en "{auditTask.status}". Para enviar el reporte debería estar "Listo para el Reporte".</p>
+            ) : null}
             <div className="action-row wrap-actions">
-              <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length} onClick={sendReportEmail} type="button">
+              <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length || auditLocked} onClick={sendReportEmail} type="button">
                 {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
                 {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
               </button>
@@ -4389,6 +4449,13 @@ function App() {
                     {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
                   </select>
                 </label>
+                <label>
+                  Recurrencia
+                  <span className="task-recurring-toggle">
+                    <input type="checkbox" checked={newTask.recurring} onChange={(event) => setNewTask((current) => ({ ...current, recurring: event.target.checked }))} />
+                    Se repite cada semana (mismo día)
+                  </span>
+                </label>
                 <button className="primary-button" disabled={workStatus === "loading"} type="submit">
                   <Plus size={17} /> Crear pendiente
                 </button>
@@ -4438,6 +4505,14 @@ function App() {
                         {taskDetail.dueDate ? (
                           <small className={`task-due-hint ${isTaskOverdue(taskDetail) ? "is-overdue" : ""}`}>{relativeDue(taskDetail.dueDate)}</small>
                         ) : null}
+                        <span className="task-recurring-toggle">
+                          <input
+                            type="checkbox"
+                            checked={taskDetail.recurring === true || (taskDetail.recurring === undefined && Boolean(taskDetail.clientId))}
+                            onChange={(event) => patchNativeTask(taskDetail.id, { recurring: event.target.checked })}
+                          />
+                          Se repite cada semana
+                        </span>
                       </label>
                       <label>
                         Etiquetas

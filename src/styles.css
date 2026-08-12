@@ -4882,6 +4882,22 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .task-tag { align-items: center; background: #eef4f9; border-radius: 999px; color: #2e5f8a; display: inline-flex; font-size: 0.72rem; font-weight: 700; gap: 5px; padding: 4px 10px; }
 .task-tag button { background: none; border: 0; color: inherit; cursor: pointer; font-weight: 800; padding: 0; }
 .task-tags input { border: 1px dashed #cfc9b6; border-radius: 999px; font-size: 0.74rem; min-height: 28px; padding: 0 10px; width: 110px; }
+
+/* Recurrencia semanal (Pedro 12-ago): las auditorias rotan solas de semana */
+.task-recurring-toggle { align-items: center; color: var(--text-muted); cursor: pointer; display: inline-flex; font-size: 0.8rem; font-weight: 600; gap: 7px; margin-top: 6px; }
+.task-recurring-toggle input { accent-color: #90bf4f; cursor: pointer; height: 15px; margin: 0; width: 15px; }
+
+/* Estado de la auditoria vinculado al reporte: hint bajo el select y aviso
+   antes de enviar (candado si ya fue enviada/cancelada). */
+.audit-state-hint { display: block; font-size: 0.72rem; font-weight: 700; margin-top: 5px; }
+.audit-state-hint.is-locked { color: #c2371f; }
+.audit-state-hint.is-warning { color: #a06a00; }
+.audit-state-hint.is-ready { color: #4f8a2e; }
+.audit-lock-note { border-radius: 8px; font-size: 0.85rem; font-weight: 600; margin: 10px 0 0; padding: 10px 14px; }
+.audit-lock-note.is-locked { background: #fbe9e4; border: 1px solid #eac3b8; color: #8c2a14; }
+.audit-lock-note.is-warning { background: #fdf4dd; border: 1px solid #ecd9a4; color: #7a5200; }
+:root[data-theme="dark"] .audit-lock-note.is-locked { background: rgba(194, 55, 31, 0.14); border-color: rgba(194, 55, 31, 0.4); color: #f2a58f; }
+:root[data-theme="dark"] .audit-lock-note.is-warning { background: rgba(160, 106, 0, 0.14); border-color: rgba(160, 106, 0, 0.4); color: #e8c477; }
 @media (max-width: 860px) {
   .task-modal-wide { grid-template-columns: 1fr; max-height: 92vh; overflow-y: auto; }
   .task-modal-main, .task-modal-side { max-height: none; }

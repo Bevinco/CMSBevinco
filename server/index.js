@@ -4066,6 +4066,12 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
       ? report.monthlyHistory
       : historyForReport(store, report, context),
   };
+  // Estado de la auditoria (modulo Pendientes) de este periodo: el front lo
+  // muestra en el cuadro Estado y bloquea comentarios/envio segun el caso.
+  const auditTask = auditTaskForReport(store, report);
+  payload.auditTask = auditTask
+    ? { id: auditTask.id, name: auditTask.name, status: auditTask.status, dueDate: auditTask.dueDate || "" }
+    : null;
   const knowledge = {
     criteriaDocuments: store.criteriaDocuments || [],
     allClientNames: context?.allClientNames || (store.clients || []).map((item) => item.name),
@@ -6668,6 +6674,7 @@ function cleanTaskPatch(body = {}) {
       .filter(Boolean)
       .slice(0, 8);
   }
+  if (body.recurring !== undefined) patch.recurring = Boolean(body.recurring);
   return patch;
 }
 
@@ -6744,9 +6751,108 @@ function checkOverdueTasks(store) {
   return changed;
 }
 
+// Automatizaciones del ciclo de auditoria (pedidas por Pedro, 12-ago-2026):
+// 1) "Sin Iniciar" pasa sola a "En Proceso" cuando llega el dia de la
+//    auditoria. Solo una vez por fecha: si el equipo la devuelve a mano a
+//    "Sin Iniciar", no se vuelve a empujar ese mismo dia.
+// 2) Tras 24 horas en "Reporte Enviado", la tarea rota a la auditoria de la
+//    semana siguiente: vuelve a "Sin Iniciar" con la proxima fecha (mismo
+//    dia de la semana; si es recurrente con dia ancla, ese dia). Asi el
+//    tablero muestra siempre el estado ACTUAL de cada local, sin selector
+//    de semanas.
+function applyTaskAutomations(store) {
+  const today = todayInChile();
+  const now = Date.now();
+  let changed = false;
+  for (const task of store.tasks || []) {
+    if (task.status === "Sin Iniciar" && task.dueDate && task.dueDate <= today && task.autoStartedFor !== task.dueDate) {
+      task.autoStartedFor = task.dueDate;
+      task.status = "En Proceso";
+      task.statusChangedAt = new Date().toISOString();
+      task.activity = [...(task.activity || []), taskEvent("Sistema", 'pasó a "En Proceso" automáticamente (llegó el día de la auditoría)')].slice(-80);
+      task.updatedAt = new Date().toISOString();
+      changed = true;
+      continue;
+    }
+    if (task.status !== "Reporte Enviado") continue;
+    if (!task.statusChangedAt) {
+      // Tareas anteriores a esta version: el reloj de 24h parte ahora.
+      task.statusChangedAt = new Date().toISOString();
+      changed = true;
+      continue;
+    }
+    const recurring = task.recurring === true || (task.recurring === undefined && Boolean(task.clientId));
+    if (!recurring) continue;
+    if (now - Date.parse(task.statusChangedAt) < 24 * 3600 * 1000) continue;
+    const nextDue = nextAuditDate(task, today);
+    task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría de la semana siguiente (${nextDue}) tras 24h en "Reporte Enviado"`)].slice(-80);
+    task.status = "Sin Iniciar";
+    task.statusChangedAt = new Date().toISOString();
+    task.dueDate = nextDue;
+    task.overdueNotifiedAt = "";
+    task.autoStartedFor = "";
+    task.updatedAt = new Date().toISOString();
+    changed = true;
+  }
+  return changed;
+}
+
+// Proxima fecha de auditoria: el dia ancla (recurringDay si la tarea es
+// recurrente con dia fijo; si no, el dia de semana de la fecha vigente),
+// estrictamente despues de hoy y de la fecha actual de la tarea.
+function nextAuditDate(task, today) {
+  const baseStr = task.dueDate && task.dueDate > today ? task.dueDate : today;
+  const anchorSource = task.dueDate || baseStr;
+  const anchor = Number.isInteger(task.recurringDay)
+    ? task.recurringDay
+    : new Date(`${anchorSource}T00:00:00Z`).getUTCDay();
+  const cursor = new Date(`${baseStr}T00:00:00Z`);
+  for (let i = 0; i < 7; i += 1) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (cursor.getUTCDay() === anchor) break;
+  }
+  return cursor.toISOString().slice(0, 10);
+}
+
+// Tarea de auditoria (Pendientes) que corresponde a un reporte: la del mismo
+// local cuya fecha cae en la semana en que SE AUDITA el periodo (la
+// auditoria de la semana Jul 20-26 se hace en los dias siguientes al
+// cierre). Si no hay, se busca dentro del periodo mismo.
+function auditTaskForReport(store, report) {
+  const period = (store.periods || []).find((candidate) => candidate.id === report.periodId);
+  if (!period || !period.endsAt) return null;
+  const windowEnd = new Date(`${period.endsAt}T00:00:00Z`);
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + 7);
+  const windowEndStr = windowEnd.toISOString().slice(0, 10);
+  const tasks = (store.tasks || []).filter((task) => task.clientId === report.clientId && task.dueDate);
+  const inAuditWeek = tasks
+    .filter((task) => task.dueDate > period.endsAt && task.dueDate <= windowEndStr)
+    .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
+  if (inAuditWeek.length) return inAuditWeek[0];
+  const inPeriod = tasks
+    .filter((task) => period.startsAt && task.dueDate >= period.startsAt && task.dueDate <= period.endsAt)
+    .sort((left, right) => right.dueDate.localeCompare(left.dueDate));
+  return inPeriod[0] || null;
+}
+
+// Al salir el correo del reporte, la tarea de auditoria vinculada pasa sola
+// a "Reporte Enviado" (y 24h despues la automatizacion la rota a la semana
+// siguiente).
+function markAuditTaskSent(store, report, author) {
+  const linked = auditTaskForReport(store, report);
+  const task = linked && (store.tasks || []).find((item) => item.id === linked.id);
+  if (!task || task.status === "Reporte Enviado") return;
+  task.activity = [...(task.activity || []), taskEvent(author || "Sistema", 'envió el reporte por correo: la tarea pasó a "Reporte Enviado"')].slice(-80);
+  task.status = "Reporte Enviado";
+  task.statusChangedAt = new Date().toISOString();
+  task.updatedAt = new Date().toISOString();
+}
+
 app.get("/api/module1/tasks", requireAuth, async (request, response) => {
   const store = await readStore();
-  if (checkOverdueTasks(store)) await writeStore(store);
+  const automated = applyTaskAutomations(store);
+  const overdueChanged = checkOverdueTasks(store);
+  if (automated || overdueChanged) await writeStore(store);
   const me = request.session?.email || request.session?.username || "";
   response.json({
     tasks: store.tasks,
@@ -6773,12 +6879,16 @@ app.post("/api/module1/tasks", requireAuth, async (request, response) => {
     dueDate: patch.dueDate || "",
     assignees: patch.assignees || [],
     tags: patch.tags || [],
+    recurring: patch.recurring === true,
     comments: [],
     activity: [taskEvent(request.session?.name || request.session?.username, "creó esta tarea")],
     createdBy: request.session?.name || request.session?.username || "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  // Dia ancla de la recurrencia: si luego cambian la fecha para una semana
+  // puntual, la rotacion vuelve a este dia.
+  if (task.recurring && task.dueDate) task.recurringDay = new Date(`${task.dueDate}T00:00:00Z`).getUTCDay();
   store.tasks.push(task);
   if (task.assignees.length) {
     notifyUsers(store, { users: task.assignees, text: `Te asignaron la tarea "${task.name}"`, taskId: task.id, author: task.createdBy });
@@ -6826,6 +6936,7 @@ app.post("/api/module1/tasks/generate-week", requireAuth, async (request, respon
       dueDate,
       assignees: [],
       tags: [],
+      recurring: true,
       comments: [],
       activity: [taskEvent(request.session?.name, "creó esta tarea (generación semanal)")],
       createdBy: request.session?.name || "",
@@ -6851,7 +6962,19 @@ app.patch("/api/module1/tasks/:taskId", requireAuth, async (request, response) =
   task.activity = task.activity || [];
   if (patch.status !== undefined && patch.status !== task.status) {
     task.activity.push(taskEvent(author, `cambió el estado de "${task.status}" a "${patch.status}"`));
+    task.statusChangedAt = new Date().toISOString();
+    // Si el equipo la devuelve a mano a "Sin Iniciar", no re-empujarla a
+    // "En Proceso" ese mismo dia.
+    if (patch.status === "Sin Iniciar") task.autoStartedFor = task.dueDate || "";
   }
+  if (patch.recurring !== undefined && patch.recurring !== (task.recurring === true || (task.recurring === undefined && Boolean(task.clientId)))) {
+    task.activity.push(taskEvent(author, patch.recurring ? "marcó la tarea como recurrente (se repite cada semana)" : "quitó la recurrencia"));
+  }
+  if (patch.recurring === true) {
+    const anchorDate = patch.dueDate !== undefined ? patch.dueDate : task.dueDate;
+    if (anchorDate) task.recurringDay = new Date(`${anchorDate}T00:00:00Z`).getUTCDay();
+  }
+  if (patch.recurring === false) delete task.recurringDay;
   if (patch.dueDate !== undefined && patch.dueDate !== task.dueDate) {
     task.activity.push(taskEvent(author, patch.dueDate ? `cambió la fecha límite al ${patch.dueDate}` : "quitó la fecha límite"));
   }
@@ -9008,6 +9131,16 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  // Candado (Pedro): si la auditoria de este periodo ya esta "Reporte
+  // Enviado" (o Cancelada), el correo no vuelve a salir hasta reabrirla en
+  // Pendientes.
+  const lockedAuditTask = auditTaskForReport(store, report);
+  if (lockedAuditTask && ["Reporte Enviado", "Cancelada"].includes(lockedAuditTask.status)) {
+    response.status(409).json({
+      error: `La auditoría de este periodo está en "${lockedAuditTask.status}": el envío está bloqueado. Cambia su estado en Pendientes si necesitas reenviar.`,
+    });
+    return;
+  }
   const rawRecipients = Array.isArray(request.body?.recipients) && request.body.recipients.length
     ? request.body.recipients
     : client?.recipients || [];
@@ -9090,6 +9223,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       client.recipients = recipients;
       client.ccRecipients = cc;
     }
+    markAuditTaskSent(store, report, request.session?.name || request.session?.username);
     await writeStore(store);
     response.json({ sent: true, via: "gmail", report: buildReportPayload(store, report) });
     return;
@@ -9127,6 +9261,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   report.emailLog = { sentAt: new Date().toISOString(), recipients, subject };
   report.updatedAt = new Date().toISOString();
   if (client) client.recipients = recipients;
+  markAuditTaskSent(store, report, request.session?.name || request.session?.username);
   await writeStore(store);
   response.json({ sent: true, payload, report: buildReportPayload(store, report) });
 });
