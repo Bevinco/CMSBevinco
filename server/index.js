@@ -6088,8 +6088,11 @@ function renderDynamicReportHtml(store, report) {
           data: rows.map(function (r) { return r.amount; }),
           backgroundColor: rows.map(function (r, i) { return famColor(r.family, i); }),
           maxBarThickness: 34,
+          // Pildora navy con texto blanco: el gris anterior se perdia sobre
+          // las barras de color (QA 12-ago). Mismo estilo del grafico de costo.
           datalabels: { display: true, anchor: "end", align: function (ctx) { return ctx.dataset.data[ctx.dataIndex] < 0 ? "start" : "end"; },
-            color: "#4b5a68", font: { weight: 800, size: 11 }, formatter: fmtK }
+            clip: false, color: "#fff", backgroundColor: NAVY, borderRadius: 4, padding: { top: 2, bottom: 1, left: 6, right: 6 },
+            font: { weight: 800, size: 11 }, formatter: fmtK }
         }]
       },
       options: {
