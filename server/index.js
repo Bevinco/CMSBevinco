@@ -1475,6 +1475,14 @@ function historyForReport(store, report, context = null) {
       purchasedCost: summarySource?.purchasedCost || 0,
       suggestedCost: summarySource?.suggestedCost || 0,
     };
+  }).filter((point, index, points) => {
+    // Re-conteos: dos auditorias que terminan con <=2 dias de diferencia
+    // (ej. 22 y 23-07) son la misma semana; se conserva la mas reciente
+    // para que cobertura/costo no muestren dos auditorias seguidas.
+    const next = points[index + 1];
+    if (!next?.endsAt || !point.endsAt) return true;
+    const diffDays = (Date.parse(`${next.endsAt}T00:00:00Z`) - Date.parse(`${point.endsAt}T00:00:00Z`)) / 86400000;
+    return !(diffDays >= 0 && diffDays <= 2);
   });
 }
 
@@ -1702,7 +1710,12 @@ function aggregateReportGroups(rawEntries, { dropParents = true, parentOf, famil
   const entries = dropParents ? dropParentTotals(rawEntries) : rawEntries;
   const familyRows = aggregateByFamily(entries, parentOf, familyOf);
   const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
-  const otherAbs = Math.abs(familyRows.find((row) => row.family === "Otros")?.value || 0);
+  // Peso BRUTO de lo que cae en "Otros" (no el neto): en cocina las
+  // categorias se cancelan entre si (+carnes, -verduras) y con el neto el
+  // modo por-categorias nunca se activaba, dejando todo el reporte como
+  // Destilados:0 ... Otros:<total> (hallazgo QA 10-ago).
+  const familyOfEntry = (category) => (familyOf && familyOf[String(category || "").toLowerCase().trim()]) || resolveFamily(category, parentOf);
+  const otherAbs = entries.reduce((sum, item) => sum + (familyOfEntry(item.category) === "Otros" ? Math.abs(item.value || 0) : 0), 0);
 
   if (!totalAbs || otherAbs / totalAbs <= 0.5) return familyRows;
 
@@ -4872,16 +4885,21 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   // La sugerencia comparable con la compra de ESTA semana es la emitida la
   // semana ANTERIOR (misma regla del desfase pedida por Pedro): se busca en
   // los reportes guardados del cliente; sin semana previa, cae a la actual.
-  const priorWeekly = (() => {
+  const priorPick = (() => {
     const currentEnd = String(payload.period?.endsAt || "");
-    if (!currentEnd) return null;
-    return (store.reports || [])
+    if (!currentEnd) return { near: null, any: null };
+    const earlier = (store.reports || [])
       .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
-      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]?.candidate || null;
+      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
+    const near = earlier.find(({ period }) => (Date.parse(`${currentEnd}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000 <= 9);
+    return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
-  const suggestedSource = (priorWeekly?.familySuggested?.length ? priorWeekly.familySuggested : payload.familySuggested) || [];
+  const priorWeekly = priorPick.near;
+  const suggestedSource = (priorWeekly?.familySuggested?.length
+    ? priorWeekly.familySuggested
+    : (priorPick.any ? [] : payload.familySuggested)) || [];
   const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
   const familyNames = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys(), ...REPORT_FAMILIES])];
   const familyPurchaseRows = familyNames
@@ -5609,19 +5627,31 @@ function dynamicReportData(store, report) {
       inventoryCost: item.inventoryCost || 0,
       usedCost: item.usedCost || 0,
     }));
-  const familyVariances = (payload.familyVariances || []).filter((item) => item.amount);
+  // Las 6 familias del reporte se muestran aunque esten en 0 (QA: "si Vinos
+  // esta en 0 no lo muestra"); las filas por-categoria (cocina) ya vienen
+  // sin ceros y "Otros" solo aparece con monto.
+  const familyVariances = (payload.familyVariances || []).filter((item) => item.amount || REPORT_FAMILIES.includes(item.family));
   // Compra sugerida comparable con la compra de esta semana: la emitida la
   // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
-  const priorWeekly = (() => {
+  const priorPick = (() => {
     const currentEnd = String(payload.period?.endsAt || "");
-    if (!currentEnd) return null;
-    return (store.reports || [])
+    if (!currentEnd) return { near: null, any: null };
+    const earlier = (store.reports || [])
       .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
-      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]?.candidate || null;
+      .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
+    const near = earlier.find(({ period }) => (Date.parse(`${currentEnd}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000 <= 9);
+    return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
-  const suggestedSource = (priorWeekly?.familySuggested?.length ? priorWeekly.familySuggested : payload.familySuggested) || [];
+  const priorWeekly = priorPick.near;
+  // Solo la sugerencia emitida la SEMANA ANTERIOR es comparable con la
+  // compra de esta semana. Si hay reportes previos pero ninguno cercano
+  // (hueco de semanas), no se muestra una sugerencia vieja como comparable;
+  // sin ningun previo (primer reporte del cliente) cae a la actual.
+  const suggestedSource = (priorWeekly?.familySuggested?.length
+    ? priorWeekly.familySuggested
+    : (priorPick.any ? [] : payload.familySuggested)) || [];
   const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
   const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
   const familyPurchases = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys()])]
