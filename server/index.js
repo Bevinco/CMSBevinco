@@ -1590,7 +1590,7 @@ function familyForCategory(name) {
   if (/cerveza|sidra|beer|cider/.test(text)) return "Cervezas y Sidra";
   if (/agua|bebida|energizante|kombucha|jugo|gaseosa|sin alcohol|s\/alcohol|cafe|café|leche|nectar|néctar/.test(text)) return "Sin Alcohol";
   if (/cabernet|carmenere|carménère|chardonnay|merlot|pinot|sauvignon|syrah|ensamblaje|late harvest|vino|rosé|rose\b|blend|malbec|riesling|viognier|moscato|torontel|cinsault|garnacha|tempranillo|zinfandel|petit|sangria|sangría/.test(text)) return "Vinos";
-  if (/whisk|bourbon|scotch|irish|vodka|gin\b|ron\b|rum\b|tequila|mezcal|pisco|licor|aperitivo|vermouth|vermut|brandy|cognac|cachaca|cachaça|destilado|amargo|bitter|anis|anís|grappa|sake|soju|absenta|premium/.test(text)) return "Destilados";
+  if (/whisk|bourbon|scotch|irish|vodka|gin\b|ron\b|rum\b|tequila|mezcal|pisco|licor|aperitivo|vermouth|vermut|brandy|cognac|cachaca|cachaça|destilado|amargo|bitter|anis|anís|grappa|sake|soju|absenta|premium|coctel|cóctel|cocktail|mixolog/.test(text)) return "Destilados";
   return "Otros";
 }
 
@@ -6565,6 +6565,37 @@ app.get("/api/module1/sculpture-inspect", requireAuth, async (request, response)
       rows: (parsed.rows || []).slice(0, 100).map((row) => row.values || row),
       totalRows: (parsed.rows || []).length,
       links: links.slice(0, 150),
+    });
+  } catch (error) {
+    response.status(error.status || 502).json({ error: error.message });
+  }
+});
+
+// Diagnostico: la fuente CRUDA (variance/intelipar) tal como la descarga el
+// sync, con encabezados y records fila a fila. Para auditar que columna trae
+// cada dato cuando una cifra del CMS no calza con Sculpture.
+app.get("/api/module1/sculpture-source", requireAuth, async (request, response) => {
+  const type = String(request.query.type || "varianceSummary");
+  const cid = configuredIdentifier(request.query.cid);
+  const pid = String(request.query.pid || "");
+  const area = String(request.query.area || "Food");
+  if (!["varianceDetailed", "varianceSummary", "intelipar"].includes(type) || !cid || !pid) {
+    response.status(400).json({ error: "Indica type (varianceDetailed|varianceSummary|intelipar), cid y pid." });
+    return;
+  }
+  try {
+    const data = await fetchSculptureInternalReport({
+      type, cid, pid, area,
+      baseUrl: String(request.query.baseUrl || "") || baseUrlForSculptureArea(area),
+      accountId: String(request.query.accountId || ""),
+    });
+    const rows = data.rows || [];
+    response.json({
+      type, cid, pid,
+      headers: data.headers || [],
+      rowsCount: rows.length,
+      rows: rows.slice(0, Number(request.query.limit || 40)).map((row) => row.record || row.values || row),
+      grandTotal: rows.map((row) => row.record || {}).find((record) => Object.values(record).some((value) => /grand\s*total/i.test(String(value)))) || null,
     });
   } catch (error) {
     response.status(error.status || 502).json({ error: error.message });
