@@ -4925,3 +4925,38 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 /* Chips de CC: tono neutro para distinguirlos de los destinatarios */
 .email-chip-cc { background: #f1ede0 !important; color: #6d7a72 !important; }
 :root[data-theme="dark"] .email-chip-cc { background: var(--surface-muted) !important; color: var(--text-muted) !important; }
+
+/* Vista previa del correo antes de enviar (reunion 14-ago) */
+.email-preview-modal {
+  width: min(760px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.email-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(0, 30, 67, 0.12);
+}
+.email-preview-head div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.email-preview-head small {
+  color: #5c6b7a;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.email-preview-frame {
+  width: 100%;
+  height: min(62vh, 640px);
+  border: 0;
+  background: #fff;
+}

@@ -27,6 +27,7 @@ import {
   Database,
   ExternalLink,
   FileSpreadsheet,
+  Eye,
   FileText,
   LayoutDashboard,
   ListChecks,
@@ -1618,6 +1619,8 @@ function App() {
   const [taskCommentDraft, setTaskCommentDraft] = useState("");
   const [taskTagDraft, setTaskTagDraft] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
+  const [taskSort, setTaskSort] = useState("fecha-asc");
+  const [emailPreviewOpen, setEmailPreviewOpen] = useState(false);
   const [taskViewMode, setTaskViewMode] = useState<"kanban" | "tabla">("kanban");
   const [taskSearch, setTaskSearch] = useState("");
   const visibleTasks = useMemo(() => {
@@ -1630,7 +1633,7 @@ function App() {
   }, [nativeTasks, taskSearch]);
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false });
+  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false, clientId: "" });
 
   const taskDetail = nativeTasks.find((task) => task.id === taskDetailId) || null;
   // Estado de la auditoria (Pendientes) del reporte abierto: manda sobre los
@@ -1703,12 +1706,13 @@ function App() {
             priority: newTask.priority,
             dueDate: newTask.dueDate,
             assignees: newTask.assignee ? [newTask.assignee] : [],
+            clientId: newTask.clientId,
             recurring: newTask.recurring,
           }),
         }),
       );
       setNativeTasks(payload.tasks || []);
-      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false });
+      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false, clientId: "" });
       setError("Pendiente creado.");
       setWorkStatus("ready");
     } catch (taskError) {
@@ -2468,6 +2472,23 @@ function App() {
     }
     setEmailCc((current) => (current.includes(value) ? current : [...current, value]));
     setEmailCcInput("");
+  }
+
+  // Vista previa del correo antes de enviar (reunion 14-ago): guarda el
+  // borrador actual y abre el shell HTML tal como lo vera el cliente.
+  async function openEmailPreview() {
+    if (!selectedReport) return;
+    try {
+      await readJson(await fetch(`/api/module1/reports/${selectedReport.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ comments: commentsDraft, emailDraft }),
+      }));
+      setEmailPreviewOpen(true);
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "No se pudo preparar la vista previa.");
+      setWorkStatus("error");
+    }
   }
 
   async function sendReportEmail() {
@@ -3667,6 +3688,9 @@ function App() {
                 {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
                 {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
               </button>
+              <button className="secondary-button" disabled={!selectedReport} type="button" onClick={openEmailPreview}>
+                <Eye size={16} /> Vista previa
+              </button>
               <button
                 className="secondary-button"
                 disabled={!selectedReport || savingDistribution || !emailRecipients.length}
@@ -3679,6 +3703,25 @@ function App() {
             </div>
           ) : null}
         </section>
+
+        {emailPreviewOpen && selectedReport ? (
+          <div className="task-modal-backdrop" onClick={() => setEmailPreviewOpen(false)}>
+            <div className="task-modal email-preview-modal" onClick={(event) => event.stopPropagation()}>
+              <header className="email-preview-head">
+                <div>
+                  <strong>Vista previa del correo</strong>
+                  <small>
+                    Para: {emailRecipients.join(", ") || "—"}
+                    {emailCc.length ? ` · CC: ${emailCc.join(", ")}` : ""}
+                  </small>
+                  <small>Asunto: {emailSubject || "(por definir)"} · Adjuntos: PDF del reporte + variance detallado</small>
+                </div>
+                <button aria-label="Cerrar vista previa" className="icon-button" type="button" onClick={() => setEmailPreviewOpen(false)}><X size={18} /></button>
+              </header>
+              <iframe className="email-preview-frame" src={`/api/module1/reports/${selectedReport.id}/email-preview?v=${selectedReport.updatedAt || ""}`} title="Vista previa del correo" />
+            </div>
+          </div>
+        ) : null}
 
         {selectedReport?.analysis ? (
           <section className="panel agent-panel">
@@ -4344,10 +4387,18 @@ function App() {
                     <button className={taskViewMode === "tabla" ? "active" : ""} type="button" onClick={() => setTaskViewMode("tabla")}>Tabla</button>
                   </div>
                   {taskViewMode === "tabla" ? (
-                    <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
-                      <option value="all">Todos los estados</option>
-                      {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                    </select>
+                    <>
+                      <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
+                        <option value="all">Todos los estados</option>
+                        {NATIVE_TASK_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                      <select aria-label="Ordenar tabla" value={taskSort} onChange={(event) => setTaskSort(event.target.value)}>
+                        <option value="fecha-asc">Fecha: más antigua primero</option>
+                        <option value="fecha-desc">Fecha: más reciente primero</option>
+                        <option value="estado">Por estado (flujo)</option>
+                        <option value="prioridad">Por prioridad</option>
+                      </select>
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -4370,7 +4421,15 @@ function App() {
                     <tbody>
                       {visibleTasks
                         .filter((task) => taskStatusFilter === "all" || task.status === taskStatusFilter)
-                        .sort((left, right) => String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999")))
+                        .sort((left, right) => {
+                          if (taskSort === "fecha-desc") return String(right.dueDate || "0000").localeCompare(String(left.dueDate || "0000"));
+                          if (taskSort === "estado") return NATIVE_TASK_STATUSES.indexOf(left.status) - NATIVE_TASK_STATUSES.indexOf(right.status);
+                          if (taskSort === "prioridad") {
+                            const rank = (priority?: string) => ["Urgente", "Alta", "Normal", "Baja"].indexOf(priority || "Normal");
+                            return rank(left.priority) - rank(right.priority);
+                          }
+                          return String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999"));
+                        })
                         .map((task) => (
                           <tr key={task.id}>
                             <td>
@@ -4452,6 +4511,17 @@ function App() {
                   <select value={newTask.priority} onChange={(event) => setNewTask((current) => ({ ...current, priority: event.target.value }))}>
                     {["Urgente", "Alta", "Normal", "Baja"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
                   </select>
+                </label>
+                <label>
+                  Local / auditoría (opcional)
+                  <select value={newTask.clientId} onChange={(event) => setNewTask((current) => ({ ...current, clientId: event.target.value }))}>
+                    <option value="">Sin local (tarea general)</option>
+                    {clients
+                      .slice()
+                      .sort((left, right) => clientDisplayName(left).localeCompare(clientDisplayName(right), "es"))
+                      .map((client) => <option key={client.id} value={client.id}>{clientDisplayName(client)}</option>)}
+                  </select>
+                  <small className="email-hint">Vinculada al local, la tarea aparece como su auditoría en los reportes semanales.</small>
                 </label>
                 <label>
                   Recurrencia

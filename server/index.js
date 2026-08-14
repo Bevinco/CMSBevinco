@@ -5076,8 +5076,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     const W = 470; const H = 240;
     const L = 150; const R = 452; const T = 22; const B = 200;
     const plotW = R - L; const plotH = B - T;
-    const nonZero = familyVariances.filter((item) => item.amount);
-    const rows = nonZero.length ? nonZero : familyVariances.slice(0, 6);
+    // Ordenado de mayor a menor impacto y con las familias en $0 incluidas,
+    // igual que el grafico dinamico del reporte web (pedido de Pedro,
+    // reunion 14-ago: PDF y web deben verse coherentes).
+    const rows = familyVariances.slice().sort((left, right) => (right.amount || 0) - (left.amount || 0));
     // Escala adaptativa: antes se redondeaba a multiplos de 50K y en locales
     // chicos (max 12K) las barras quedaban aplastadas en el centro.
     const rawAbs = Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.15;
@@ -6890,8 +6892,35 @@ function checkOverdueTasks(store) {
 function applyTaskAutomations(store) {
   const today = todayInChile();
   const now = Date.now();
+  const tomorrowDate = new Date(`${today}T00:00:00Z`);
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
+  const tomorrow = tomorrowDate.toISOString().slice(0, 10);
   let changed = false;
   for (const task of store.tasks || []) {
+    // Prioridad "Urgente" automatica cuando la fecha limite esta encima
+    // (vence hoy o manana) y la auditoria sigue activa; avisa a los
+    // responsables (reunion 14-ago). Una sola vez por fecha: si el equipo
+    // la baja a mano, se respeta.
+    if (
+      task.dueDate && task.dueDate <= tomorrow &&
+      !["Reporte Enviado", "Cancelada"].includes(task.status) &&
+      (task.priority || "Normal") !== "Urgente" &&
+      task.autoUrgentFor !== task.dueDate
+    ) {
+      task.autoUrgentFor = task.dueDate;
+      task.priority = "Urgente";
+      task.activity = [...(task.activity || []), taskEvent("Sistema", `subió la prioridad a Urgente (vence ${task.dueDate <= today ? "hoy" : "mañana"})`)].slice(-80);
+      if ((task.assignees || []).length) {
+        notifyUsers(store, {
+          users: task.assignees,
+          text: `Tarea URGENTE: "${task.name}" vence ${task.dueDate <= today ? "HOY" : `el ${task.dueDate}`}`,
+          taskId: task.id,
+          author: "",
+        });
+      }
+      task.updatedAt = new Date().toISOString();
+      changed = true;
+    }
     if (task.status === "Sin Iniciar" && task.dueDate && task.dueDate <= today && task.autoStartedFor !== task.dueDate) {
       task.autoStartedFor = task.dueDate;
       task.status = "En Proceso";
@@ -6918,6 +6947,10 @@ function applyTaskAutomations(store) {
     task.dueDate = nextDue;
     task.overdueNotifiedAt = "";
     task.autoStartedFor = "";
+    // La auditoria nueva parte limpia: la urgencia de la semana pasada no
+    // aplica a la semana que viene.
+    task.autoUrgentFor = "";
+    if (task.priority === "Urgente") task.priority = "Normal";
     task.updatedAt = new Date().toISOString();
     changed = true;
   }
@@ -9247,6 +9280,23 @@ async function varianceDetailForChat(store, report) {
   }
   return "";
 }
+
+// Vista previa del correo (reunion 14-ago): el cuerpo guardado dentro del
+// mismo shell HTML con el que sale el email real. El PDF y el variance van
+// como adjuntos al enviar, aca solo se anuncian.
+app.get("/api/module1/reports/:reportId/email-preview", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) {
+    response.status(404).send("No se encontró el reporte.");
+    return;
+  }
+  const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  response.type("html").send(renderEmailShellHtml({
+    clientName: client?.name || report.clientId,
+    bodyText: report.emailDraft || "(El cuerpo del correo está vacío: escríbelo en la pestaña Enviar o usa Redactar con IA.)",
+  }));
+});
 
 app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, response) => {
   const store = await readStore();
