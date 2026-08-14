@@ -1946,7 +1946,7 @@ function App() {
     }
   }
 
-  async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string } | null) {
+  async function loadClientPeriods(unit: { sculptureCid?: string; cid?: string; area?: string; baseUrl?: string; sculptureBaseUrl?: string; sculptureAccountId?: string } | null) {
     const requestId = ++periodsRequestRef.current;
     const isCurrent = () => requestId === periodsRequestRef.current;
     const cid = unit?.sculptureCid || unit?.cid || "";
@@ -1960,6 +1960,10 @@ function App() {
     try {
       const params = new URLSearchParams({ cid: String(cid), area: unit?.area || "" });
       if (unit?.baseUrl || unit?.sculptureBaseUrl) params.set("baseUrl", unit.baseUrl || unit.sculptureBaseUrl || "");
+      // Sin el accountId, los locales de las nubes nuevas (valdivia,
+      // cafediario, tt-afm) consultan con la cuenta principal y no traen
+      // periodos (QA 13-ago: "no me aparecen los periodos").
+      if (unit?.sculptureAccountId) params.set("accountId", unit.sculptureAccountId);
       const payload = await readJson<{ periods: SculpturePeriod[] }>(
         await fetch(`/api/module1/sculpture-units/periods?${params.toString()}`),
       );

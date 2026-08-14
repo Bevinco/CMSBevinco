@@ -2628,6 +2628,48 @@ function extractReportMetrics(parsedTable, familyOverrides) {
   };
 }
 
+// Cocinas: el variance SUMMARY trae la jerarquia real de familias que usa el
+// equipo (fila suelta "Carnes" = encabezado, "Vacuno:" = categoria hoja,
+// "Total Carnes:" = cierre con los montos agregados). El detailed no tiene
+// este nivel y el grafico mostraba las hojas (Gyosas, Palta...) como si
+// fueran familias (QA 13-ago). Devuelve las familias con sus totales y el
+// mapa hoja -> familia para que sugerencias y variance hablen igual.
+function extractSummaryFamilyGroups(parsedTable) {
+  const families = [];
+  const leafToFamily = {};
+  let currentFamily = "";
+  let currentLeaves = [];
+  const keyOf = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  for (const row of parsedTable.rows || []) {
+    const record = row.record || {};
+    const name = String(pickRecordValue(record, ["itemName", "nombreArticulo", "nombreArtículo", "nombreArtCulo"], (row.values || [])[0] || "")).trim();
+    if (!name) continue;
+    if (/grand\s+total/i.test(name)) { currentFamily = ""; currentLeaves = []; continue; }
+    const amount = parseNumber(pickRecordValue(record, ["diferenciaCosto", "extendedDifference", "difference"]));
+    const purchased = parseNumber(pickRecordValue(record, ["comprasCosto", "purchasedCost", "compraCosto"]));
+    const inventory = parseNumber(pickRecordValue(record, ["existenciaCosto", "inventoryCost", "stockCosto"]));
+    const used = parseNumber(pickRecordValue(record, ["usadoCosto", "usedCost", "costoUsado"]));
+    const hasNumbers = Boolean(amount || purchased || inventory || used);
+    if (/^total\s+/i.test(name)) {
+      const familyName = cleanTotalName(name);
+      if (currentFamily && keyOf(familyName) === keyOf(currentFamily)) {
+        families.push({ family: currentFamily, amount, purchased });
+        for (const leaf of currentLeaves) leafToFamily[leaf] = currentFamily;
+      }
+      currentFamily = "";
+      currentLeaves = [];
+      continue;
+    }
+    if (/:\s*$/.test(name)) {
+      if (currentFamily) currentLeaves.push(cleanTotalName(name).toLowerCase());
+      continue;
+    }
+    // Fila suelta sin ":" y sin montos: encabezado de la siguiente familia.
+    if (!hasNumbers) { currentFamily = name; currentLeaves = []; }
+  }
+  return { families, leafToFamily };
+}
+
 function extractPurchaseActuals(parsedTable) {
   return (parsedTable.rows || [])
     .map((row) => {
@@ -3582,6 +3624,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   const syncResults = {};
   let detailedStockUnits = new Map();
   let varianceData = null;
+  let summaryFamilyGroups = null;
 
   if (!cid || !pid) {
     const missing = !cid ? "cid" : "pid";
@@ -3622,6 +3665,9 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             if (value && !merged[key]) merged[key] = value;
           }
           report.summary = merged;
+        }
+        if (type === "varianceSummary" && /food/i.test(area)) {
+          summaryFamilyGroups = extractSummaryFamilyGroups(data);
         }
         // Solo el variance DETAILED define categorias, familias y productos:
         // el summary tiene otra estructura de filas y duplicaba o vaciaba montos.
@@ -3756,6 +3802,12 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           const family = resolveFamily(category, suggestedParentOf);
           if (family !== "Otros") learnedFamilies[String(category).toLowerCase().trim()] = family;
         }
+        // Cocinas: la jerarquia hoja -> familia del variance summary manda,
+        // para que sugerencia y variance grafiquen las MISMAS familias
+        // (Carnes, Lacteos...) y no una mezcla de hojas (Vacuno, Quesos...).
+        for (const [leaf, family] of Object.entries(summaryFamilyGroups?.leafToFamily || {})) {
+          learnedFamilies[leaf] = family;
+        }
         if (client) client.categoryFamilies = learnedFamilies;
         const familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
         if (familySuggested.some((item) => item.suggested)) {
@@ -3786,6 +3838,17 @@ async function syncSculptureSources(store, report, requestBody = {}) {
     const refreshed = extractReportMetrics(varianceData, client.categoryFamilies);
     if (refreshed.familyVariances?.some((item) => item.amount)) report.familyVariances = refreshed.familyVariances;
     if (refreshed.familyPurchases?.some((item) => item.purchased)) report.familyPurchases = refreshed.familyPurchases;
+  }
+
+  // Cocinas: si el variance summary trajo la jerarquia real de familias
+  // (Carnes, Lacteos, Verduras...), esos totales MANDAN sobre cualquier
+  // re-agrupacion: son cifras exactas de Sculpture, suman igual al grand
+  // total, y el grafico deja de mostrar hojas como si fueran familias.
+  if ((summaryFamilyGroups?.families || []).length >= 2) {
+    report.familyVariances = summaryFamilyGroups.families.map((group) => ({ family: group.family, amount: Math.round(group.amount) }));
+    if (summaryFamilyGroups.families.some((group) => group.purchased)) {
+      report.familyPurchases = summaryFamilyGroups.families.map((group) => ({ family: group.family, purchased: Math.round(group.purchased) }));
+    }
   }
 
   if (!(report.summary?.revenue > 0)) {
@@ -5627,10 +5690,10 @@ function dynamicReportData(store, report) {
       inventoryCost: item.inventoryCost || 0,
       usedCost: item.usedCost || 0,
     }));
-  // Las 6 familias del reporte se muestran aunque esten en 0 (QA: "si Vinos
-  // esta en 0 no lo muestra"); las filas por-categoria (cocina) ya vienen
-  // sin ceros y "Otros" solo aparece con monto.
-  const familyVariances = (payload.familyVariances || []).filter((item) => item.amount || REPORT_FAMILIES.includes(item.family));
+  // Todas las familias guardadas se muestran, aunque esten en $0 (QA: "si
+  // Vinos esta en 0 no lo muestra"): en barra son las 6 clasicas y en
+  // cocina las del summary de Sculpture (Carnes, Lacteos, Verduras...).
+  const familyVariances = payload.familyVariances || [];
   // Compra sugerida comparable con la compra de esta semana: la emitida la
   // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
   const priorPick = (() => {
