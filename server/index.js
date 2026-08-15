@@ -7788,11 +7788,39 @@ app.get("/api/module1/sculpture-units/periods", requireAuth, async (request, res
     response.status(400).json({ error: "Falta el identificador del restaurante." });
     return;
   }
-  const baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(String(request.query.area || ""));
+  let baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(String(request.query.area || ""));
+  let accountId = String(request.query.accountId || "");
+
+  // Blindaje multi-cuenta (QA 15-ago: "no me aparecen los periodos"): si la
+  // peticion llega sin cuenta (front viejo en cache, u objeto cliente sin el
+  // campo), se resuelve desde el directorio/clientes guardados. Consultar un
+  // cid de otra nube con la cuenta principal devuelve una pagina sin
+  // periodos y parecia que el restaurante no tenia semanas.
+  if (!accountId) {
+    try {
+      const store = await readStore();
+      const known = (store.clients || []).find(
+        (client) => String(client.sculptureCid || client.cid || "") === cid && client.sculptureAccountId,
+      );
+      if (known) {
+        accountId = known.sculptureAccountId;
+        baseUrl = String(request.query.baseUrl || "") || known.sculptureBaseUrl || baseUrl;
+      } else {
+        const directory = await discoverSculptureUnits();
+        const unit = (directory.units || []).find((item) => String(item.sculptureCid || item.cid || "") === cid);
+        if (unit?.sculptureAccountId) {
+          accountId = unit.sculptureAccountId;
+          baseUrl = String(request.query.baseUrl || "") || unit.baseUrl || baseUrl;
+        }
+      }
+    } catch {
+      // sin store/directorio: se intenta igual con la cuenta principal
+    }
+  }
 
   try {
-    const periods = await fetchSculpturePeriodsForClient({ baseUrl, cid, accountId: String(request.query.accountId || "") });
-    response.json({ periods });
+    const periods = await fetchSculpturePeriodsForClient({ baseUrl, cid, accountId });
+    response.json({ periods, cuenta: accountId || "principal" });
   } catch (error) {
     console.error("[periods] activation failed:", error.status, error.message, String(error.details || "").slice(0, 300));
     response.status(error.status || 500).json({
