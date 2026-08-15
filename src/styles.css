@@ -4783,8 +4783,9 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .task-mention-row { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
 .task-mention-row .primary-button { margin-left: auto; min-height: 34px; padding: 0 14px; }
 .task-mention-chip { background: #f2f8ec; border: 1px solid #d8e8c8; border-radius: 999px; color: #4f7d17; cursor: pointer; font-size: 0.72rem; font-weight: 700; padding: 5px 10px; }
-.task-modal-foot { align-items: center; display: flex; justify-content: space-between; }
+.task-modal-foot { align-items: center; display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
 .task-modal-foot small { color: var(--text-muted); }
+.task-save-button { margin-left: auto; }
 .workflow-card-native { background: none; border: 0; cursor: pointer; padding: 0; }
 .week-task-native { cursor: pointer; font: inherit; text-align: left; }
 .sidebar-notif { position: relative; }

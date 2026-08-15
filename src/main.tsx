@@ -46,6 +46,7 @@ import {
   TrendingUp,
   Trash2,
   BookOpenCheck,
+  CheckCircle2,
   Upload,
   Users,
   ShoppingCart,
@@ -4745,6 +4746,20 @@ function App() {
                     <footer className="task-modal-foot">
                       <button className="managed-client-delete" type="button" onClick={() => deleteNativeTask(taskDetail.id)}>Eliminar tarea</button>
                       <small>Creada por {taskDetail.createdBy || "el equipo"}{taskDetail.createdAt ? ` · ${timeAgo(taskDetail.createdAt)}` : ""}</small>
+                      <button
+                        className="primary-button task-save-button"
+                        type="button"
+                        onClick={() => {
+                          // El modal ya guarda cada cambio al instante; este botón
+                          // confirma lo que esté a medio escribir (blur) y cierra.
+                          (document.activeElement as HTMLElement | null)?.blur?.();
+                          setTaskDetailId("");
+                          setError("Pendiente guardado.");
+                          setWorkStatus("ready");
+                        }}
+                      >
+                        <CheckCircle2 size={16} /> Guardar
+                      </button>
                     </footer>
                   </div>
                   <div className="task-modal-side">
