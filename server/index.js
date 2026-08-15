@@ -6915,6 +6915,26 @@ function applyTaskAutomations(store) {
       task.updatedAt = new Date().toISOString();
       changed = true;
     }
+    // Periodo finalizado => "Listo para el Reporte" (reunion 14-ago): si el
+    // dia de auditoria paso hace 3+ dias y la tarea sigue en un estado
+    // inicial, esa semana ya esta completa para enviar. Los estados que el
+    // equipo marca a mano (Falta Informacion, etc.) se respetan, y si
+    // alguien la devuelve, no se vuelve a empujar (una vez por fecha).
+    if (
+      task.clientId &&
+      ["Sin Iniciar", "En Proceso"].includes(task.status) &&
+      task.dueDate &&
+      (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${task.dueDate}T00:00:00Z`)) / 86400000 >= 3 &&
+      task.autoReadyFor !== task.dueDate
+    ) {
+      task.autoReadyFor = task.dueDate;
+      task.status = "Listo para el Reporte";
+      task.statusChangedAt = new Date().toISOString();
+      task.activity = [...(task.activity || []), taskEvent("Sistema", 'pasó a "Listo para el Reporte" automáticamente (el periodo auditado ya finalizó)')].slice(-80);
+      task.updatedAt = new Date().toISOString();
+      changed = true;
+      continue;
+    }
     if (task.status === "Sin Iniciar" && task.dueDate && task.dueDate <= today && task.autoStartedFor !== task.dueDate) {
       task.autoStartedFor = task.dueDate;
       task.status = "En Proceso";
@@ -6941,6 +6961,7 @@ function applyTaskAutomations(store) {
     task.dueDate = nextDue;
     task.overdueNotifiedAt = "";
     task.autoStartedFor = "";
+    task.autoReadyFor = "";
     // La auditoria nueva parte limpia: la urgencia de la semana pasada no
     // aplica a la semana que viene.
     task.autoUrgentFor = "";

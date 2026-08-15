@@ -3400,14 +3400,28 @@ function App() {
                     )}
                   </>
                 ) : selectedReport ? (
-                  <select
-                    className="unit-state-select"
-                    aria-label="Estado del flujo de trabajo"
-                    value={workflowStateFor(selectedReport)}
-                    onChange={(event) => setReportWorkflowState(selectedReport, event.target.value)}
-                  >
-                    {WORKFLOW_STATES.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
+                  <>
+                    <select
+                      className="unit-state-select"
+                      aria-label="Estado del flujo de trabajo"
+                      value={(() => {
+                        // Semana auditada ya finalizada y sin envio registrado:
+                        // el reporte esta completo => "Listo para el Reporte"
+                        // (reunion 14-ago). Estados manuales se respetan.
+                        const state = workflowStateFor(selectedReport);
+                        if (auditedWeekEnded && !selectedReport.emailLog?.sentAt && ["Sin Iniciar", "En Proceso"].includes(state)) {
+                          return "Listo para el Reporte";
+                        }
+                        return state;
+                      })()}
+                      onChange={(event) => setReportWorkflowState(selectedReport, event.target.value)}
+                    >
+                      {WORKFLOW_STATES.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                    {auditedWeekEnded && !selectedReport.emailLog?.sentAt && ["Sin Iniciar", "En Proceso"].includes(workflowStateFor(selectedReport)) ? (
+                      <small className="audit-state-hint is-ready">Semana auditada finalizada: lista para el reporte</small>
+                    ) : null}
+                  </>
                 ) : (
                   <strong>Sin reporte</strong>
                 )}
