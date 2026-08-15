@@ -305,6 +305,7 @@ type NativeTask = {
   recurring?: boolean;
   comments: Array<{ id: string; author: string; text: string; at: string }>;
   activity?: Array<{ id: string; author: string; text: string; at: string }>;
+  attachments?: Array<{ id: string; name: string; url: string; by: string; at: string }>;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -1640,7 +1641,14 @@ function App() {
   // comentarios y el envio (logica pedida por Pedro, 12-ago-2026).
   const auditTask = selectedReport?.auditTask || null;
   const auditLocked = Boolean(auditTask && ["Reporte Enviado", "Cancelada"].includes(auditTask.status));
-  const auditReady = !auditTask || auditTask.status === "Listo para el Reporte";
+  // Semana auditada ya terminada = reporte completo para enviar (regla de
+  // Pedro/Tamara, 14-ago: un reporte de una semana cerrada no necesita
+  // warning aunque la tarea no este "Listo para el Reporte").
+  const auditedWeekEnded = Boolean(
+    selectedReport?.period?.endsAt &&
+    String(selectedReport.period.endsAt) < new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(new Date()),
+  );
+  const auditReady = !auditTask || auditTask.status === "Listo para el Reporte" || auditedWeekEnded;
   const unreadNotifications = taskNotifications.filter((item) => !item.read);
 
   const nativeBoardTasks = useMemo<ClickupTask[]>(() => nativeTasks
@@ -1668,6 +1676,47 @@ function App() {
       setTaskNotifications((payload.notifications || []).sort((a, b) => b.at.localeCompare(a.at)));
     } catch {
       // sin tareas nativas: el tablero cae a ClickUp
+    }
+  }
+
+  async function uploadAttachmentFile(taskId: string, file: File) {
+    if (file.size > 8 * 1024 * 1024) {
+      setError("El archivo supera el máximo de 8 MB.");
+      setWorkStatus("error");
+      return;
+    }
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+      reader.readAsDataURL(file);
+    });
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch(`/api/module1/tasks/${taskId}/attachments`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: file.name, contentType: file.type, dataBase64 }),
+        }),
+      );
+      setNativeTasks(payload.tasks || []);
+      setError(`Adjunto "${file.name}" guardado.`);
+      setWorkStatus("ready");
+    } catch (attachError) {
+      setError(attachError instanceof Error ? attachError.message : "No se pudo adjuntar el archivo.");
+      setWorkStatus("error");
+    }
+  }
+
+  async function deleteAttachment(taskId: string, attachmentId: string) {
+    try {
+      const payload = await readJson<{ tasks: NativeTask[] }>(
+        await fetch(`/api/module1/tasks/${taskId}/attachments/${attachmentId}`, { method: "DELETE" }),
+      );
+      setNativeTasks(payload.tasks || []);
+    } catch (attachError) {
+      setError(attachError instanceof Error ? attachError.message : "No se pudo quitar el adjunto.");
+      setWorkStatus("error");
     }
   }
 
@@ -3421,7 +3470,7 @@ function App() {
                 ) : null}
                 {selectedReport ? (
                   <button className="button-link" type="button" onClick={() => shareWebReport(selectedReport.id)}>
-                    <ExternalLink size={17} /> Link web
+                    <ExternalLink size={17} /> Vista previa
                   </button>
                 ) : null}
               </div>
@@ -3689,7 +3738,7 @@ function App() {
                 {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
               </button>
               <button className="secondary-button" disabled={!selectedReport} type="button" onClick={openEmailPreview}>
-                <Eye size={16} /> Vista previa
+                <Eye size={16} /> Vista previa del correo
               </button>
               <button
                 className="secondary-button"
@@ -4395,7 +4444,8 @@ function App() {
                       <select aria-label="Ordenar tabla" value={taskSort} onChange={(event) => setTaskSort(event.target.value)}>
                         <option value="fecha-asc">Fecha: más antigua primero</option>
                         <option value="fecha-desc">Fecha: más reciente primero</option>
-                        <option value="estado">Por estado (flujo)</option>
+                        <option value="estado">Estado: flujo ↑</option>
+                        <option value="estado-desc">Estado: flujo ↓</option>
                         <option value="prioridad">Por prioridad</option>
                       </select>
                     </>
@@ -4416,7 +4466,23 @@ function App() {
                 <div className="tasks-table-wrap">
                   <table className="tasks-table">
                     <thead>
-                      <tr><th>Tarea</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Responsables</th><th className="num">💬</th><th></th></tr>
+                      <tr>
+                        <th>Tarea</th>
+                        <th>
+                          <button className="th-sort" type="button" onClick={() => setTaskSort((current) => current === "estado" ? "estado-desc" : "estado")}>
+                            Estado {taskSort === "estado" ? "▲" : taskSort === "estado-desc" ? "▼" : "↕"}
+                          </button>
+                        </th>
+                        <th>Prioridad</th>
+                        <th>
+                          <button className="th-sort" type="button" onClick={() => setTaskSort((current) => current === "fecha-asc" ? "fecha-desc" : "fecha-asc")}>
+                            Fecha {taskSort === "fecha-asc" ? "▲" : taskSort === "fecha-desc" ? "▼" : "↕"}
+                          </button>
+                        </th>
+                        <th>Responsables</th>
+                        <th className="num">💬</th>
+                        <th></th>
+                      </tr>
                     </thead>
                     <tbody>
                       {visibleTasks
@@ -4424,6 +4490,7 @@ function App() {
                         .sort((left, right) => {
                           if (taskSort === "fecha-desc") return String(right.dueDate || "0000").localeCompare(String(left.dueDate || "0000"));
                           if (taskSort === "estado") return NATIVE_TASK_STATUSES.indexOf(left.status) - NATIVE_TASK_STATUSES.indexOf(right.status);
+                          if (taskSort === "estado-desc") return NATIVE_TASK_STATUSES.indexOf(right.status) - NATIVE_TASK_STATUSES.indexOf(left.status);
                           if (taskSort === "prioridad") {
                             const rank = (priority?: string) => ["Urgente", "Alta", "Normal", "Baja"].indexOf(priority || "Normal");
                             return rank(left.priority) - rank(right.priority);
@@ -4648,6 +4715,33 @@ function App() {
                         }}
                       />
                     </label>
+                    <div className="task-modal-field">
+                      Adjuntos
+                      <div className="task-attachments">
+                        {(taskDetail.attachments || []).map((attachment) => (
+                          <span className="task-attachment" key={attachment.id}>
+                            <a href={attachment.url} rel="noreferrer" target="_blank">
+                              <Paperclip size={13} /> {attachment.name}
+                            </a>
+                            <button aria-label={`Quitar ${attachment.name}`} type="button" onClick={() => deleteAttachment(taskDetail.id, attachment.id)}>×</button>
+                          </span>
+                        ))}
+                        <label className="task-attach-button">
+                          <Upload size={14} /> Adjuntar archivo
+                          <input
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp"
+                            hidden
+                            type="file"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) uploadAttachmentFile(taskDetail.id, file);
+                              event.target.value = "";
+                            }}
+                          />
+                        </label>
+                        <small className="email-hint">PDF, Word, Excel o imagen · máx. 8 MB · quedan guardados en la nube.</small>
+                      </div>
+                    </div>
                     <footer className="task-modal-foot">
                       <button className="managed-client-delete" type="button" onClick={() => deleteNativeTask(taskDetail.id)}>Eliminar tarea</button>
                       <small>Creada por {taskDetail.createdBy || "el equipo"}{taskDetail.createdAt ? ` · ${timeAgo(taskDetail.createdAt)}` : ""}</small>

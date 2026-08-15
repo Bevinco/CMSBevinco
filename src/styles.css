@@ -4960,3 +4960,72 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
   border: 0;
   background: #fff;
 }
+
+/* Orden por columna en la tabla de pendientes */
+.tasks-table th .th-sort {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Adjuntos en el modal de tarea */
+.task-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.task-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 30, 67, 0.06);
+  border: 1px solid rgba(0, 30, 67, 0.14);
+  border-radius: 999px;
+  padding: 4px 8px 4px 10px;
+  font-size: 12.5px;
+}
+.task-attachment a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #001e43;
+  font-weight: 600;
+  text-decoration: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-attachment a:hover { text-decoration: underline; }
+.task-attachment button {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: #7a8794;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.task-attachment button:hover { color: #c0392b; }
+.task-attach-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px dashed rgba(0, 30, 67, 0.35);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #001e43;
+  cursor: pointer;
+}
+.task-attach-button:hover { background: rgba(144, 191, 79, 0.12); border-color: #90bf4f; }

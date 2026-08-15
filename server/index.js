@@ -5073,59 +5073,53 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   // ---- Grafico 2: Ahorro/faltantes inventario por familia (barras divergentes) ----
   function familyVarianceSvg() {
+    // Mismo lenguaje visual que el grafico del reporte web (Chart.js):
+    // nombres de familia a la izquierda, grilla vertical #efece1, barras de
+    // color por familia y la cifra en una pildora navy al extremo, ordenado
+    // de mayor a menor impacto (pedido de Pedro, reunion 14-ago).
     const W = 470; const H = 240;
-    const L = 150; const R = 452; const T = 22; const B = 200;
+    const L = 128; const R = 400; const T = 12; const B = 212;
     const plotW = R - L; const plotH = B - T;
-    // Ordenado de mayor a menor impacto y con las familias en $0 incluidas,
-    // igual que el grafico dinamico del reporte web (pedido de Pedro,
-    // reunion 14-ago: PDF y web deben verse coherentes).
     const rows = familyVariances.slice().sort((left, right) => (right.amount || 0) - (left.amount || 0));
-    // Escala adaptativa: antes se redondeaba a multiplos de 50K y en locales
-    // chicos (max 12K) las barras quedaban aplastadas en el centro.
-    const rawAbs = Math.max(...rows.map((item) => Math.abs(item.amount)), 1) * 1.15;
-    const maxAbs = niceCeil(rawAbs, niceStep(rawAbs, 3));
-    const xAt = (v) => L + ((v + maxAbs) / (2 * maxAbs)) * plotW;
-    const ticks = [];
-    for (let v = -maxAbs; v <= maxAbs; v += maxAbs / 3) ticks.push(v);
-    // Ticks limpios sin decimales ("-15K", "K", "15K"), como la referencia.
-    const tickLabel = (v) => {
-      if (v === 0) return "K";
-      if (Math.abs(v) >= 1e6) return fmtK(v);
-      const thousands = v / 1000;
-      return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+    const values = rows.map((item) => item.amount || 0);
+    const maxVal = Math.max(...values, 0);
+    const minVal = Math.min(...values, 0);
+    const niceOf = (raw) => {
+      const power = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
+      const unit = raw / power;
+      return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * power;
     };
-    const grid = ticks.map((v) =>
-      `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#e6e6e6"/>` +
-      `<text x="${xAt(v)}" y="${B + 12}" text-anchor="middle" class="ax">${tickLabel(v)}</text>`).join("");
+    const step = niceOf(Math.max((maxVal - minVal) * 1.2, 1) / 4);
+    const hi = Math.max(step, Math.ceil((maxVal * 1.15) / step) * step);
+    const lo = Math.min(0, Math.floor((minVal * 1.15) / step) * step);
+    const xAt = (v) => L + ((v - lo) / (hi - lo)) * plotW;
+    const gridTicks = [];
+    for (let v = lo; v <= hi + step / 2; v += step) gridTicks.push(v);
+    const grid = gridTicks.map((v) =>
+      `<line x1="${xAt(v)}" y1="${T}" x2="${xAt(v)}" y2="${B}" stroke="#efece1"/>` +
+      `<text x="${xAt(v)}" y="${B + 13}" text-anchor="middle" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
     const rowH = plotH / Math.max(rows.length, 1);
-    // Referencia del equipo: barras gruesas (llenan la fila) y la cifra en un
-    // chip del color de la barra pegado a su EXTREMO, por fuera: el largo de
-    // la barra sigue siendo la unica codificacion del valor.
-    // Sin espacio entre barras: cada una ocupa su fila completa, como la referencia.
-    const barH = rowH;
+    const barH = Math.min(22, Math.max(9, rowH - 8));
     const bars = rows.map((item, i) => {
+      const amount = item.amount || 0;
       const color = paletteFor(item.family, i);
       const yc = T + (i + 0.5) * rowH;
-      const x0 = xAt(0); const x1 = xAt(item.amount);
+      const x0 = xAt(0); const x1 = xAt(amount);
       const bx = Math.min(x0, x1); const bw = Math.max(2, Math.abs(x1 - x0));
-      const positive = item.amount >= 0;
-      const label = fmtK(item.amount).replace(/([KM])$/, " $1");
-      const chipW = 12 + label.length * 7.2;
-      const chipX = positive
-        ? Math.min(x1 + 1, W - chipW - 2)
-        : Math.max(x1 - 1 - chipW, 2);
-      return `<rect x="${bx}" y="${yc - barH / 2}" width="${bw}" height="${barH}" fill="${color}"/>` +
-        `<rect x="${chipX}" y="${yc - barH / 2}" width="${chipW}" height="${barH}" fill="${color}"/>` +
-        `<text x="${chipX + chipW / 2}" y="${yc + 4.5}" text-anchor="middle" class="chip">${label}</text>`;
+      const label = fmtK(amount);
+      const pillW = 16 + label.length * 6.4; const pillH = 16;
+      let pillX = amount >= 0 ? x1 + 4 : x1 - 4 - pillW;
+      pillX = Math.max(2, Math.min(pillX, W - pillW - 2));
+      return `<text x="${L - 8}" y="${yc + 4}" text-anchor="end" class="fam">${escapeHtml(item.family)}</text>` +
+        `<rect x="${bx}" y="${yc - barH / 2}" width="${bw}" height="${barH}" fill="${color}"/>` +
+        `<rect x="${pillX}" y="${yc - pillH / 2}" width="${pillW}" height="${pillH}" rx="4" fill="#001E43"/>` +
+        `<text x="${pillX + pillW / 2}" y="${yc + 4}" text-anchor="middle" class="pill">${label}</text>`;
     }).join("");
-    const legend = rows.map((item, i) =>
-      `<rect x="8" y="${T + 12 + i * 22}" width="9" height="9" fill="${paletteFor(item.family, i)}"/>` +
-      `<text x="21" y="${T + 20 + i * 22}" class="leg">${escapeHtml(item.family)}</text>`).join("");
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:12px Calibri,Arial;fill:#808080}.chip{font:700 12px Calibri,Arial;fill:#fff}.leg{font:700 12.5px Calibri,Arial;fill:#404040}</style>
+      <style>.ax{font:11px Calibri,Arial;fill:#8b95a5}.fam{font:700 11.5px Calibri,Arial;fill:#33475c}.pill{font:700 10.5px Calibri,Arial;fill:#fff}</style>
       ${grid}
-      <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#9a9a9a"/>
-      ${bars}${legend}
+      <line x1="${xAt(0)}" y1="${T}" x2="${xAt(0)}" y2="${B}" stroke="#c9ccd4"/>
+      ${bars}
     </svg>`;
   }
 
@@ -7007,6 +7001,111 @@ function markAuditTaskSent(store, report, author) {
   task.statusChangedAt = new Date().toISOString();
   task.updatedAt = new Date().toISOString();
 }
+
+// Adjuntos de tareas (reunion 14-ago): los archivos van a Supabase Storage
+// (el disco de Render se borra en cada deploy y el store JSON no aguanta
+// binarios). Bucket publico "cms-adjuntos"; se crea solo al primer uso.
+async function uploadTaskAttachment({ path, base64, contentType }) {
+  if (!supabaseConfigured) {
+    throw new Error("Supabase no está configurado en este entorno: no hay dónde guardar adjuntos.");
+  }
+  const body = Buffer.from(base64, "base64");
+  const doUpload = () => fetch(`${supabaseUrl}/storage/v1/object/cms-adjuntos/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseKey,
+      authorization: `Bearer ${supabaseKey}`,
+      "content-type": contentType || "application/octet-stream",
+      "x-upsert": "true",
+    },
+    body,
+    signal: AbortSignal.timeout(30000),
+  });
+  let uploadResponse = await doUpload();
+  if (uploadResponse.status === 400 || uploadResponse.status === 404) {
+    // Primer uso: el bucket no existe todavia. Se crea publico y se reintenta.
+    await fetch(`${supabaseUrl}/storage/v1/bucket`, {
+      method: "POST",
+      headers: supabaseHeaders(),
+      body: JSON.stringify({ id: "cms-adjuntos", name: "cms-adjuntos", public: true }),
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => {});
+    uploadResponse = await doUpload();
+  }
+  if (!uploadResponse.ok) {
+    const detail = await uploadResponse.text().catch(() => "");
+    throw new Error(`Supabase Storage rechazó el archivo (${uploadResponse.status}): ${detail.slice(0, 160)}`);
+  }
+  return `${supabaseUrl}/storage/v1/object/public/cms-adjuntos/${path}`;
+}
+
+const ATTACHMENT_EXTENSIONS = /\.(pdf|docx?|xlsx?|csv|png|jpe?g|webp)$/i;
+
+app.post("/api/module1/tasks/:taskId/attachments", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const task = store.tasks.find((item) => item.id === request.params.taskId);
+  if (!task) {
+    response.status(404).json({ error: "No se encontró la tarea." });
+    return;
+  }
+  const name = String(request.body?.name || "").trim().slice(0, 120);
+  const base64 = String(request.body?.dataBase64 || "");
+  if (!name || !base64) {
+    response.status(400).json({ error: "Falta el archivo (name + dataBase64)." });
+    return;
+  }
+  if (!ATTACHMENT_EXTENSIONS.test(name)) {
+    response.status(400).json({ error: "Formato no permitido. Usa PDF, Word, Excel, CSV o imagen." });
+    return;
+  }
+  const sizeBytes = Math.floor(base64.length * 0.75);
+  if (sizeBytes > 8 * 1024 * 1024) {
+    response.status(400).json({ error: "El archivo supera el máximo de 8 MB." });
+    return;
+  }
+  const safeName = name.replace(/[^\w.\-]+/g, "_");
+  try {
+    const url = await uploadTaskAttachment({
+      path: `${task.id}/${Date.now()}-${safeName}`,
+      base64,
+      contentType: String(request.body?.contentType || "application/octet-stream").slice(0, 100),
+    });
+    const author = request.session?.name || request.session?.username || "Equipo";
+    const attachment = { id: crypto.randomUUID(), name, url, by: author, at: new Date().toISOString() };
+    task.attachments = [...(task.attachments || []), attachment].slice(-20);
+    task.activity = [...(task.activity || []), taskEvent(author, `adjuntó "${name}"`)].slice(-80);
+    task.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    response.json({ task, tasks: store.tasks });
+  } catch (error) {
+    response.status(502).json({ error: error.message });
+  }
+});
+
+app.delete("/api/module1/tasks/:taskId/attachments/:attachmentId", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const task = store.tasks.find((item) => item.id === request.params.taskId);
+  if (!task) {
+    response.status(404).json({ error: "No se encontró la tarea." });
+    return;
+  }
+  const attachment = (task.attachments || []).find((item) => item.id === request.params.attachmentId);
+  task.attachments = (task.attachments || []).filter((item) => item.id !== request.params.attachmentId);
+  if (attachment?.url && supabaseConfigured) {
+    const objectPath = attachment.url.split("/object/public/cms-adjuntos/")[1];
+    if (objectPath) {
+      fetch(`${supabaseUrl}/storage/v1/object/cms-adjuntos/${objectPath}`, {
+        method: "DELETE",
+        headers: supabaseHeaders(),
+      }).catch(() => {});
+    }
+  }
+  const author = request.session?.name || request.session?.username || "Equipo";
+  if (attachment) task.activity = [...(task.activity || []), taskEvent(author, `quitó el adjunto "${attachment.name}"`)].slice(-80);
+  task.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  response.json({ task, tasks: store.tasks });
+});
 
 app.get("/api/module1/tasks", requireAuth, async (request, response) => {
   const store = await readStore();
