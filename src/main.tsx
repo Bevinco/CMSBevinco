@@ -1285,7 +1285,7 @@ function App() {
       setNewPending((current) => ({ ...current, status: current.status || meta.defaultTaskStatus || "LISTO PARA REPORTE" }));
     } catch (metaError) {
       setClickupMeta({ members: [], importantStatuses: [], defaultTaskStatus: "LISTO PARA REPORTE" });
-      setError(metaError instanceof Error ? metaError.message : "No se pudo cargar la configuracion de ClickUp.");
+      setError(metaError instanceof Error ? metaError.message : "No se pudo cargar la configuración del tablero.");
     }
   }
 
@@ -1315,7 +1315,7 @@ function App() {
       setClickupColumnPages({});
     } catch (tasksError) {
       setClickupTasks([]);
-      setError(tasksError instanceof Error ? tasksError.message : "No se pudieron cargar las tareas de ClickUp.");
+      setError(tasksError instanceof Error ? tasksError.message : "No se pudieron cargar las tareas del tablero.");
     }
   }
 
@@ -1328,7 +1328,7 @@ function App() {
     }
 
     setWorkStatus("loading");
-    setError("Creando pendiente en ClickUp...");
+    setError("Creando pendiente...");
 
     try {
       const dueDate = newPending.dueDate
@@ -1360,7 +1360,7 @@ function App() {
         priority: "3",
       });
       await loadClickupTasks(0, clickupStatusFilter);
-      setError("Pendiente creado en ClickUp.");
+      setError("Pendiente creado.");
       setWorkStatus("ready");
     } catch (taskError) {
       setError(taskError instanceof Error ? taskError.message : "Error desconocido.");
@@ -2455,10 +2455,10 @@ function App() {
       const updated = payload.task;
       setCalendarTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setClickupTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setError(`"${task.name}" movida a ${targetStatus} en ClickUp.`);
+      setError(`"${task.name}" movida a ${targetStatus}.`);
       setWorkStatus("ready");
     } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "No se pudo mover la tarea en ClickUp.");
+      setError(moveError instanceof Error ? moveError.message : "No se pudo mover la tarea.");
       setWorkStatus("error");
     }
   }
@@ -2669,7 +2669,7 @@ function App() {
   async function createClickupTask() {
     if (!selectedReport) return;
     setWorkStatus("loading");
-    setError("Creando tarea en ClickUp para este reporte...");
+    setError("Creando tarea para este reporte...");
 
     try {
       const payload = await readJson<{ task: NonNullable<Report["clickupTask"]>; report: Report }>(
@@ -2677,7 +2677,7 @@ function App() {
       );
       setSelectedReport(payload.report);
       setReports((current) => current.map((item) => (item.id === payload.report.id ? payload.report : item)));
-      setError(payload.task.url ? `Tarea creada en ClickUp: ${payload.task.url}` : "Tarea creada en ClickUp.");
+      setError(payload.task.url ? `Tarea creada: ${payload.task.url}` : "Tarea creada.");
       await loadClickupStatus();
       await loadClickupTasks();
       setWorkStatus("ready");
@@ -3149,7 +3149,7 @@ function App() {
           >
             <span>
               {/CLICKUP|token|OAuth|configured/i.test(error) && !isAdminUser(currentUserInfo)
-                ? "ClickUp no está disponible en este momento. Avisa al administrador."
+                ? "El tablero no está disponible en este momento. Avisa al administrador."
                 : error}
             </span>
             <button aria-label="Cerrar aviso" onClick={() => setError("")}>×</button>
@@ -3174,7 +3174,7 @@ function App() {
             <section className="panel workflow-panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Flujo de trabajo · ClickUp</p>
+                  <p className="eyebrow">Flujo de trabajo · Pendientes</p>
                   <h2>Estado de las auditorías</h2>
                 </div>
                 <ListChecks size={22} />
@@ -3223,7 +3223,7 @@ function App() {
                                       <ListChecks size={13} />
                                     </button>
                                   ) : (
-                                    <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir en ClickUp">
+                                    <a className="workflow-card-open" href={task.url} target="_blank" rel="noreferrer" title="Abrir enlace de la tarea">
                                       <strong>{task.name}</strong>
                                       <ExternalLink size={13} />
                                     </a>
@@ -3288,9 +3288,6 @@ function App() {
                     <button className="secondary-button" type="button" onClick={() => setCalendarWeekOffset(0)}>Hoy</button>
                   ) : null}
                   <button className="secondary-button" type="button" onClick={() => setCalendarWeekOffset((current) => current + 1)}>Siguiente ›</button>
-                  <a className="button-link" href={CLICKUP_CALENDAR_URL} target="_blank" rel="noreferrer">
-                    <CalendarDays size={17} /> Abrir en ClickUp
-                  </a>
                 </div>
               </div>
               <div className="week-calendar">
@@ -4383,7 +4380,7 @@ function App() {
             {!clients.length ? (
               <div className="empty-state">
                 <strong>Aún no hay clientes guardados</strong>
-                <small>Los clientes se crean al generar su primer reporte o al importar sus correos desde ClickUp.</small>
+                <small>Los clientes se crean al generar su primer reporte o al importar sus correos guardados.</small>
               </div>
             ) : null}
           </section>
