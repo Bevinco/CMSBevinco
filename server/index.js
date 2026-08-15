@@ -9407,13 +9407,15 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
-  // Candado (Pedro): si la auditoria de este periodo ya esta "Reporte
-  // Enviado" (o Cancelada), el correo no vuelve a salir hasta reabrirla en
-  // Pendientes.
+  // Candado (Pedro): sin iniciar ("inactiva", definicion 15-ago), ya enviada
+  // o cancelada => el correo no sale hasta cambiar el estado en Pendientes.
   const lockedAuditTask = auditTaskForReport(store, report);
-  if (lockedAuditTask && ["Reporte Enviado", "Cancelada"].includes(lockedAuditTask.status)) {
+  if (lockedAuditTask && ["Sin Iniciar", "Reporte Enviado", "Cancelada"].includes(lockedAuditTask.status)) {
+    const inactive = lockedAuditTask.status === "Sin Iniciar";
     response.status(409).json({
-      error: `La auditoría de este periodo está en "${lockedAuditTask.status}": el envío está bloqueado. Cambia su estado en Pendientes si necesitas reenviar.`,
+      error: inactive
+        ? "La auditoría de este periodo aún no comienza (Sin Iniciar): el envío está bloqueado hasta que la auditoría parta."
+        : `La auditoría de este periodo está en "${lockedAuditTask.status}": el envío está bloqueado. Cambia su estado en Pendientes si necesitas reenviar.`,
     });
     return;
   }

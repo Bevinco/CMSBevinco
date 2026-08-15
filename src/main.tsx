@@ -1641,7 +1641,10 @@ function App() {
   // Estado de la auditoria (Pendientes) del reporte abierto: manda sobre los
   // comentarios y el envio (logica pedida por Pedro, 12-ago-2026).
   const auditTask = selectedReport?.auditTask || null;
-  const auditLocked = Boolean(auditTask && ["Reporte Enviado", "Cancelada"].includes(auditTask.status));
+  // "Inactiva" = la auditoria aun no comienza (Sin Iniciar). Definicion de
+  // Pedro (15-ago): bloquea igual que Reporte Enviado/Cancelada.
+  const auditInactive = auditTask?.status === "Sin Iniciar";
+  const auditLocked = Boolean(auditTask && ["Sin Iniciar", "Reporte Enviado", "Cancelada"].includes(auditTask.status));
   // Semana auditada ya terminada = reporte completo para enviar (regla de
   // Pedro/Tamara, 14-ago: un reporte de una semana cerrada no necesita
   // warning aunque la tarea no este "Listo para el Reporte").
@@ -3389,7 +3392,7 @@ function App() {
                       {NATIVE_TASK_STATUSES.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                     {auditLocked ? (
-                      <small className="audit-state-hint is-locked">Auditoría cerrada: comentarios y envío bloqueados</small>
+                      <small className="audit-state-hint is-locked">{auditInactive ? "Auditoría inactiva (sin iniciar): comentarios y envío bloqueados" : "Auditoría cerrada: comentarios y envío bloqueados"}</small>
                     ) : !auditReady ? (
                       <small className="audit-state-hint is-warning">Para enviar debe estar "Listo para el Reporte"</small>
                     ) : (
@@ -3726,7 +3729,11 @@ function App() {
               <span>este cuerpo + el PDF del reporte y el variance detallado adjuntos.</span>
             </div>
             {auditTask && auditLocked ? (
-              <p className="audit-lock-note is-locked">La auditoría de este periodo está en "{auditTask.status}": el envío y los comentarios quedan bloqueados. Reábrela en Pendientes si necesitas reenviar.</p>
+              <p className="audit-lock-note is-locked">
+                {auditInactive
+                  ? "La auditoría de este periodo aún no comienza (Sin Iniciar): el envío y los comentarios quedan bloqueados. Cuando llegue el día de la auditoría pasa sola a En Proceso, o cámbiala a mano en Pendientes."
+                  : `La auditoría de este periodo está en "${auditTask.status}": el envío y los comentarios quedan bloqueados. Reábrela en Pendientes si necesitas reenviar.`}
+              </p>
             ) : auditTask && !auditReady ? (
               <p className="audit-lock-note is-warning">La auditoría está en "{auditTask.status}". Para enviar el reporte debería estar "Listo para el Reporte".</p>
             ) : null}
