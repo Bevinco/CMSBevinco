@@ -6064,6 +6064,10 @@ function renderDynamicReportHtml(store, report) {
   function alignAgainst(own, other, preferTop) {
     return function (ctx) {
       var i = ctx.dataIndex;
+      // Primer punto con dato: la etiqueta hacia la DERECHA del punto, si no
+      // la mitad queda montada sobre el eje Y / fuera del recuadro (QA 17-ago).
+      var firstWithData = own.findIndex(function (v) { return v != null; });
+      if (i === firstWithData) return "right";
       var mine = own[i];
       var theirs = other ? other[i] : null;
       if (mine == null) return preferTop ? "top" : "bottom";
