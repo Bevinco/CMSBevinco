@@ -5891,7 +5891,9 @@ function renderDynamicReportHtml(store, report) {
     .grid-var > * { min-width: 0; }
     .side-kpis { display: flex; flex-direction: column; gap: 14px; }
     .side-kpis .kpi-card { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-    .comments-grid { align-items: start; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    /* stretch: las dos tarjetas comparten altura aunque una tenga menos
+       comentarios; con "start" la corta quedaba flotando desalineada. */
+    .comments-grid { align-items: stretch; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .comment-card h3 { color: #5c8f1e; font-size: 13.5px; font-weight: 800; margin: 0 0 9px; }
     .comment-card p { color: var(--text-light); font-size: 13px; line-height: 1.65; margin: 0 0 8px; }
     .comment-card p b { color: var(--text); }
@@ -6182,14 +6184,16 @@ function renderDynamicReportHtml(store, report) {
         labels: labels,
         datasets: [
           { label: "Compra sugerida", data: suggested, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: function (ctx) { return ctx.dataIndex === labels.length - 1 && nextSuggested ? 6 : 4; }, spanGaps: true,
-            datalabels: { display: true, align: alignAgainst(suggested, purchased, true), offset: 8, clip: false, color: "#5c8f1e", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } },
+            datalabels: { display: true, align: alignAgainst(suggested, purchased, true), offset: 8, clip: false, clamp: true, color: "#5c8f1e", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } },
           { label: "Compra realizada", data: purchased, borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, spanGaps: true,
-            datalabels: { display: true, align: alignAgainst(purchased, suggested, false), offset: 8, clip: false, color: NAVY, font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } }
+            datalabels: { display: true, align: alignAgainst(purchased, suggested, false), offset: 8, clip: false, clamp: true, color: NAVY, font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? fmtK(v) : ""; } } }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        layout: { padding: { top: 18, right: 26 } },
+        // padding izquierdo + clamp: la cifra del primer punto (ej. "5.5M")
+        // se salia del recuadro por la izquierda (QA 17-ago).
+        layout: { padding: { top: 18, right: 26, left: 24 } },
         interaction: { mode: "index", intersect: false },
         plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.y); } } } },
