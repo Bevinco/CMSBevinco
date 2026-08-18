@@ -6795,6 +6795,7 @@ function cleanTaskPatch(body = {}) {
       .slice(0, 8);
   }
   if (body.clientId !== undefined) patch.clientId = String(body.clientId || "");
+  if (body.recurringWeeks !== undefined) patch.recurringWeeks = Number(body.recurringWeeks) === 2 ? 2 : 1;
   if (body.priority !== undefined) {
     const priority = String(body.priority);
     patch.priority = ["Urgente", "Alta", "Normal", "Baja"].includes(priority) ? priority : "Normal";
@@ -6963,7 +6964,7 @@ function applyTaskAutomations(store) {
     if (!recurring) continue;
     if (now - Date.parse(task.statusChangedAt) < 24 * 3600 * 1000) continue;
     const nextDue = nextAuditDate(task, today);
-    task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría de la semana siguiente (${nextDue}) tras 24h en "Reporte Enviado"`)].slice(-80);
+    task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría siguiente (${nextDue}${Number(task.recurringWeeks) === 2 ? ", quincenal" : ""}) tras 24h en "Reporte Enviado"`)].slice(-80);
     task.status = "Sin Iniciar";
     task.statusChangedAt = new Date().toISOString();
     task.dueDate = nextDue;
@@ -6994,6 +6995,8 @@ function nextAuditDate(task, today) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
     if (cursor.getUTCDay() === anchor) break;
   }
+  // Auditorias quincenales (pedido 18-ago): la siguiente es en DOS semanas.
+  if (Number(task.recurringWeeks) === 2) cursor.setUTCDate(cursor.getUTCDate() + 7);
   return cursor.toISOString().slice(0, 10);
 }
 
@@ -7168,6 +7171,7 @@ app.post("/api/module1/tasks", requireAuth, async (request, response) => {
     assignees: patch.assignees || [],
     tags: patch.tags || [],
     recurring: patch.recurring === true,
+    recurringWeeks: patch.recurringWeeks === 2 ? 2 : 1,
     comments: [],
     activity: [taskEvent(request.session?.name || request.session?.username, "creó esta tarea")],
     createdBy: request.session?.name || request.session?.username || "",

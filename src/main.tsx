@@ -307,6 +307,7 @@ type NativeTask = {
   comments: Array<{ id: string; author: string; text: string; at: string }>;
   activity?: Array<{ id: string; author: string; text: string; at: string }>;
   attachments?: Array<{ id: string; name: string; url: string; by: string; at: string }>;
+  recurringWeeks?: number;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -1635,7 +1636,7 @@ function App() {
   }, [nativeTasks, taskSearch]);
   const [generateWeekDate, setGenerateWeekDate] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false, clientId: "" });
+  const [newTask, setNewTask] = useState({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurrence: "", clientId: "" });
 
   const taskDetail = nativeTasks.find((task) => task.id === taskDetailId) || null;
   // Estado de la auditoria (Pendientes) del reporte abierto: manda sobre los
@@ -1760,12 +1761,13 @@ function App() {
             dueDate: newTask.dueDate,
             assignees: newTask.assignee ? [newTask.assignee] : [],
             clientId: newTask.clientId,
-            recurring: newTask.recurring,
+            recurring: newTask.recurrence !== "",
+            recurringWeeks: newTask.recurrence === "2" ? 2 : 1,
           }),
         }),
       );
       setNativeTasks(payload.tasks || []);
-      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurring: false, clientId: "" });
+      setNewTask({ name: "", status: "Sin Iniciar", assignee: "", dueDate: "", description: "", priority: "Normal", recurrence: "", clientId: "" });
       setError("Pendiente creado.");
       setWorkStatus("ready");
     } catch (taskError) {
@@ -3303,7 +3305,26 @@ function App() {
                     day.setDate(monday.getDate() + index);
                     const dayKey = day.toDateString();
                     const sourceTasks = nativeBoardTasks.length ? nativeBoardTasks : calendarTasks.length ? calendarTasks : clickupTasks;
-                    const dayTasks = sourceTasks.filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey);
+                    const exactDay = sourceTasks
+                      .filter((task) => task.dueDate && new Date(Number(task.dueDate)).toDateString() === dayKey)
+                      .map((task) => ({ task, carried: false }));
+                    // Auditorías abiertas de semanas anteriores: se muestran en la
+                    // semana visible (actual/futura) en su mismo día, con su estado
+                    // ACTUAL, para que el calendario tenga todas las de la semana.
+                    const weekStart = new Date(monday);
+                    weekStart.setHours(0, 0, 0, 0);
+                    const carriedOver = calendarWeekOffset >= 0
+                      ? sourceTasks
+                          .filter((task) => {
+                            if (!task.dueDate || !task.native) return false;
+                            if (["Reporte Enviado", "Cancelada"].includes(task.status)) return false;
+                            const due = new Date(Number(task.dueDate));
+                            if (due >= weekStart) return false;
+                            return ((due.getDay() + 6) % 7) === index;
+                          })
+                          .map((task) => ({ task, carried: true }))
+                      : [];
+                    const dayTasks = [...exactDay, ...carriedOver];
                     const isToday = dayKey === today.toDateString();
                     return (
                       <div className={`week-day ${isToday ? "is-today" : ""}`} key={label}>
@@ -3311,7 +3332,7 @@ function App() {
                           <strong>{label}</strong>
                           <span>{day.getDate()}/{day.getMonth() + 1}</span>
                         </header>
-                        {dayTasks.length ? dayTasks.map((task) => {
+                        {dayTasks.length ? dayTasks.map(({ task, carried }) => {
                           const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
                           const inner = (
                             <>
@@ -3326,6 +3347,7 @@ function App() {
                               <span className="week-task-foot">
                                 <i className="week-status-dot" style={{ backgroundColor: task.statusColor || "#9db0aa" }} />
                                 <small>{task.status}</small>
+                                {carried ? <small className="week-late">Atrasada · {new Date(Number(task.dueDate)).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })}</small> : null}
                                 <span className="week-avatars">
                                   {(task.assignees || []).slice(0, 3).map((person) => (
                                     <b key={person.id || person.initials} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
@@ -4611,10 +4633,11 @@ function App() {
                 </label>
                 <label>
                   Recurrencia
-                  <span className="task-recurring-toggle">
-                    <input type="checkbox" checked={newTask.recurring} onChange={(event) => setNewTask((current) => ({ ...current, recurring: event.target.checked }))} />
-                    Se repite cada semana (mismo día)
-                  </span>
+                  <select value={newTask.recurrence} onChange={(event) => setNewTask((current) => ({ ...current, recurrence: event.target.value }))}>
+                    <option value="">No se repite</option>
+                    <option value="1">Cada semana (mismo día)</option>
+                    <option value="2">Cada 2 semanas (quincenal)</option>
+                  </select>
                 </label>
                 <button className="primary-button" disabled={workStatus === "loading"} type="submit">
                   <Plus size={17} /> Crear pendiente
@@ -4665,14 +4688,20 @@ function App() {
                         {taskDetail.dueDate ? (
                           <small className={`task-due-hint ${isTaskOverdue(taskDetail) ? "is-overdue" : ""}`}>{relativeDue(taskDetail.dueDate)}</small>
                         ) : null}
-                        <span className="task-recurring-toggle">
-                          <input
-                            type="checkbox"
-                            checked={taskDetail.recurring === true || (taskDetail.recurring === undefined && Boolean(taskDetail.clientId))}
-                            onChange={(event) => patchNativeTask(taskDetail.id, { recurring: event.target.checked })}
-                          />
-                          Se repite cada semana
-                        </span>
+                        <select
+                          className="task-recurring-select"
+                          value={(taskDetail.recurring === true || (taskDetail.recurring === undefined && Boolean(taskDetail.clientId)))
+                            ? (taskDetail.recurringWeeks === 2 ? "2" : "1")
+                            : ""}
+                          onChange={(event) => patchNativeTask(taskDetail.id, {
+                            recurring: event.target.value !== "",
+                            recurringWeeks: event.target.value === "2" ? 2 : 1,
+                          })}
+                        >
+                          <option value="">No se repite</option>
+                          <option value="1">Se repite cada semana</option>
+                          <option value="2">Se repite cada 2 semanas (quincenal)</option>
+                        </select>
                       </label>
                       <label>
                         Etiquetas
