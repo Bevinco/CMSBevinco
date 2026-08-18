@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Bevinco CMS · Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #001E43; --green: #90BF4F; --cream: #f9f6ef; --teal: #8bc6c1;
+    --ink: #1c2b3a; --muted: #5c6b7a; --line: #e6e0cf; --card: #ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--cream); color: var(--ink); font-family: "Inter", "Segoe UI", Arial, sans-serif; line-height: 1.55; }
+  .wrap { margin: 0 auto; max-width: 1080px; padding: 0 22px; }
+
+  header.hero { background: var(--navy); color: #fff; padding: 64px 0 72px; }
+  .brand { align-items: baseline; display: flex; gap: 12px; margin-bottom: 34px; }
+  .brand strong { color: #fff; font-size: 22px; font-weight: 900; letter-spacing: 0.02em; }
+  .brand strong i { color: var(--green); font-style: normal; }
+  .brand span { color: #9fb0c4; font-size: 13px; }
+  .hero h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 900; line-height: 1.12; max-width: 720px; }
+  .hero h1 em { color: var(--green); font-style: normal; }
+  .hero p.lead { color: #c7d2e0; font-size: 17px; margin-top: 16px; max-width: 640px; }
+  .hero .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
+  .hero .chips span { background: rgba(144,191,79,0.16); border: 1px solid rgba(144,191,79,0.45); border-radius: 999px; color: #d9ecc2; font-size: 12.5px; font-weight: 600; padding: 6px 14px; }
+  .demo-badge { background: var(--green); border-radius: 999px; color: #12300a; display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: 0.08em; margin-bottom: 18px; padding: 5px 14px; text-transform: uppercase; }
+
+  section { padding: 58px 0 8px; }
+  .eyebrow { color: #6b8f2f; font-size: 12.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+  h2 { font-size: clamp(22px, 3.2vw, 30px); font-weight: 900; margin: 6px 0 8px; }
+  .sub { color: var(--muted); max-width: 640px; }
+
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px rgba(0,30,67,0.05); overflow: hidden; }
+  .card .mock { background: #fdfcf7; border-bottom: 1px solid var(--line); min-height: 150px; padding: 16px; }
+  .card .txt { padding: 16px 18px 20px; }
+  .card h3 { font-size: 16.5px; font-weight: 800; margin-bottom: 5px; }
+  .card p { color: var(--muted); font-size: 13.5px; }
+
+  /* mockups en CSS puro */
+  .m-kpis { display: grid; gap: 8px; grid-template-columns: repeat(3, 1fr); }
+  .m-kpi { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; }
+  .m-kpi i { color: var(--muted); display: block; font-size: 9.5px; font-style: normal; letter-spacing: 0.06em; text-transform: uppercase; }
+  .m-kpi b { color: var(--navy); font-size: 15px; }
+  .m-kpi b.pos { color: #5c8f1e; }
+  .m-line { background: #fff; border: 1px solid var(--line); border-radius: 10px; margin-top: 8px; padding: 10px 10px 6px; }
+  .m-bars { align-items: end; display: flex; gap: 7px; height: 56px; }
+  .m-bars i { background: var(--teal); border-radius: 3px 3px 0 0; flex: 1; }
+  .m-bars i.g { background: var(--green); }
+  .m-bars i.n { background: var(--navy); }
+
+  .m-board { display: grid; gap: 7px; grid-template-columns: repeat(3, 1fr); }
+  .m-col { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .m-col u { color: var(--muted); display: block; font-size: 9.5px; font-weight: 700; margin-bottom: 7px; text-decoration: none; text-transform: uppercase; }
+  .m-task { background: var(--cream); border: 1px solid var(--line); border-radius: 7px; font-size: 10px; font-weight: 700; margin-bottom: 6px; padding: 7px 8px; }
+  .m-task s { border-radius: 999px; display: inline-block; font-size: 8.5px; margin-top: 4px; padding: 1px 7px; text-decoration: none; }
+  .m-task s.red { background: #fde8e6; color: #c0392b; }
+  .m-task s.grn { background: #e8f3d8; color: #5c8f1e; }
+  .m-task s.blu { background: #e3edf7; color: #2e75b6; }
+
+  .m-rows { background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .m-row { border-bottom: 1px solid #f0ece0; display: flex; font-size: 10.5px; justify-content: space-between; padding: 8px 12px; }
+  .m-row:last-child { border-bottom: 0; }
+  .m-row b.tot { color: #5c8f1e; }
+  .m-head { background: var(--navy); color: #fff; font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .m-mails { display: flex; flex-wrap: wrap; gap: 6px; }
+  .m-mails span { background: #eef4e2; border: 1px solid #d3e3b5; border-radius: 999px; color: #476c17; font-size: 10px; font-weight: 600; padding: 4px 10px; }
+  .m-mails span.cc { background: #eef1f4; border-color: #d5dce3; color: #5c6b7a; }
+
+  .m-chat { display: flex; flex-direction: column; gap: 7px; }
+  .m-chat i { border-radius: 11px; font-size: 10.5px; font-style: normal; max-width: 85%; padding: 8px 11px; }
+  .m-chat i.q { align-self: flex-end; background: var(--navy); color: #fff; }
+  .m-chat i.a { align-self: flex-start; background: #fff; border: 1px solid var(--line); }
+
+  /* ciclo */
+  .cycle { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 28px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 13px; padding: 14px; position: relative; }
+  .step b { display: block; font-size: 13.5px; }
+  .step small { color: var(--muted); display: block; font-size: 11.5px; margin-top: 4px; }
+  .step .auto { background: #fff7e0; border: 1px solid #f0dd9d; border-radius: 999px; color: #8a6d1a; display: inline-block; font-size: 9.5px; font-weight: 800; margin-bottom: 7px; padding: 2px 9px; }
+  .step .team { background: #e3edf7; border: 1px solid #c5d9ee; border-radius: 999px; color: #2e75b6; display: inline-block; font-size: 9.5px; font-weight: 800; margin-bottom: 7px; padding: 2px 9px; }
+
+  .integrations { color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px 26px; font-size: 13.5px; font-weight: 600; margin-top: 22px; }
+  .integrations b { color: var(--navy); }
+
+  footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; margin-top: 64px; padding: 26px 0 40px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand"><strong>BEVINCO<i>.</i> CMS</strong><span>Sculpture Hospitality · Chile</span></div>
+    <span class="demo-badge">Demo de presentación</span>
+    <h1>Toda la operación de auditorías, <em>en un solo lugar</em>.</h1>
+    <p class="lead">Reportes semanales y mensuales conectados a Sculpture Hospitality, análisis con IA, envío a clientes, sugerencias de compra y la gestión del equipo — con un ciclo de auditoría que avanza solo.</p>
+    <div class="chips">
+      <span>Reportes con IA</span><span>Enlace web dinámico</span><span>PDF de marca</span><span>Pendientes · Kanban</span><span>Compras Intelipar/PAR</span><span>Correos automáticos</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Módulos</p>
+    <h2>Qué hace el sistema</h2>
+    <p class="sub">Cada semana, el CMS trae los datos de Sculpture, arma el reporte, lo analiza con IA y acompaña al equipo hasta el envío al cliente.</p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="mock">
+          <div class="m-kpis">
+            <div class="m-kpi"><i>Ingresos</i><b>$10.4M</b></div>
+            <div class="m-kpi"><i>% Costo</i><b>26.5%</b></div>
+            <div class="m-kpi"><i>Diferencia</i><b class="pos">+$46K</b></div>
+          </div>
+          <div class="m-line"><div class="m-bars"><i style="height:46%"></i><i class="n" style="height:64%"></i><i style="height:38%"></i><i class="n" style="height:74%"></i><i style="height:55%"></i><i class="g" style="height:88%"></i></div></div>
+        </div>
+        <div class="txt"><h3>Reportes semanales y mensuales</h3><p>Cifras directas de Sculpture (variance, Intelipar), verificadas contra la fuente. Histórico, familias de productos y top de variaciones.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="mock">
+          <div class="m-board">
+            <div class="m-col"><u>Sin Iniciar</u><div class="m-task">Bardot barra<br><s class="blu">20/08</s></div><div class="m-task">El Bajo<br><s class="blu">19/08</s></div></div>
+            <div class="m-col"><u>En Proceso</u><div class="m-task">Tambo Cocina<br><s class="red">Urgente</s></div></div>
+            <div class="m-col"><u>Enviado</u><div class="m-task">Azotea<br><s class="grn">✓ 14/08</s></div></div>
+          </div>
+        </div>
+        <div class="txt"><h3>Pendientes del equipo</h3><p>Kanban con arrastrar y soltar, recurrencia estilo calendario, adjuntos, comentarios con @menciones y notificaciones. El estado de cada auditoría avanza solo.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="mock">
+          <div class="m-rows">
+            <div class="m-row m-head"><span>Producto</span><span>Sugerido</span></div>
+            <div class="m-row"><span>Filete</span><b>12 kg</b></div>
+            <div class="m-row"><span>Camarón 36/40</span><b>8 kg</b></div>
+            <div class="m-row"><span>TOTAL DEL PEDIDO</span><b class="tot">$1.6M</b></div>
+          </div>
+        </div>
+        <div class="txt"><h3>Sugerencias de compra</h3><p>PAR e Intelipar por local y período, con mezclas de barra, exceso de stock y exportación a Excel con formato listo para el proveedor.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="mock">
+          <div class="m-chat">
+            <i class="q">¿Por qué subió el costo de destilados esta semana?</i>
+            <i class="a">El faltante se concentra en Ron ($-49.079, -99.8%). Revisa el conteo de Havana Club Añejo…</i>
+          </div>
+        </div>
+        <div class="txt"><h3>Agente IA por reporte</h3><p>Chat que conoce el variance completo, los criterios del negocio y el historial del cliente. Redacta el análisis y el correo con un click.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="mock">
+          <div class="m-mails">
+            <span>gerencia@cliente.cl</span><span>chef@cliente.cl</span><span>compras@cliente.cl</span><span class="cc">CC: equipo@sculpture…</span>
+          </div>
+          <div class="m-rows" style="margin-top:10px">
+            <div class="m-row"><span>Reporte semanal + variance</span><b>PDF adjunto</b></div>
+            <div class="m-row"><span>Enlace web interactivo</span><b>bevinco…/r/…</b></div>
+          </div>
+        </div>
+        <div class="txt"><h3>Clientes y envíos</h3><p>Directorio de correos por local (Para y CC), vista previa del correo, PDF de marca y un enlace web dinámico con gráficos interactivos para cada cliente.</p></div>
+      </div>
+
+      <div class="card">
+        <div class="mock">
+          <div class="m-rows">
+            <div class="m-row m-head"><span>Verificación</span><span>Resultado</span></div>
+            <div class="m-row"><span>Ingresos vs Sculpture</span><b class="tot">exacto ✓</b></div>
+            <div class="m-row"><span>% costo real e ideal</span><b class="tot">exacto ✓</b></div>
+            <div class="m-row"><span>Variance por familia</span><b class="tot">exacto ✓</b></div>
+          </div>
+        </div>
+        <div class="txt"><h3>Datos auditables</h3><p>Cada cifra se puede contrastar contra la fuente cruda de Sculpture con herramientas de diagnóstico integradas. Sin cajas negras.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Automatización</p>
+    <h2>El ciclo de auditoría avanza solo</h2>
+    <p class="sub">El equipo trabaja; el sistema mueve los estados, avisa las urgencias y deja el tablero mirando siempre la semana que viene.</p>
+    <div class="cycle">
+      <div class="step"><span class="auto">Automático</span><b>Sin Iniciar</b><small>La auditoría espera su día (semanal, quincenal o mensual).</small></div>
+      <div class="step"><span class="auto">Automático</span><b>En Proceso</b><small>Al llegar el día de la auditoría, la tarjeta arranca sola.</small></div>
+      <div class="step"><span class="team">Equipo</span><b>Gráficos y comentarios</b><small>El equipo revisa, marca "Falta Información" si algo no cuadra.</small></div>
+      <div class="step"><span class="auto">Automático</span><b>Listo para el Reporte</b><small>Semana auditada cerrada = lista para enviar.</small></div>
+      <div class="step"><span class="auto">Automático</span><b>Reporte Enviado</b><small>Al enviar el correo desde el CMS, el estado se marca solo.</small></div>
+      <div class="step"><span class="auto">Automático</span><b>Rota a la próxima semana</b><small>Dos horas después, la tarjeta vuelve a "Sin Iniciar" con la fecha siguiente.</small></div>
+    </div>
+    <div class="integrations">
+      <span>Conectado a <b>Sculpture Hospitality</b> (multi-cuenta)</span>
+      <span>IA: <b>OpenAI</b></span>
+      <span>Correo: <b>Resend · dominio propio</b></span>
+      <span>Respaldo: <b>Supabase</b></span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Página de presentación — sin datos reales de clientes.</span>
+    <span>Bevinco · Sculpture Hospitality Chile — desarrollado con GoPoint Agency</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -8876,6 +8876,18 @@ async function reportForToken(request) {
   return { store, report: { ...report, webToken: token } };
 }
 
+// Pagina publica de presentacion del sistema (sin login y sin datos
+// reales): un tour por los modulos para compartir con quien sea.
+let demoHtmlCache = "";
+app.get("/demo", async (_request, response) => {
+  try {
+    if (!demoHtmlCache) demoHtmlCache = await fs.readFile(path.resolve(__dirname, "demo.html"), "utf8");
+    response.type("html").send(demoHtmlCache);
+  } catch {
+    response.status(404).send("Demo no disponible.");
+  }
+});
+
 app.get("/r/:token", async (request, response) => {
   const { store, report } = await reportForToken(request);
   if (!report) {
