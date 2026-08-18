@@ -7170,7 +7170,15 @@ app.get("/api/module1/tasks", requireAuth, async (request, response) => {
   const store = await readStore();
   const automated = applyTaskAutomations(store);
   const overdueChanged = checkOverdueTasks(store);
-  if (automated || overdueChanged) await writeStore(store);
+  if (automated || overdueChanged) {
+    // La persistencia no puede tumbar la lectura: si el disco/Supabase
+    // fallara, los cambios ya viven en la cache y se reintentan luego.
+    try {
+      await writeStore(store);
+    } catch (error) {
+      console.error("[tareas] persistencia de automatizaciones fallo:", error.message);
+    }
+  }
   const me = request.session?.email || request.session?.username || "";
   response.json({
     tasks: store.tasks,
