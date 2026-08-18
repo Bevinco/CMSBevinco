@@ -6945,7 +6945,16 @@ function applyTaskAutomations(store) {
       changed = true;
       continue;
     }
-    if (task.status === "Sin Iniciar" && task.dueDate && task.dueDate <= today && task.autoStartedFor !== task.dueDate) {
+    // El respeto a la devolucion manual solo vale si el equipo la devolvio a
+    // "Sin Iniciar" EL DIA de la auditoria (o despues): esa es la pelea
+    // consciente con la automatizacion. Si la devolvieron ANTES (tarea
+    // reagendada a futuro), el candado no aplica y arranca sola al llegar
+    // el dia. Sana ademas las tareas ya trabadas por el bug del 18-ago.
+    const statusChangedDay = task.statusChangedAt
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(new Date(task.statusChangedAt))
+      : "";
+    const manualHold = task.autoStartedFor === task.dueDate && statusChangedDay >= String(task.dueDate || "");
+    if (task.status === "Sin Iniciar" && task.dueDate && task.dueDate <= today && !manualHold) {
       task.autoStartedFor = task.dueDate;
       task.status = "En Proceso";
       task.statusChangedAt = new Date().toISOString();
@@ -7292,8 +7301,14 @@ app.patch("/api/module1/tasks/:taskId", requireAuth, async (request, response) =
     task.activity.push(taskEvent(author, `cambió el estado de "${task.status}" a "${patch.status}"`));
     task.statusChangedAt = new Date().toISOString();
     // Si el equipo la devuelve a mano a "Sin Iniciar", no re-empujarla a
-    // "En Proceso" ese mismo dia.
-    if (patch.status === "Sin Iniciar") task.autoStartedFor = task.dueDate || "";
+    // "En Proceso" ESE MISMO DIA. Pero si la auditoria quedo agendada a
+    // futuro, el candado se LIMPIA: reprogramar al dia siguiente dejaba la
+    // tarea trabada en Sin Iniciar para siempre (bug 18-ago: autoStartedFor
+    // quedaba con la fecha nueva y el dia que llegaba ya no arrancaba).
+    if (patch.status === "Sin Iniciar") {
+      const effectiveDue = patch.dueDate !== undefined ? patch.dueDate : (task.dueDate || "");
+      task.autoStartedFor = effectiveDue && effectiveDue <= todayInChile() ? effectiveDue : "";
+    }
   }
   if (patch.recurring !== undefined && patch.recurring !== (task.recurring === true || (task.recurring === undefined && Boolean(task.clientId)))) {
     task.activity.push(taskEvent(author, patch.recurring ? "marcó la tarea como recurrente (se repite cada semana)" : "quitó la recurrencia"));
