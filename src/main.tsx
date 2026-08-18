@@ -308,6 +308,7 @@ type NativeTask = {
   activity?: Array<{ id: string; author: string; text: string; at: string }>;
   attachments?: Array<{ id: string; name: string; url: string; by: string; at: string }>;
   recurringWeeks?: number;
+  recurringMonthly?: boolean;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -859,6 +860,25 @@ function relativeDue(dueDate: string) {
   if (days > 1) return `en ${days} días`;
   if (days === -1) return "venció ayer";
   return `venció hace ${Math.abs(days)} días`;
+}
+
+// Etiquetas de recurrencia estilo Google Calendar: el dia se lee de la
+// fecha de la tarea ("Cada semana el lunes", "Cada mes el tercer lunes").
+function recurrenceLabels(dueDate?: string) {
+  if (!dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return { weekly: "Cada semana (mismo día)", biweekly: "Cada 2 semanas (quincenal)", monthly: "Cada mes (mismo día del mes)" };
+  }
+  const date = new Date(`${dueDate}T12:00:00`);
+  const weekday = date.toLocaleDateString("es-CL", { weekday: "long" });
+  const nth = Math.floor((date.getDate() - 1) / 7);
+  const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const isLastOfMonth = date.getDate() + 7 > daysInMonth;
+  const ordinal = isLastOfMonth && nth >= 3 ? "último" : ["primer", "segundo", "tercer", "cuarto", "quinto"][nth];
+  return {
+    weekly: `Cada semana el ${weekday}`,
+    biweekly: `Cada 2 semanas el ${weekday}`,
+    monthly: `Cada mes el ${ordinal} ${weekday}`,
+  };
 }
 
 function isTaskOverdue(task: NativeTask) {
@@ -1763,6 +1783,7 @@ function App() {
             clientId: newTask.clientId,
             recurring: newTask.recurrence !== "",
             recurringWeeks: newTask.recurrence === "2" ? 2 : 1,
+            recurringMonthly: newTask.recurrence === "m",
           }),
         }),
       );
@@ -4635,8 +4656,9 @@ function App() {
                   Recurrencia
                   <select value={newTask.recurrence} onChange={(event) => setNewTask((current) => ({ ...current, recurrence: event.target.value }))}>
                     <option value="">No se repite</option>
-                    <option value="1">Cada semana (mismo día)</option>
-                    <option value="2">Cada 2 semanas (quincenal)</option>
+                    <option value="1">{recurrenceLabels(newTask.dueDate).weekly}</option>
+                    <option value="2">{recurrenceLabels(newTask.dueDate).biweekly}</option>
+                    <option value="m">{recurrenceLabels(newTask.dueDate).monthly}</option>
                   </select>
                 </label>
                 <button className="primary-button" disabled={workStatus === "loading"} type="submit">
@@ -4691,16 +4713,18 @@ function App() {
                         <select
                           className="task-recurring-select"
                           value={(taskDetail.recurring === true || (taskDetail.recurring === undefined && Boolean(taskDetail.clientId)))
-                            ? (taskDetail.recurringWeeks === 2 ? "2" : "1")
+                            ? (taskDetail.recurringMonthly ? "m" : taskDetail.recurringWeeks === 2 ? "2" : "1")
                             : ""}
                           onChange={(event) => patchNativeTask(taskDetail.id, {
                             recurring: event.target.value !== "",
                             recurringWeeks: event.target.value === "2" ? 2 : 1,
+                            recurringMonthly: event.target.value === "m",
                           })}
                         >
                           <option value="">No se repite</option>
-                          <option value="1">Se repite cada semana</option>
-                          <option value="2">Se repite cada 2 semanas (quincenal)</option>
+                          <option value="1">{recurrenceLabels(taskDetail.dueDate).weekly}</option>
+                          <option value="2">{recurrenceLabels(taskDetail.dueDate).biweekly}</option>
+                          <option value="m">{recurrenceLabels(taskDetail.dueDate).monthly}</option>
                         </select>
                       </label>
                       <label>

@@ -6796,6 +6796,7 @@ function cleanTaskPatch(body = {}) {
   }
   if (body.clientId !== undefined) patch.clientId = String(body.clientId || "");
   if (body.recurringWeeks !== undefined) patch.recurringWeeks = Number(body.recurringWeeks) === 2 ? 2 : 1;
+  if (body.recurringMonthly !== undefined) patch.recurringMonthly = Boolean(body.recurringMonthly);
   if (body.priority !== undefined) {
     const priority = String(body.priority);
     patch.priority = ["Urgente", "Alta", "Normal", "Baja"].includes(priority) ? priority : "Normal";
@@ -6981,10 +6982,36 @@ function applyTaskAutomations(store) {
   return changed;
 }
 
+// Recurrencia mensual estilo Google Calendar: "cada mes el tercer lunes".
+// El n-esimo se toma de la fecha vigente; si ese mes no tiene n-esimo
+// (ej. quinto lunes), cae a la ULTIMA ocurrencia del mes.
+function nextMonthlyDate(task, baseStr) {
+  const due = new Date(`${task.dueDate || baseStr}T00:00:00Z`);
+  const anchorDay = Number.isInteger(task.recurringDay) ? task.recurringDay : due.getUTCDay();
+  const nth = Math.floor((due.getUTCDate() - 1) / 7);
+  const base = new Date(`${baseStr}T00:00:00Z`);
+  const target = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1));
+  let count = 0;
+  let lastMatch = null;
+  for (let day = 1; day <= 31; day += 1) {
+    const candidate = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), day));
+    if (candidate.getUTCMonth() !== target.getUTCMonth()) break;
+    if (candidate.getUTCDay() === anchorDay) {
+      lastMatch = candidate;
+      if (count === nth) return candidate.toISOString().slice(0, 10);
+      count += 1;
+    }
+  }
+  return (lastMatch || target).toISOString().slice(0, 10);
+}
+
 // Proxima fecha de auditoria: el dia ancla (recurringDay si la tarea es
 // recurrente con dia fijo; si no, el dia de semana de la fecha vigente),
 // estrictamente despues de hoy y de la fecha actual de la tarea.
 function nextAuditDate(task, today) {
+  if (task.recurringMonthly === true) {
+    return nextMonthlyDate(task, task.dueDate && task.dueDate > today ? task.dueDate : today);
+  }
   const baseStr = task.dueDate && task.dueDate > today ? task.dueDate : today;
   const anchorSource = task.dueDate || baseStr;
   const anchor = Number.isInteger(task.recurringDay)
@@ -7172,6 +7199,7 @@ app.post("/api/module1/tasks", requireAuth, async (request, response) => {
     tags: patch.tags || [],
     recurring: patch.recurring === true,
     recurringWeeks: patch.recurringWeeks === 2 ? 2 : 1,
+    recurringMonthly: patch.recurringMonthly === true,
     comments: [],
     activity: [taskEvent(request.session?.name || request.session?.username, "creó esta tarea")],
     createdBy: request.session?.name || request.session?.username || "",
