@@ -2881,6 +2881,28 @@ function App() {
     }
   }, [authStatus, activeView]);
 
+  // Pestañas que quedan abiertas horas/días: al volver a la pestaña se
+  // refrescan las tareas para que el tablero muestre los pases de estado
+  // automáticos del servidor (máx. una vez por minuto).
+  const lastTasksRefreshRef = useRef(0);
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastTasksRefreshRef.current < 60000) return;
+      lastTasksRefreshRef.current = now;
+      loadNativeTasks();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus]);
+
   useEffect(() => {
     const unit =
       sculptureUnits.find((item) => item.id === selectedSculptureUnitId) ||
