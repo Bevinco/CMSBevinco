@@ -6965,16 +6965,20 @@ function applyTaskAutomations(store) {
     }
     if (task.status !== "Reporte Enviado") continue;
     if (!task.statusChangedAt) {
-      // Tareas anteriores a esta version: el reloj de 24h parte ahora.
+      // Tareas anteriores a esta version: el reloj de rotacion parte ahora.
       task.statusChangedAt = new Date().toISOString();
       changed = true;
       continue;
     }
     const recurring = task.recurring === true || (task.recurring === undefined && Boolean(task.clientId));
     if (!recurring) continue;
-    if (now - Date.parse(task.statusChangedAt) < 24 * 3600 * 1000) continue;
+    // 2 horas de gracia en "Reporte Enviado" (pedido de Pedro, 18-ago: con
+    // 24h el tablero quedaba mirando la semana pasada; con la gracia corta
+    // se alcanza a pillar un envio equivocado y la tarjeta rota el mismo
+    // dia a la auditoria siguiente).
+    if (now - Date.parse(task.statusChangedAt) < 2 * 3600 * 1000) continue;
     const nextDue = nextAuditDate(task, today);
-    task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría siguiente (${nextDue}${Number(task.recurringWeeks) === 2 ? ", quincenal" : ""}) tras 24h en "Reporte Enviado"`)].slice(-80);
+    task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría siguiente (${nextDue}${Number(task.recurringWeeks) === 2 ? ", quincenal" : ""}) tras el envío del reporte`)].slice(-80);
     task.status = "Sin Iniciar";
     task.statusChangedAt = new Date().toISOString();
     task.dueDate = nextDue;
