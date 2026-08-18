@@ -1699,8 +1699,11 @@ function App() {
       setNativeTasks(payload.tasks || []);
       setTaskUsers(payload.users || []);
       setTaskNotifications((payload.notifications || []).sort((a, b) => b.at.localeCompare(a.at)));
-    } catch {
-      // sin tareas nativas: el tablero cae a ClickUp
+    } catch (tasksError) {
+      // Visible: un catch silencioso hacía parecer que "Actualizar no hace
+      // nada" cuando en realidad la petición fallaba.
+      setError(tasksError instanceof Error ? `No se pudieron actualizar los pendientes: ${tasksError.message}` : "No se pudieron actualizar los pendientes.");
+      setWorkStatus("error");
     }
   }
 
@@ -2887,16 +2890,24 @@ function App() {
   const lastTasksRefreshRef = useRef(0);
   useEffect(() => {
     if (authStatus !== "authenticated") return;
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
+    const refresh = () => {
       const now = Date.now();
-      if (now - lastTasksRefreshRef.current < 60000) return;
+      if (now - lastTasksRefreshRef.current < 45000) return;
       lastTasksRefreshRef.current = now;
       loadNativeTasks();
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    // Sondeo: el tablero se actualiza solo cada 60s mientras la pestaña
+    // esté visible (los pases de estado del servidor llegan sin apretar nada).
+    const poll = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 60000);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => {
+      clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
