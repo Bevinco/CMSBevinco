@@ -9801,4 +9801,20 @@ app.listen(port, () => {
   readStore()
     .then((store) => console.log(`[store] listo: ${store.reports.length} reportes, ${(store.criteriaDocuments || []).length} criterios`))
     .catch((error) => console.error("[store] carga inicial fallo:", error.message));
+  // Reloj de automatizaciones de Pendientes: sin esto, los pases de estado
+  // (dia de auditoria -> En Proceso, rotacion semanal, urgencias, vencidas)
+  // solo corrian cuando alguien abria el CMS. Cada hora, pase lo que pase.
+  setInterval(async () => {
+    try {
+      const store = await readStore();
+      const automated = applyTaskAutomations(store);
+      const overdue = checkOverdueTasks(store);
+      if (automated || overdue) {
+        await writeStore(store);
+        console.log("[tareas] automatizaciones aplicadas por el reloj interno");
+      }
+    } catch (error) {
+      console.error("[tareas] reloj de automatizaciones fallo:", error.message);
+    }
+  }, 60 * 60 * 1000);
 });
