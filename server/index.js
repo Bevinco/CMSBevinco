@@ -2153,6 +2153,7 @@ async function generateReportAnalysisAI(payload) {
     // nivel macro del metodo; sin el, la IA no podia comentar "Total
     // Barriles" ni separar merma de faltante injustificado.
     familias: payload.familyVariances || [],
+    totalesFamiliaSummary: payload.familySummaryTotals || [],
     categorias: (payload.categoryVariances || []).slice(0, 40),
     productos: (payload.topProducts || []).slice(0, 20),
     productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
@@ -2668,6 +2669,40 @@ function extractSummaryFamilyGroups(parsedTable) {
     if (!hasNumbers) { currentFamily = name; currentLeaves = []; }
   }
   return { families, leafToFamily };
+}
+
+// Filas "Total <familia>" del variance SUMMARY tal cual las publica
+// Sculpture (cantidad CON SU UNIDAD, % y $), para el agente del chat.
+// Se leen POR POSICION de columna: al armar el record, "Diferencia" y
+// "% Diferencia" colisionan en la clave `diferencia` (la segunda pisa a
+// la primera) y la cantidad se perdia; el agente terminaba sumando el
+// detailed a mano, con riesgo de mezclar unidades (hallazgo 19-ago).
+function extractSummaryFamilyTotals(parsedTable) {
+  const headers = (parsedTable.headers || []).map((header) => String(header).trim().toLowerCase());
+  const indexOf = (label) => headers.indexOf(label);
+  const iDif = indexOf("diferencia");
+  const iPct = indexOf("% diferencia");
+  const iDifCost = headers.findIndex((header) => /^diferencia \(costo\)/.test(header));
+  const iUsado = indexOf("usado");
+  const iVendido = indexOf("vendido");
+  const iCompras = indexOf("compras");
+  const cell = (values, index) => (index >= 0 ? String(values[index] ?? "").trim() : "");
+  const totals = [];
+  for (const row of parsedTable.rows || []) {
+    const values = row.values || [];
+    const name = String(values[0] || "").trim();
+    if (!/^total\s+/i.test(name) || /grand\s*total/i.test(name)) continue;
+    totals.push({
+      familia: cleanTotalName(name),
+      diferencia: cell(values, iDif),
+      diferenciaPct: cell(values, iPct),
+      diferenciaCosto: Math.round(parseNumber(cell(values, iDifCost))),
+      usado: cell(values, iUsado),
+      vendido: cell(values, iVendido),
+      compras: cell(values, iCompras),
+    });
+  }
+  return totals.slice(0, 30);
 }
 
 function extractPurchaseActuals(parsedTable) {
@@ -3666,8 +3701,9 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           }
           report.summary = merged;
         }
-        if (type === "varianceSummary" && /food/i.test(area)) {
-          summaryFamilyGroups = extractSummaryFamilyGroups(data);
+        if (type === "varianceSummary") {
+          report.familySummaryTotals = extractSummaryFamilyTotals(data);
+          if (/food/i.test(area)) summaryFamilyGroups = extractSummaryFamilyGroups(data);
         }
         // Solo el variance DETAILED define categorias, familias y productos:
         // el summary tiene otra estructura de filas y duplicaba o vaciaba montos.
@@ -3848,6 +3884,47 @@ async function syncSculptureSources(store, report, requestBody = {}) {
     report.familyVariances = summaryFamilyGroups.families.map((group) => ({ family: group.family, amount: Math.round(group.amount) }));
     if (summaryFamilyGroups.families.some((group) => group.purchased)) {
       report.familyPurchases = summaryFamilyGroups.families.map((group) => ({ family: group.family, purchased: Math.round(group.purchased) }));
+    }
+  }
+
+  // Cocinas cuyo Intelipar NO trae columna de Pedido (ej. De la Ostia): el
+  // reporte quedaba sin "Compra sugerida". Se calcula con el motor del
+  // modulo Compras (misma formula PAR de cocina) y se agrupa por familia
+  // cruzando producto -> categoria (variance) -> familia (mapa aprendido).
+  if (!(report.familySuggested || []).some((item) => item.suggested) && /food/i.test(area) && client) {
+    try {
+      const periodForSuggest = store.periods.find((candidate) => candidate.id === report.periodId);
+      const { items } = await computeSuggestionItems({ client, period: periodForSuggest });
+      const ordered = (items || []).filter((item) => (item.orderCost || 0) > 0);
+      if ((items || []).length) {
+        // Aunque la orden sea $0 (todo el stock sobre el PAR), se registra:
+        // el KPI muestra "$0" con certeza en vez de quedar en blanco.
+        report.summary = report.summary || {};
+        report.summary.suggestedCost = Math.round(ordered.reduce((sum, item) => sum + (item.orderCost || 0), 0));
+      }
+      if (ordered.length) {
+        const categoryOf = new Map();
+        let walkingCategory = "";
+        for (const row of varianceData?.rows || []) {
+          const rowName = String(pickRecordValue(row.record, ["itemName", "nombreArticulo", "nombreArtículo", "nombreArtCulo"], row.values?.[0] || "")).trim();
+          if (!rowName) continue;
+          if (/^total\s+/i.test(rowName)) { walkingCategory = ""; continue; }
+          if (/:\s*$/.test(rowName)) { walkingCategory = cleanTotalName(rowName).toLowerCase(); continue; }
+          if (walkingCategory) categoryOf.set(rowName.toLowerCase(), walkingCategory);
+        }
+        const familyOfCategory = client.categoryFamilies || {};
+        const byFamily = new Map();
+        for (const item of ordered) {
+          const category = categoryOf.get(String(item.name || "").toLowerCase());
+          const family = (category && familyOfCategory[category]) || "Otros";
+          byFamily.set(family, (byFamily.get(family) || 0) + (item.orderCost || 0));
+        }
+        report.familySuggested = [...byFamily.entries()].map(([family, suggested]) => ({ family, suggested: Math.round(suggested) }));
+        report.summary = report.summary || {};
+        report.summary.suggestedCost = Math.round(ordered.reduce((sum, item) => sum + (item.orderCost || 0), 0));
+      }
+    } catch (error) {
+      console.error("[sugerencia] fallback de cocina fallo:", error.message);
     }
   }
 
@@ -4146,7 +4223,7 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
   // muestra en el cuadro Estado y bloquea comentarios/envio segun el caso.
   const auditTask = auditTaskForReport(store, report);
   payload.auditTask = auditTask
-    ? { id: auditTask.id, name: auditTask.name, status: auditTask.status, dueDate: auditTask.dueDate || "" }
+    ? { id: auditTask.id, name: auditTask.name, status: auditTask.status, dueDate: auditTask.dueDate || "", ...(auditTask.readonly ? { readonly: true } : {}) }
     : null;
   const knowledge = {
     criteriaDocuments: store.criteriaDocuments || [],
@@ -6978,6 +7055,10 @@ function applyTaskAutomations(store) {
     // dia a la auditoria siguiente).
     if (now - Date.parse(task.statusChangedAt) < 2 * 3600 * 1000) continue;
     const nextDue = nextAuditDate(task, today);
+    // Constancia del ciclo cerrado: el reporte de ESA semana debe seguir
+    // mostrando "Reporte Enviado" aunque la tarjeta rote a la siguiente
+    // (hallazgo de Tamara 19-ago: el estado desaparecia al rotar).
+    task.cycles = [...(task.cycles || []), { dueDate: task.dueDate, status: "Reporte Enviado", at: new Date().toISOString() }].slice(-40);
     task.activity = [...(task.activity || []), taskEvent("Sistema", `rotó a la auditoría siguiente (${nextDue}${Number(task.recurringWeeks) === 2 ? ", quincenal" : ""}) tras el envío del reporte`)].slice(-80);
     task.status = "Sin Iniciar";
     task.statusChangedAt = new Date().toISOString();
@@ -7055,6 +7136,15 @@ function auditTaskForReport(store, report) {
     .filter((task) => task.dueDate > period.endsAt && task.dueDate <= windowEndStr)
     .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
   if (inAuditWeek.length) return inAuditWeek[0];
+  // Ciclos cerrados: la tarjeta ya roto a la semana siguiente, pero la
+  // auditoria ENVIADA de esta semana quedo registrada en task.cycles.
+  // Se devuelve solo-lectura: el estado se muestra y bloquea, sin select.
+  for (const task of (store.tasks || []).filter((item) => item.clientId === report.clientId)) {
+    const cycle = (task.cycles || []).find((item) => item.dueDate && item.dueDate > period.endsAt && item.dueDate <= windowEndStr);
+    if (cycle) {
+      return { id: task.id, name: task.name, status: cycle.status || "Reporte Enviado", dueDate: cycle.dueDate, readonly: true };
+    }
+  }
   const inPeriod = tasks
     .filter((task) => period.startsAt && task.dueDate >= period.startsAt && task.dueDate <= period.endsAt)
     .sort((left, right) => right.dueDate.localeCompare(left.dueDate));
@@ -8465,6 +8555,9 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       // nivel macro que el equipo comenta primero; sin esto el agente decia
       // "no tengo el variance de Total Barriles" (reclamo de Pedro, 04-ago).
       familias: payload.familyVariances || [],
+      // Filas "Total <familia>" del summary TAL CUAL (cantidad con unidad,
+      // % y $): la fuente oficial para totales por familia.
+      totalesFamiliaSummary: payload.familySummaryTotals || [],
       categorias: (payload.categoryVariances || []).slice(0, 40),
       productos: (payload.topProducts || []).slice(0, 20),
       productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
@@ -8483,6 +8576,7 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       ? [
           "VARIANCE DETALLADO COMPLETO — obtenido AUTOMATICAMENTE desde Sculpture para este cliente y periodo. ES TU FUENTE PRIMARIA y tienes acceso total a el: NUNCA digas que no tienes acceso al variance, NUNCA digas que esta 'pegado en el chat' (nadie lo pego: llega solo, siempre), y NUNCA pidas que te peguen datos. Si en mensajes anteriores de esta conversacion dijiste que no tenias acceso, eso era un error ya corregido: ignoralo.",
           "Notas de lectura: cada fila es un producto bajo su categoria ('Categoria:' encabeza y 'Total Categoria:' cierra). Las 'familias' del extracto de arriba son agrupaciones del CMS sobre estas categorias (usa mapaCategoriaFamilia para cruzar; lo que no aparece en el mapa cae en 'Otros'). Para calculos por familia (cobertura, inventario, usado) agrega las filas del detalle segun ese mapa.",
+          "Para TOTALES por familia (diferencia en cantidad, % y $) usa 'totalesFamiliaSummary' del extracto: son las filas 'Total <familia>' del variance summary de Sculpture, tal cual, con la cantidad y SU UNIDAD. NO reconstruyas esos totales sumando el detailed (las unidades de los productos pueden diferir y el resultado sale mal).",
           "Si una familia del extracto (p. ej. 'Otros') no tiene categorias en este detalle, significa que esa familia no tuvo productos en el variance de la semana (suele venir solo del Intelipar de compras): dilo tal cual, en una linea, y sigue; ese dato NO existe en ninguna otra parte, no lo pidas.",
           varianceDetailText,
         ].join("\n")

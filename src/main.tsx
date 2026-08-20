@@ -191,7 +191,7 @@ type Report = {
   backfill?: boolean;
   monthly?: boolean;
   emailLog?: { sentAt: string; recipients: string[]; subject: string; cc?: string[] };
-  auditTask?: { id: string; name: string; status: string; dueDate: string } | null;
+  auditTask?: { id: string; name: string; status: string; dueDate: string; readonly?: boolean } | null;
   chat?: Array<{ role: "user" | "assistant"; content: string }>;
   includedPeriods?: Array<{ id: string; label: string; startsAt: string; endsAt: string }>;
   clickupTask?: {
@@ -3457,7 +3457,12 @@ function App() {
               </article>
               <article>
                 <span>Estado</span>
-                {selectedReport && auditTask ? (
+                {selectedReport && auditTask?.readonly ? (
+                  <>
+                    <strong>{auditTask.status}</strong>
+                    <small className="audit-state-hint is-locked">Ciclo cerrado: la auditoría de esta semana ya se envió</small>
+                  </>
+                ) : selectedReport && auditTask ? (
                   <>
                     <select
                       className="unit-state-select"
