@@ -444,6 +444,7 @@ function shortDate(timestamp?: number | null) {
 }
 
 function monthFromPeriod(period?: Period | SculpturePeriod | null) {
+
   return (period?.startsAt || period?.endsAt || "").slice(0, 7);
 }
 
@@ -2527,7 +2528,9 @@ function App() {
     setSelectedReport(monthlyReport);
     setCommentsDraft(monthlyReport.comments || "");
     setEmailDraft(monthlyReport.emailDraft || "");
-    navigateTo("module1");
+    // El espacio de trabajo se abre AQUI mismo, en Reportes mensuales
+    // (antes redirigia a semanales y desorientaba al equipo).
+    setTimeout(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
   }
 
   function addEmailRecipient(raw?: string) {
@@ -3085,6 +3088,445 @@ function App() {
   }
 
   if (authStatus === "anonymous") return <LoginScreen onLogin={checkSession} />;
+
+  // Espacio de trabajo del reporte (chat, envío, análisis, histórico,
+  // variance y sugerencia): compartido entre Reportes semanales y
+  // Reportes mensuales — el mensual ya no redirige a semanales.
+  const reportWorkspace = (
+    <>
+          <section className="panel workspace-panel" id="workspace">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Reporte generado{selectedReport?.period?.label ? ` · ${selectedReport.period.label}` : ""}</p>
+                <h2>Trabajar el reporte</h2>
+              </div>
+              <div className="workspace-header-side">
+                {aiModels ? (
+                  <span className="ai-model-tag" title={`Reportes: ${aiModels.reports || "?"} · Chat: ${aiModels.chat || "?"}`}>
+                    ✦ {aiModels.chat || aiModels.reports}
+                  </span>
+                ) : null}
+                <button className="primary-button" disabled={!selectedReport || workStatus === "loading" || auditLocked} onClick={generateSummary}>
+                  {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
+                  {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
+                </button>
+              </div>
+            </div>
+            <div className="report-tabs" role="tablist">
+              <button className={reportTab === "chat" ? "active" : ""} role="tab" onClick={() => setReportTab("chat")}>
+                <Bot size={15} /> Chat con el agente
+              </button>
+              <button className={reportTab === "send" ? "active" : ""} role="tab" onClick={() => setReportTab("send")}>
+                <Send size={15} /> Enviar{selectedReport?.emailLog ? " ✓" : ""}
+              </button>
+            </div>
+
+            {reportTab === "chat" ? (
+              <div className="report-tab-body">
+              {selectedReport && !criteriaDocuments.some((doc) => doc.clientId === selectedReport.clientId) ? (
+                <div className="chat-import-bar">
+                  <div>
+                    <strong>{selectedClient?.name || "Este restaurante"} aún no tiene criterios propios.</strong>
+                    <small>Impórtale el conocimiento base de la casa para que el agente entienda el negocio desde el primer mensaje.</small>
+                  </div>
+                  <button className="secondary-button" disabled={importingCriteria} type="button" onClick={importGeneralCriteria}>
+                    {importingCriteria ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                    {importingCriteria ? "Importando..." : "Importar criterios generales"}
+                  </button>
+                </div>
+              ) : null}
+              <div className="chat-thread" aria-live="polite">
+                {!chatMessages.length ? (
+                  <div className="chat-empty">
+                    <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
+                    <div className="chat-suggestions">
+                      {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
+                        <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  chatMessages.map((item, index) => (
+                    <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
+                      <div className="chat-bubble-content">
+                        {item.content.split(/\*\*([^*]+)\*\*/g).map((part, partIndex) =>
+                          partIndex % 2 === 1 ? <strong key={partIndex}>{part}</strong> : part,
+                        )}
+                      </div>
+                      {item.role === "assistant" && !item.content.startsWith("⚠") ? (
+                        <div className="chat-bubble-actions">
+                          <button type="button" onClick={() => applyChatAsSummary(item.content, index)}>Usar como resumen</button>
+                          <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+                {chatSending ? (
+                  <div className="chat-bubble assistant">
+                    <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
+                  </div>
+                ) : null}
+              </div>
+              {chatMessages.length >= 2 ? (
+                <div className="chat-learn-bar">
+                  <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("client")}>
+                    {chatLearning === "client" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                    {chatLearning === "client" ? "Guardando memoria..." : "Guardar última instrucción (este cliente)"}
+                  </button>
+                  <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("general")}>
+                    {chatLearning === "general" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
+                    {chatLearning === "general" ? "Guardando memoria..." : "Última instrucción para TODOS los clientes"}
+                  </button>
+                  <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales). "Del cliente" las suma a la skill de {selectedClient?.name || "este cliente"}; "para TODOS" las guarda como conocimiento base de la casa, que aplica a toda la cartera.</small>
+                </div>
+              ) : null}
+              {chatFiles.length ? (
+                <div className="chat-attachments">
+                  {chatFiles.map((file) => (
+                    <span className="email-chip" key={`${file.name}-${file.size}`}>
+                      📎 {file.name}
+                      <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => setChatFiles((current) => current.filter((item) => item !== file))}>×</button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="chat-composer">
+                <label className="chat-attach" title="Adjuntar imágenes o archivos de texto">
+                  <Paperclip size={17} />
+                  <input
+                    accept="image/png,image/jpeg,image/webp,.txt,.md,.csv"
+                    multiple
+                    type="file"
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files || []).filter((file) => file.size <= 4 * 1024 * 1024);
+                      setChatFiles((current) => [...current, ...files].slice(0, 4));
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                <textarea
+                  placeholder={selectedReport ? "Escribe tu ajuste o pregunta..." : "Genera un reporte primero para conversar sobre él."}
+                  disabled={!selectedReport || chatSending}
+                  rows={2}
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      sendChatMessage();
+                    }
+                  }}
+                />
+                <button className="primary-button" disabled={!selectedReport || chatSending || (!chatInput.trim() && !chatFiles.length)} onClick={sendChatMessage}>
+                  {chatSending ? <span className="btn-spinner" /> : <Send size={17} />}
+                  Enviar
+                </button>
+              </div>
+              </div>
+            ) : null}
+
+            {reportTab === "send" ? (
+              <div className="report-tab-body">
+              {selectedReport?.emailLog ? (
+                <p className="email-sent-note">
+                  ✓ Último envío: {new Date(selectedReport.emailLog.sentAt).toLocaleString("es-CL")} a {selectedReport.emailLog.recipients.join(", ")}
+                </p>
+              ) : null}
+              <div className="email-grid">
+                <label>
+                  Destinatarios
+                  <div className="email-recipients">
+                    {emailRecipients.map((email) => (
+                      <span className="email-chip" key={email}>
+                        {email}
+                        <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailRecipients((current) => current.filter((item) => item !== email))}>×</button>
+                      </span>
+                    ))}
+                    <input
+                      placeholder={emailRecipients.length ? "Agregar otro..." : "correo@cliente.com"}
+                      value={emailRecipientInput}
+                      onChange={(event) => setEmailRecipientInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === "," || event.key === ";") {
+                          event.preventDefault();
+                          addEmailRecipient();
+                        }
+                      }}
+                      onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
+                    />
+                  </div>
+                  <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
+                </label>
+                <label>
+                  CC (en copia)
+                  <div className="email-recipients">
+                    {emailCc.map((email) => (
+                      <span className="email-chip email-chip-cc" key={email}>
+                        {email}
+                        <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailCc((current) => current.filter((item) => item !== email))}>×</button>
+                      </span>
+                    ))}
+                    <input
+                      placeholder={emailCc.length ? "Agregar otro..." : "equipo@sculpture..."}
+                      value={emailCcInput}
+                      onChange={(event) => setEmailCcInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === "," || event.key === ";") {
+                          event.preventDefault();
+                          addEmailCc();
+                        }
+                      }}
+                      onBlur={() => emailCcInput.trim() && addEmailCc()}
+                    />
+                  </div>
+                  <small className="email-hint">Reciben copia visible del correo (equipo interno).</small>
+                </label>
+                <label>
+                  Asunto
+                  <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+                </label>
+              </div>
+              <label className="email-body-field">
+                Cuerpo del correo
+                <textarea
+                  aria-label="Cuerpo del email"
+                  placeholder="Resumen ejecutivo breve para el cliente. Usa 'Redactar con IA' o pídeselo al chat y aplica 'Usar como correo'."
+                  value={emailDraft}
+                  onChange={(event) => setEmailDraft(event.target.value)}
+                />
+              </label>
+              <div className="email-preview">
+                <strong>Se enviará:</strong>
+                <span>este cuerpo + el PDF del reporte y el variance detallado adjuntos.</span>
+              </div>
+              {auditTask && auditLocked ? (
+                <p className="audit-lock-note is-locked">
+                  {auditInactive
+                    ? "La auditoría de este periodo aún no comienza (Sin Iniciar): el envío y los comentarios quedan bloqueados. Cuando llegue el día de la auditoría pasa sola a En Proceso, o cámbiala a mano en Pendientes."
+                    : `La auditoría de este periodo está en "${auditTask.status}": el envío y los comentarios quedan bloqueados. Reábrela en Pendientes si necesitas reenviar.`}
+                </p>
+              ) : auditTask && !auditReady ? (
+                <p className="audit-lock-note is-warning">La auditoría está en "{auditTask.status}". Para enviar el reporte debería estar "Listo para el Reporte".</p>
+              ) : null}
+              <div className="action-row wrap-actions">
+                <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length || auditLocked} onClick={sendReportEmail} type="button">
+                  {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
+                  {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
+                </button>
+                <button className="secondary-button" disabled={!selectedReport} type="button" onClick={openEmailPreview}>
+                  <Eye size={16} /> Vista previa del correo
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!selectedReport || savingDistribution || !emailRecipients.length}
+                  type="button"
+                  onClick={() => selectedReport && saveClientDistribution(selectedReport.clientId, { recipients: emailRecipients, ccRecipients: emailCc })}
+                >
+                  <Mail size={16} /> Guardar como lista del cliente
+                </button>
+              </div>
+              </div>
+            ) : null}
+          </section>
+
+          {emailPreviewOpen && selectedReport ? (
+            <div className="task-modal-backdrop" onClick={() => setEmailPreviewOpen(false)}>
+              <div className="task-modal email-preview-modal" onClick={(event) => event.stopPropagation()}>
+                <header className="email-preview-head">
+                  <div>
+                    <strong>Vista previa del correo</strong>
+                    <small>
+                      Para: {emailRecipients.join(", ") || "—"}
+                      {emailCc.length ? ` · CC: ${emailCc.join(", ")}` : ""}
+                    </small>
+                    <small>Asunto: {emailSubject || "(por definir)"} · Adjuntos: PDF del reporte + variance detallado</small>
+                  </div>
+                  <button aria-label="Cerrar vista previa" className="icon-button" type="button" onClick={() => setEmailPreviewOpen(false)}><X size={18} /></button>
+                </header>
+                <iframe className="email-preview-frame" src={`/api/module1/reports/${selectedReport.id}/email-preview?v=${selectedReport.updatedAt || ""}`} title="Vista previa del correo" />
+              </div>
+            </div>
+          ) : null}
+
+          {selectedReport?.analysis ? (
+            <section className="panel agent-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Análisis del agente</p>
+                  <h2>Lectura ejecutiva del periodo</h2>
+                </div>
+                <span className={`analysis-source ${selectedReport.analysisSource === "openai" ? "is-ai" : ""}`}>
+                  {selectedReport.analysisSource === "openai"
+                    ? "✦ Generado con IA y los criterios del cliente"
+                    : "Plantilla automática — usa Redactar con IA para aplicar los criterios"}
+                </span>
+              </div>
+              <div className="agent-analysis-grid">
+                {[
+                  {
+                    key: "bestOfWeek",
+                    title: "Lo mejor de la semana",
+                    tone: "pos",
+                    icon: <TrendingUp size={17} />,
+                    items: selectedReport.analysis.bestOfWeek || [],
+                    empty: "Sin hallazgos positivos relevantes esta semana.",
+                  },
+                  {
+                    key: "weeklyChallenges",
+                    title: "Los desafíos de la semana",
+                    tone: "neg",
+                    icon: <TrendingDown size={17} />,
+                    items: selectedReport.analysis.weeklyChallenges || [],
+                    empty: "Sin desafíos relevantes esta semana.",
+                  },
+                  {
+                    key: "stockEfficiency",
+                    title: "Eficiencia de stock y compra",
+                    tone: "info",
+                    icon: <ShoppingCart size={17} />,
+                    items: selectedReport.analysis.stockEfficiency || [],
+                    empty: "Sin observaciones de stock y compra para este periodo.",
+                  },
+                  {
+                    key: "criteriaApplied",
+                    title: "Criterios aplicados",
+                    tone: "brand",
+                    icon: <BookOpenCheck size={17} />,
+                    items: selectedReport.analysis.criteriaApplied || [],
+                    empty: "",
+                  },
+                ]
+                  .filter((block) => block.items.length || block.empty)
+                  .map((block) => (
+                    <article className={`analysis-card tone-${block.tone}`} key={block.key}>
+                      <header>
+                        <span className="analysis-icon">{block.icon}</span>
+                        <strong>{block.title}</strong>
+                        {block.items.length ? <span className="analysis-count">{block.items.length}</span> : null}
+                      </header>
+                      <div className="analysis-items">
+                        {(block.items.length ? block.items : [block.empty]).map((item) => (
+                          <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
+                            {highlightFigures(item.replace(/\*\*/g, ""))}
+                          </p>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+              </div>
+              {!selectedReport.analysis.criteriaApplied?.length ? (
+                <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Histórico</p>
+                <h2>Últimos 4 periodos</h2>
+              </div>
+              <BarChart3 size={22} />
+            </div>
+            <div className="history-chart">
+                {selectedReport?.history.map((point) => (
+                  <article key={point.periodId}>
+                    <span>{point.label}</span>
+                    <div className="bar-track"><div style={{ width: `${Math.max(8, (point.revenue / maxRevenue) * 100)}%` }} /></div>
+                    <small>{money(point.revenue)} - {point.costPercent}% costo</small>
+                    <div className="bar-track variance"><div style={{ width: `${Math.max(8, (Math.abs(point.varianceAmount) / maxAbsVariance) * 100)}%` }} /></div>
+                    <small>{money(point.varianceAmount)} variance</small>
+                  </article>
+                ))}
+              </div>
+          </section>
+
+          <section className="module-grid">
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Variance</p>
+                  <h2>Variaciones por familia</h2>
+                </div>
+              </div>
+              <div className="variance-chart">
+                {(familyVarianceRows.length
+                  ? familyVarianceRows
+                  : (selectedReport?.categoryVariances || []).map((item) => ({ family: item.category, amount: item.amount }))
+                ).map((item) => (
+                  <article key={item.family}>
+                    <div>
+                      <strong>{item.family}</strong>
+                      <span className={item.amount < 0 ? "negative" : "positive"}>{money(item.amount)}</span>
+                    </div>
+                    <div className="chart-track">
+                      <div
+                        className={item.amount < 0 ? "negative-bar" : "positive-bar"}
+                        style={{ width: `${Math.max(8, (Math.abs(item.amount) / maxFamilyVariance) * 100)}%` }}
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Productos</p>
+                  <h2>Top variaciones</h2>
+                </div>
+              </div>
+              <div className="variance-chart">
+                {selectedReport?.topProducts.map((item) => (
+                  <article key={`${item.name}-${item.category}`}>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <small>{item.category}</small>
+                      <span className={item.varianceAmount < 0 ? "negative" : "positive"}>{money(item.varianceAmount)} - {item.variancePercent}%</span>
+                    </div>
+                    <div className="chart-track">
+                      <div
+                        className={item.varianceAmount < 0 ? "negative-bar" : "positive-bar"}
+                        style={{ width: `${Math.max(8, (Math.abs(item.varianceAmount) / maxProductVariance) * 100)}%` }}
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Intelipar</p>
+                <h2>Sugerencia de compra</h2>
+              </div>
+              {selectedReport ? (
+                <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/purchase-suggestion`} target="_blank" rel="noreferrer">
+                  <ShoppingCart size={17} /> Descargar para enviar (CSV)
+                </a>
+              ) : (
+                <ShoppingCart size={22} />
+              )}
+            </div>
+            <div className="purchase-grid">
+              {selectedReport?.purchaseSuggestions.map((item) => (
+                <article key={`${item.item}-${item.provider}`}>
+                  <strong>{item.item}</strong>
+                  <span>{item.provider}</span>
+                  <small>Stock {item.stock} - sugerido {item.suggested}</small>
+                  <p>{item.note}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+
+    </>
+  );
 
   return (
     <main className="app-shell">
@@ -3689,435 +4131,7 @@ function App() {
           </article>
         </section>
 
-        <section className="panel workspace-panel" id="workspace">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Reporte generado{selectedReport?.period?.label ? ` · ${selectedReport.period.label}` : ""}</p>
-              <h2>Trabajar el reporte</h2>
-            </div>
-            <div className="workspace-header-side">
-              {aiModels ? (
-                <span className="ai-model-tag" title={`Reportes: ${aiModels.reports || "?"} · Chat: ${aiModels.chat || "?"}`}>
-                  ✦ {aiModels.chat || aiModels.reports}
-                </span>
-              ) : null}
-              <button className="primary-button" disabled={!selectedReport || workStatus === "loading" || auditLocked} onClick={generateSummary}>
-                {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
-                {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
-              </button>
-            </div>
-          </div>
-          <div className="report-tabs" role="tablist">
-            <button className={reportTab === "chat" ? "active" : ""} role="tab" onClick={() => setReportTab("chat")}>
-              <Bot size={15} /> Chat con el agente
-            </button>
-            <button className={reportTab === "send" ? "active" : ""} role="tab" onClick={() => setReportTab("send")}>
-              <Send size={15} /> Enviar{selectedReport?.emailLog ? " ✓" : ""}
-            </button>
-          </div>
-
-          {reportTab === "chat" ? (
-            <div className="report-tab-body">
-            {selectedReport && !criteriaDocuments.some((doc) => doc.clientId === selectedReport.clientId) ? (
-              <div className="chat-import-bar">
-                <div>
-                  <strong>{selectedClient?.name || "Este restaurante"} aún no tiene criterios propios.</strong>
-                  <small>Impórtale el conocimiento base de la casa para que el agente entienda el negocio desde el primer mensaje.</small>
-                </div>
-                <button className="secondary-button" disabled={importingCriteria} type="button" onClick={importGeneralCriteria}>
-                  {importingCriteria ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {importingCriteria ? "Importando..." : "Importar criterios generales"}
-                </button>
-              </div>
-            ) : null}
-            <div className="chat-thread" aria-live="polite">
-              {!chatMessages.length ? (
-                <div className="chat-empty">
-                  <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
-                  <div className="chat-suggestions">
-                    {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
-                      <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                chatMessages.map((item, index) => (
-                  <div className={`chat-bubble ${item.role}`} key={`${index}-${item.content.slice(0, 12)}`}>
-                    <div className="chat-bubble-content">
-                      {item.content.split(/\*\*([^*]+)\*\*/g).map((part, partIndex) =>
-                        partIndex % 2 === 1 ? <strong key={partIndex}>{part}</strong> : part,
-                      )}
-                    </div>
-                    {item.role === "assistant" && !item.content.startsWith("⚠") ? (
-                      <div className="chat-bubble-actions">
-                        <button type="button" onClick={() => applyChatAsSummary(item.content, index)}>Usar como resumen</button>
-                        <button type="button" onClick={() => setEmailDraft(item.content)}>Usar como correo</button>
-                      </div>
-                    ) : null}
-                  </div>
-                ))
-              )}
-              {chatSending ? (
-                <div className="chat-bubble assistant">
-                  <div className="chat-bubble-content chat-typing"><span /><span /><span /></div>
-                </div>
-              ) : null}
-            </div>
-            {chatMessages.length >= 2 ? (
-              <div className="chat-learn-bar">
-                <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("client")}>
-                  {chatLearning === "client" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {chatLearning === "client" ? "Guardando memoria..." : "Guardar última instrucción (este cliente)"}
-                </button>
-                <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("general")}>
-                  {chatLearning === "general" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {chatLearning === "general" ? "Guardando memoria..." : "Última instrucción para TODOS los clientes"}
-                </button>
-                <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales). "Del cliente" las suma a la skill de {selectedClient?.name || "este cliente"}; "para TODOS" las guarda como conocimiento base de la casa, que aplica a toda la cartera.</small>
-              </div>
-            ) : null}
-            {chatFiles.length ? (
-              <div className="chat-attachments">
-                {chatFiles.map((file) => (
-                  <span className="email-chip" key={`${file.name}-${file.size}`}>
-                    📎 {file.name}
-                    <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => setChatFiles((current) => current.filter((item) => item !== file))}>×</button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="chat-composer">
-              <label className="chat-attach" title="Adjuntar imágenes o archivos de texto">
-                <Paperclip size={17} />
-                <input
-                  accept="image/png,image/jpeg,image/webp,.txt,.md,.csv"
-                  multiple
-                  type="file"
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files || []).filter((file) => file.size <= 4 * 1024 * 1024);
-                    setChatFiles((current) => [...current, ...files].slice(0, 4));
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <textarea
-                placeholder={selectedReport ? "Escribe tu ajuste o pregunta..." : "Genera un reporte primero para conversar sobre él."}
-                disabled={!selectedReport || chatSending}
-                rows={2}
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    sendChatMessage();
-                  }
-                }}
-              />
-              <button className="primary-button" disabled={!selectedReport || chatSending || (!chatInput.trim() && !chatFiles.length)} onClick={sendChatMessage}>
-                {chatSending ? <span className="btn-spinner" /> : <Send size={17} />}
-                Enviar
-              </button>
-            </div>
-            </div>
-          ) : null}
-
-          {reportTab === "send" ? (
-            <div className="report-tab-body">
-            {selectedReport?.emailLog ? (
-              <p className="email-sent-note">
-                ✓ Último envío: {new Date(selectedReport.emailLog.sentAt).toLocaleString("es-CL")} a {selectedReport.emailLog.recipients.join(", ")}
-              </p>
-            ) : null}
-            <div className="email-grid">
-              <label>
-                Destinatarios
-                <div className="email-recipients">
-                  {emailRecipients.map((email) => (
-                    <span className="email-chip" key={email}>
-                      {email}
-                      <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailRecipients((current) => current.filter((item) => item !== email))}>×</button>
-                    </span>
-                  ))}
-                  <input
-                    placeholder={emailRecipients.length ? "Agregar otro..." : "correo@cliente.com"}
-                    value={emailRecipientInput}
-                    onChange={(event) => setEmailRecipientInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === "," || event.key === ";") {
-                        event.preventDefault();
-                        addEmailRecipient();
-                      }
-                    }}
-                    onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
-                  />
-                </div>
-                <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
-              </label>
-              <label>
-                CC (en copia)
-                <div className="email-recipients">
-                  {emailCc.map((email) => (
-                    <span className="email-chip email-chip-cc" key={email}>
-                      {email}
-                      <button aria-label={`Quitar ${email}`} type="button" onClick={() => setEmailCc((current) => current.filter((item) => item !== email))}>×</button>
-                    </span>
-                  ))}
-                  <input
-                    placeholder={emailCc.length ? "Agregar otro..." : "equipo@sculpture..."}
-                    value={emailCcInput}
-                    onChange={(event) => setEmailCcInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === "," || event.key === ";") {
-                        event.preventDefault();
-                        addEmailCc();
-                      }
-                    }}
-                    onBlur={() => emailCcInput.trim() && addEmailCc()}
-                  />
-                </div>
-                <small className="email-hint">Reciben copia visible del correo (equipo interno).</small>
-              </label>
-              <label>
-                Asunto
-                <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
-              </label>
-            </div>
-            <label className="email-body-field">
-              Cuerpo del correo
-              <textarea
-                aria-label="Cuerpo del email"
-                placeholder="Resumen ejecutivo breve para el cliente. Usa 'Redactar con IA' o pídeselo al chat y aplica 'Usar como correo'."
-                value={emailDraft}
-                onChange={(event) => setEmailDraft(event.target.value)}
-              />
-            </label>
-            <div className="email-preview">
-              <strong>Se enviará:</strong>
-              <span>este cuerpo + el PDF del reporte y el variance detallado adjuntos.</span>
-            </div>
-            {auditTask && auditLocked ? (
-              <p className="audit-lock-note is-locked">
-                {auditInactive
-                  ? "La auditoría de este periodo aún no comienza (Sin Iniciar): el envío y los comentarios quedan bloqueados. Cuando llegue el día de la auditoría pasa sola a En Proceso, o cámbiala a mano en Pendientes."
-                  : `La auditoría de este periodo está en "${auditTask.status}": el envío y los comentarios quedan bloqueados. Reábrela en Pendientes si necesitas reenviar.`}
-              </p>
-            ) : auditTask && !auditReady ? (
-              <p className="audit-lock-note is-warning">La auditoría está en "{auditTask.status}". Para enviar el reporte debería estar "Listo para el Reporte".</p>
-            ) : null}
-            <div className="action-row wrap-actions">
-              <button className="primary-button" disabled={!selectedReport || emailSending || !emailRecipients.length || auditLocked} onClick={sendReportEmail} type="button">
-                {emailSending ? <span className="btn-spinner" /> : <Send size={17} />}
-                {emailSending ? "Enviando..." : `Enviar a ${emailRecipients.length || 0} destinatario(s)`}
-              </button>
-              <button className="secondary-button" disabled={!selectedReport} type="button" onClick={openEmailPreview}>
-                <Eye size={16} /> Vista previa del correo
-              </button>
-              <button
-                className="secondary-button"
-                disabled={!selectedReport || savingDistribution || !emailRecipients.length}
-                type="button"
-                onClick={() => selectedReport && saveClientDistribution(selectedReport.clientId, { recipients: emailRecipients, ccRecipients: emailCc })}
-              >
-                <Mail size={16} /> Guardar como lista del cliente
-              </button>
-            </div>
-            </div>
-          ) : null}
-        </section>
-
-        {emailPreviewOpen && selectedReport ? (
-          <div className="task-modal-backdrop" onClick={() => setEmailPreviewOpen(false)}>
-            <div className="task-modal email-preview-modal" onClick={(event) => event.stopPropagation()}>
-              <header className="email-preview-head">
-                <div>
-                  <strong>Vista previa del correo</strong>
-                  <small>
-                    Para: {emailRecipients.join(", ") || "—"}
-                    {emailCc.length ? ` · CC: ${emailCc.join(", ")}` : ""}
-                  </small>
-                  <small>Asunto: {emailSubject || "(por definir)"} · Adjuntos: PDF del reporte + variance detallado</small>
-                </div>
-                <button aria-label="Cerrar vista previa" className="icon-button" type="button" onClick={() => setEmailPreviewOpen(false)}><X size={18} /></button>
-              </header>
-              <iframe className="email-preview-frame" src={`/api/module1/reports/${selectedReport.id}/email-preview?v=${selectedReport.updatedAt || ""}`} title="Vista previa del correo" />
-            </div>
-          </div>
-        ) : null}
-
-        {selectedReport?.analysis ? (
-          <section className="panel agent-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Análisis del agente</p>
-                <h2>Lectura ejecutiva del periodo</h2>
-              </div>
-              <span className={`analysis-source ${selectedReport.analysisSource === "openai" ? "is-ai" : ""}`}>
-                {selectedReport.analysisSource === "openai"
-                  ? "✦ Generado con IA y los criterios del cliente"
-                  : "Plantilla automática — usa Redactar con IA para aplicar los criterios"}
-              </span>
-            </div>
-            <div className="agent-analysis-grid">
-              {[
-                {
-                  key: "bestOfWeek",
-                  title: "Lo mejor de la semana",
-                  tone: "pos",
-                  icon: <TrendingUp size={17} />,
-                  items: selectedReport.analysis.bestOfWeek || [],
-                  empty: "Sin hallazgos positivos relevantes esta semana.",
-                },
-                {
-                  key: "weeklyChallenges",
-                  title: "Los desafíos de la semana",
-                  tone: "neg",
-                  icon: <TrendingDown size={17} />,
-                  items: selectedReport.analysis.weeklyChallenges || [],
-                  empty: "Sin desafíos relevantes esta semana.",
-                },
-                {
-                  key: "stockEfficiency",
-                  title: "Eficiencia de stock y compra",
-                  tone: "info",
-                  icon: <ShoppingCart size={17} />,
-                  items: selectedReport.analysis.stockEfficiency || [],
-                  empty: "Sin observaciones de stock y compra para este periodo.",
-                },
-                {
-                  key: "criteriaApplied",
-                  title: "Criterios aplicados",
-                  tone: "brand",
-                  icon: <BookOpenCheck size={17} />,
-                  items: selectedReport.analysis.criteriaApplied || [],
-                  empty: "",
-                },
-              ]
-                .filter((block) => block.items.length || block.empty)
-                .map((block) => (
-                  <article className={`analysis-card tone-${block.tone}`} key={block.key}>
-                    <header>
-                      <span className="analysis-icon">{block.icon}</span>
-                      <strong>{block.title}</strong>
-                      {block.items.length ? <span className="analysis-count">{block.items.length}</span> : null}
-                    </header>
-                    <div className="analysis-items">
-                      {(block.items.length ? block.items : [block.empty]).map((item) => (
-                        <p className={`analysis-item ${block.items.length ? "" : "is-empty"}`} key={item}>
-                          {highlightFigures(item.replace(/\*\*/g, ""))}
-                        </p>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-            </div>
-            {!selectedReport.analysis.criteriaApplied?.length ? (
-              <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
-            ) : null}
-          </section>
-        ) : null}
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Histórico</p>
-              <h2>Últimos 4 periodos</h2>
-            </div>
-            <BarChart3 size={22} />
-          </div>
-          <div className="history-chart">
-              {selectedReport?.history.map((point) => (
-                <article key={point.periodId}>
-                  <span>{point.label}</span>
-                  <div className="bar-track"><div style={{ width: `${Math.max(8, (point.revenue / maxRevenue) * 100)}%` }} /></div>
-                  <small>{money(point.revenue)} - {point.costPercent}% costo</small>
-                  <div className="bar-track variance"><div style={{ width: `${Math.max(8, (Math.abs(point.varianceAmount) / maxAbsVariance) * 100)}%` }} /></div>
-                  <small>{money(point.varianceAmount)} variance</small>
-                </article>
-              ))}
-            </div>
-        </section>
-
-        <section className="module-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Variance</p>
-                <h2>Variaciones por familia</h2>
-              </div>
-            </div>
-            <div className="variance-chart">
-              {(familyVarianceRows.length
-                ? familyVarianceRows
-                : (selectedReport?.categoryVariances || []).map((item) => ({ family: item.category, amount: item.amount }))
-              ).map((item) => (
-                <article key={item.family}>
-                  <div>
-                    <strong>{item.family}</strong>
-                    <span className={item.amount < 0 ? "negative" : "positive"}>{money(item.amount)}</span>
-                  </div>
-                  <div className="chart-track">
-                    <div
-                      className={item.amount < 0 ? "negative-bar" : "positive-bar"}
-                      style={{ width: `${Math.max(8, (Math.abs(item.amount) / maxFamilyVariance) * 100)}%` }}
-                    />
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Productos</p>
-                <h2>Top variaciones</h2>
-              </div>
-            </div>
-            <div className="variance-chart">
-              {selectedReport?.topProducts.map((item) => (
-                <article key={`${item.name}-${item.category}`}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <small>{item.category}</small>
-                    <span className={item.varianceAmount < 0 ? "negative" : "positive"}>{money(item.varianceAmount)} - {item.variancePercent}%</span>
-                  </div>
-                  <div className="chart-track">
-                    <div
-                      className={item.varianceAmount < 0 ? "negative-bar" : "positive-bar"}
-                      style={{ width: `${Math.max(8, (Math.abs(item.varianceAmount) / maxProductVariance) * 100)}%` }}
-                    />
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Intelipar</p>
-              <h2>Sugerencia de compra</h2>
-            </div>
-            {selectedReport ? (
-              <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/purchase-suggestion`} target="_blank" rel="noreferrer">
-                <ShoppingCart size={17} /> Descargar para enviar (CSV)
-              </a>
-            ) : (
-              <ShoppingCart size={22} />
-            )}
-          </div>
-          <div className="purchase-grid">
-            {selectedReport?.purchaseSuggestions.map((item) => (
-              <article key={`${item.item}-${item.provider}`}>
-                <strong>{item.item}</strong>
-                <span>{item.provider}</span>
-                <small>Stock {item.stock} - sugerido {item.suggested}</small>
-                <p>{item.note}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+        {reportWorkspace}
 
         <details className="panel unit-panel collapsible-panel">
           <summary>
@@ -4311,6 +4325,8 @@ function App() {
             </section>
             </>
           ) : null}
+
+          {selectedReport?.monthly ? reportWorkspace : null}
           </>
         ) : null}
 
