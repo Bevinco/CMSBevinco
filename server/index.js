@@ -7081,7 +7081,7 @@ function applyTaskAutomations(store) {
 // (ej. quinto lunes), cae a la ULTIMA ocurrencia del mes.
 function nextMonthlyDate(task, baseStr) {
   const due = new Date(`${task.dueDate || baseStr}T00:00:00Z`);
-  const anchorDay = Number.isInteger(task.recurringDay) ? task.recurringDay : due.getUTCDay();
+  const anchorDay = due.getUTCDay();
   const nth = Math.floor((due.getUTCDate() - 1) / 7);
   const base = new Date(`${baseStr}T00:00:00Z`);
   const target = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1));
@@ -7108,9 +7108,11 @@ function nextAuditDate(task, today) {
   }
   const baseStr = task.dueDate && task.dueDate > today ? task.dueDate : today;
   const anchorSource = task.dueDate || baseStr;
-  const anchor = Number.isInteger(task.recurringDay)
-    ? task.recurringDay
-    : new Date(`${anchorSource}T00:00:00Z`).getUTCDay();
+  // El dia ancla es SIEMPRE el dia de semana de la fecha vigente: si el
+  // equipo movio la auditoria del lunes al miercoles, las rotaciones siguen
+  // al miercoles. (recurringDay quedaba envenenado con el dia de la
+  // generacion semanal y mandaba las tarjetas al dia equivocado, 21-ago.)
+  const anchor = new Date(`${anchorSource}T00:00:00Z`).getUTCDay();
   const cursor = new Date(`${baseStr}T00:00:00Z`);
   for (let i = 0; i < 7; i += 1) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);

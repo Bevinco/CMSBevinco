@@ -5040,3 +5040,7 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 
 /* Auditoria enviada mostrada en el calendario de la semana */
 .week-sent { color: #5c8f1e; font-size: 10.5px; font-weight: 800; white-space: nowrap; }
+
+/* Auditoria proyectada (aun no rota a esta semana) */
+.week-task-ghost { border-style: dashed; opacity: 0.75; }
+.week-ghost { color: #7a8794; font-size: 10.5px; font-weight: 800; white-space: nowrap; }

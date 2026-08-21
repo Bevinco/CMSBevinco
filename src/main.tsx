@@ -3402,7 +3402,53 @@ function App() {
                         carried: false,
                         sent: true,
                       })));
-                    const dayTasks = [...exactDay.map((entry) => ({ ...entry, sent: false })), ...carriedOver.map((entry) => ({ ...entry, sent: false })), ...sentCycles];
+                    // Proyección (Pedro 21-ago): en semanas futuras se muestran
+                    // TODAS las auditorías recurrentes en su día, aunque la
+                    // tarjeta real siga en la semana actual (aún sin rotar).
+                    const ghostDay = calendarWeekOffset >= 1
+                      ? nativeTasks.flatMap((nativeTask) => {
+                          if (!nativeTask.dueDate || !nativeTask.clientId || nativeTask.status === "Cancelada") return [];
+                          const isRecurring = nativeTask.recurring === true || (nativeTask.recurring === undefined && Boolean(nativeTask.clientId));
+                          if (!isRecurring || nativeTask.recurringMonthly) return [];
+                          const realDue = new Date(`${nativeTask.dueDate}T12:00:00`);
+                          if (realDue >= weekStart) return []; // ya tiene tarjeta real en esta semana o después
+                          const intervalMs = 7 * (nativeTask.recurringWeeks === 2 ? 2 : 1) * 86400000;
+                          for (let hop = 1; hop <= 10; hop += 1) {
+                            const candidate = new Date(realDue.getTime() + intervalMs * hop);
+                            if (candidate.toDateString() === dayKey) {
+                              return [{
+                                task: {
+                                  id: nativeTask.id,
+                                  name: nativeTask.name,
+                                  status: "Sin Iniciar",
+                                  statusColor: "#a6b3ae",
+                                  native: true,
+                                  url: "",
+                                  dueDate: String(candidate.getTime()),
+                                  assignees: [],
+                                  tags: [],
+                                  subtasks: [],
+                                  tagDetails: [],
+                                } as unknown as ClickupTask,
+                                carried: false,
+                                sent: false,
+                                ghost: true,
+                              }];
+                            }
+                            if (candidate.getTime() > day.getTime() + 6 * 86400000) break;
+                          }
+                          return [];
+                        })
+                      : [];
+                    const realEntries = [
+                      ...exactDay.map((entry) => ({ ...entry, sent: false, ghost: false })),
+                      ...carriedOver.map((entry) => ({ ...entry, sent: false, ghost: false })),
+                      ...sentCycles.map((entry) => ({ ...entry, ghost: false })),
+                    ];
+                    // La proyección no duplica: si la tarea ya se ve ese día
+                    // (real, atrasada o enviada), el fantasma sobra.
+                    const seenIds = new Set(realEntries.map((entry) => entry.task.id));
+                    const dayTasks = [...realEntries, ...ghostDay.filter((entry) => !seenIds.has(entry.task.id))];
                     const isToday = dayKey === today.toDateString();
                     return (
                       <div className={`week-day ${isToday ? "is-today" : ""}`} key={label}>
@@ -3410,7 +3456,7 @@ function App() {
                           <strong>{label}</strong>
                           <span>{day.getDate()}/{day.getMonth() + 1}</span>
                         </header>
-                        {dayTasks.length ? dayTasks.map(({ task, carried, sent }) => {
+                        {dayTasks.length ? dayTasks.map(({ task, carried, sent, ghost }) => {
                           const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
                           const inner = (
                             <>
@@ -3427,6 +3473,7 @@ function App() {
                                 <small>{task.status}</small>
                                 {carried ? <small className="week-late">Atrasada · {new Date(Number(task.dueDate)).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })}</small> : null}
                                 {sent ? <small className="week-sent">✓ enviado</small> : null}
+                                {ghost ? <small className="week-ghost">programada</small> : null}
                                 <span className="week-avatars">
                                   {(task.assignees || []).slice(0, 3).map((person) => (
                                     <b key={person.id || person.initials} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
@@ -3438,7 +3485,7 @@ function App() {
                             </>
                           );
                           return task.native ? (
-                            <button className="week-task week-task-native" key={task.id} type="button" style={{ borderLeftColor: accent }} onClick={() => openTaskFromBoard(task.id)}>
+                            <button className={`week-task week-task-native ${ghost ? "week-task-ghost" : ""}`} key={`${task.id}-${ghost ? "g" : "r"}`} type="button" style={{ borderLeftColor: accent }} onClick={() => openTaskFromBoard(task.id)}>
                               {inner}
                             </button>
                           ) : (
