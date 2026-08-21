@@ -2686,12 +2686,18 @@ function extractSummaryFamilyTotals(parsedTable) {
   const iUsado = indexOf("usado");
   const iVendido = indexOf("vendido");
   const iCompras = indexOf("compras");
+  const iPrev = indexOf("existencia previa");
+  const iExistencia = indexOf("existencia");
+  const iIngresos = indexOf("ingresos");
+  const iUsadoCosto = headers.findIndex((header) => /^usado \(costo\)/.test(header));
+  const iVendidoCosto = headers.findIndex((header) => /^vendido \(costo\)/.test(header));
   const cell = (values, index) => (index >= 0 ? String(values[index] ?? "").trim() : "");
   const totals = [];
   for (const row of parsedTable.rows || []) {
     const values = row.values || [];
     const name = String(values[0] || "").trim();
     if (!/^total\s+/i.test(name) || /grand\s*total/i.test(name)) continue;
+    const unitMatch = cell(values, iUsado).match(/[0-9.,\s]+([a-zA-Z%]+)\s*$/);
     totals.push({
       familia: cleanTotalName(name),
       diferencia: cell(values, iDif),
@@ -2700,6 +2706,23 @@ function extractSummaryFamilyTotals(parsedTable) {
       usado: cell(values, iUsado),
       vendido: cell(values, iVendido),
       compras: cell(values, iCompras),
+      // Campos NUMERICOS para el resumen mensual por categoria (propuesta de
+      // Pedro 21-ago): el mes suma flujos y recalcula porcentajes.
+      unidad: unitMatch ? unitMatch[1] : "",
+      n: {
+        // Las cantidades vienen con su unidad ("482294 ml", "43.59 kg"):
+        // se limpia la letra antes de parsear o el numero se pierde.
+        prev: parseNumber(String(cell(values, iPrev)).replace(/[a-zA-Z]/g, "")),
+        compras: parseNumber(String(cell(values, iCompras)).replace(/[a-zA-Z]/g, "")),
+        existencia: parseNumber(String(cell(values, iExistencia)).replace(/[a-zA-Z]/g, "")),
+        usado: parseNumber(String(cell(values, iUsado)).replace(/[a-zA-Z]/g, "")),
+        vendido: parseNumber(String(cell(values, iVendido)).replace(/[a-zA-Z]/g, "")),
+        dif: parseNumber(String(cell(values, iDif)).replace(/[a-zA-Z]/g, "")),
+        difCosto: parseNumber(cell(values, iDifCost)),
+        usadoCosto: parseNumber(cell(values, iUsadoCosto)),
+        vendidoCosto: parseNumber(cell(values, iVendidoCosto)),
+        ingresos: parseNumber(cell(values, iIngresos)),
+      },
     });
   }
   return totals.slice(0, 30);
@@ -5514,6 +5537,105 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       </table>
     </section>` : "";
 
+  // ---- Pagina 3 (solo mensual): resumen por categoria + Stock Efficiency --
+  const fmt1 = (value) => Number(value || 0).toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  // Cantidades como en el ejemplo de Pedro: enteros grandes sin decimal
+  // (1.257.062), fracciones chicas con uno (742,1).
+  const fmtQty = (value) => {
+    const numberValue = Number(value || 0);
+    return Math.abs(numberValue) >= 1000
+      ? numberValue.toLocaleString("es-CL", { maximumFractionDigits: 0 })
+      : numberValue.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  };
+  const fmt0 = (value) => Number(value || 0).toLocaleString("es-CL", { maximumFractionDigits: 0 });
+  const monthlyTableRows = (payload.familyMonthlyTable || []).map((row, index) => `
+    <tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">Total ${escapeHtml(row.familia)}${row.unidad ? ` (${escapeHtml(row.unidad)})` : ""}</td>
+      <td class="tnum">${fmtQty(row.prev)}</td>
+      <td class="tnum">${fmtQty(row.compras)}</td>
+      <td class="tnum">${fmtQty(row.existencia)}</td>
+      <td class="tnum">${fmtQty(row.usado)}</td>
+      <td class="tnum">${fmtQty(row.vendido)}</td>
+      <td class="tnum ${row.dif < 0 ? "neg" : ""}">${fmtQty(row.dif)}</td>
+      <td class="tnum ${row.difPct < 0 ? "neg" : ""}">${fmt1(row.difPct)}%</td>
+      <td class="tnum ${row.difCosto < 0 ? "neg" : ""}">$${fmt0(row.difCosto)}</td>
+      <td class="tnum">${fmt1(row.costoPct)}%</td>
+      <td class="tnum">${fmt1(row.idealPct)}%</td>
+      <td class="tnum">$${fmt0(row.ingresos)}</td>
+    </tr>`).join("");
+  const monthlyGrand = (payload.familyMonthlyTable || []).reduce((acc, row) => ({
+    difCosto: acc.difCosto + (row.difCosto || 0),
+    usadoCosto: acc.usadoCosto + (row.usadoCosto || 0),
+    vendidoCosto: acc.vendidoCosto + (row.vendidoCosto || 0),
+    ingresos: acc.ingresos + (row.ingresos || 0),
+  }), { difCosto: 0, usadoCosto: 0, vendidoCosto: 0, ingresos: 0 });
+  const seData = payload.stockEfficiencyReport;
+  const seFamilies = (seData?.families || []).map((row, index) => `
+    <tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">${escapeHtml(row.family)}</td>
+      <td class="tnum">$${fmt0(row.total)}</td>
+      <td class="tnum">$${fmt0(row.dead)} (${fmt1(row.deadPct)}%)</td>
+      <td class="tnum">$${fmt0(row.slow)} (${fmt1(row.slowPct)}%)</td>
+    </tr>`).join("");
+  const seTopDead = (seData?.topDead || []).map((row, index) => `
+    <tr class="${index % 2 ? "alt" : ""}">
+      <td class="tname">${escapeHtml(row.name)}</td>
+      <td class="tnum">${escapeHtml(row.onhand)}</td>
+      <td class="tnum">$${fmt0(row.value)}</td>
+    </tr>`).join("");
+  const monthlyExtrasPage = `
+  <main class="bv-page page-break bv-monthly-page">
+    <header class="bv-head bv-monthly-head">
+      <div class="bv-brand"><strong>Resumen del mes por categoría</strong><span>${escapeHtml(clientTitle)} · ${escapeHtml(payload.period?.label || report.periodId)}</span></div>
+    </header>
+    ${payload.familyMonthlyTable?.length ? `
+    <section class="bv-table-wrap">
+      <table class="bv-table bv-monthly-table">
+        <thead>
+          <tr>
+            <th>Nombre Artículo</th><th>Exist. Previa</th><th>Compras</th><th>Existencia</th><th>Usado</th><th>Vendido</th>
+            <th>Diferencia</th><th>% Dif.</th><th>Diferencia ($)</th><th>% Costo</th><th>% Costo Ideal</th><th>Ingresos</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${monthlyTableRows}
+          <tr class="bv-grand">
+            <td class="tname">GRAND TOTAL</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+            <td class="tnum ${monthlyGrand.difCosto < 0 ? "neg" : ""}">$${fmt0(monthlyGrand.difCosto)}</td>
+            <td class="tnum">${fmt1(monthlyGrand.ingresos ? (monthlyGrand.usadoCosto / monthlyGrand.ingresos) * 100 : 0)}%</td>
+            <td class="tnum">${fmt1(monthlyGrand.ingresos ? (monthlyGrand.vendidoCosto / monthlyGrand.ingresos) * 100 : 0)}%</td>
+            <td class="tnum">$${fmt0(monthlyGrand.ingresos)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>` : ""}
+    ${seData ? `
+    <h3 class="bv-se-title">Stock Efficiency Report${seData.rangeLabel ? ` · ${escapeHtml(seData.rangeLabel)}` : ""}</h3>
+    <section class="bv-kpis bv-se-kpis">
+      <article><span>Inventario total</span><strong>$${fmt0(seData.total)}</strong></article>
+      <article><span>Stock sin movimiento</span><strong class="neg">$${fmt0(seData.deadTotal)} (${fmt1(seData.deadPct)}%)</strong></article>
+      <article><span>Movimiento lento</span><strong>$${fmt0(seData.slowTotal)} (${fmt1(seData.slowPct)}%)</strong></article>
+      <article><span>Rotación saludable</span><strong class="pos">${fmt1(seData.healthyPct)}%</strong></article>
+    </section>
+    <section class="bv-grid2 bv-stockeff">
+      <table class="bv-table">
+        <thead>
+          <tr><th colspan="4" class="bv-table-title">Stock por categoría</th></tr>
+          <tr><th>Categoría</th><th>Stock total</th><th>Sin movimiento</th><th>Mov. lento</th></tr>
+        </thead>
+        <tbody>${seFamilies}</tbody>
+      </table>
+      <table class="bv-table">
+        <thead>
+          <tr><th colspan="3" class="bv-table-title">Top 10 sin movimiento por valor</th></tr>
+          <tr><th>Producto</th><th>On-hand</th><th>Stock al costo</th></tr>
+        </thead>
+        <tbody>${seTopDead || '<tr><td class="tname" colspan="3">Sin productos detenidos en la ventana.</td></tr>'}</tbody>
+      </table>
+    </section>` : ""}
+    ${pageFooter}
+  </main>`;
+
   const productRows = tableProducts.map((item, index) => {
     const neg = (item.varianceAmount || 0) < 0;
     return `<tr class="${index % 2 ? "alt" : ""}">
@@ -5570,6 +5692,25 @@ function renderTwoPageReportHtml(store, report, options = {}) {
        quedaba un vacio enorme. */
     .bv-comments-grid { align-items: start; display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
     .bv-comments-grid .bv-comments { margin-bottom: 0; }
+    .bv-monthly-head { border-bottom: 2px solid #e8e2d2; margin-bottom: 12px; padding-bottom: 8px; }
+    .bv-monthly-head .bv-brand strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
+    .bv-monthly-head .bv-brand span { color: #6b7c8f; font-size: 11px; }
+    .bv-monthly-table { table-layout: fixed; width: 100%; }
+    .bv-monthly-table th, .bv-monthly-table td { font-size: 7.7px; padding: 3px; }
+    .bv-monthly-table th:last-child, .bv-monthly-table td:last-child { width: 11.5%; }
+    .bv-monthly-table th:nth-child(8), .bv-monthly-table td:nth-child(8) { width: 6%; }
+    .bv-monthly-table th:first-child, .bv-monthly-table td:first-child { width: 12%; }
+    .bv-monthly-table .tname { overflow-wrap: anywhere; }
+    .bv-se-kpis { display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); margin: 8px 0 12px; }
+    .bv-se-kpis article { background: #faf8f2; border: 1px solid #ece7da; border-radius: 10px; padding: 8px 10px; }
+    .bv-se-kpis article span { color: #6b7c8f; display: block; font-size: 8.6px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .bv-se-kpis article strong { font-size: 12.5px; }
+    .bv-monthly-table .tnum { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .bv-monthly-table .neg, .bv-se-kpis .neg { color: #c0392b; }
+    .bv-se-kpis .pos { color: #5c8f1e; }
+    .bv-grand td { background: #e8f3d8; font-weight: 700; }
+    .bv-se-title { font-size: 13px; font-weight: 800; margin: 14px 0 8px; }
+    .bv-table-wrap { margin-bottom: 6px; overflow: hidden; }
     .bv-ctitle { color: #76a73e; font-size: 16px; margin: 6px 0 4px; }
     .bv-citem { display: flex; gap: 10px; margin: 0 0 3px; }
     .bv-citem span { color: #333; }
@@ -5729,12 +5870,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         ${familyPurchaseSvg()}
       </div>
     </section>`}
-    ${isMonthlyReport ? stockEfficiencySection : ""}
+    ${isMonthlyReport && !payload.stockEfficiencyReport ? stockEfficiencySection : ""}
     <section class="bv-comments">
       ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
     ${pageFooter}
   </main>
+  ${isMonthlyReport && (payload.familyMonthlyTable?.length || payload.stockEfficiencyReport) ? monthlyExtrasPage : ""}
   ${webMode ? `<footer class="web-footer">Tú te encargas del sabor. <b>Nosotros del margen.</b> — Bevinco · Sculpture Hospitality</footer>` : ""}
 </body>
 </html>`;
@@ -8352,6 +8494,125 @@ app.patch("/api/module1/reports/:reportId", requireAuth, async (request, respons
 
 const MONTH_NAMES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
+// Resumen por categoria del MES (propuesta de Pedro, 21-ago): suma los
+// flujos de las semanas (compras, usado, vendido, diferencias, ingresos),
+// toma la existencia previa de la PRIMERA semana y la existencia de la
+// ULTIMA, y recalcula los porcentajes sobre los totales.
+function accumulateFamilySummaryTotals(payloads) {
+  const order = [];
+  const byFamily = new Map();
+  for (const payload of payloads) {
+    for (const row of payload.familySummaryTotals || []) {
+      if (!row?.n) continue;
+      if (!byFamily.has(row.familia)) {
+        byFamily.set(row.familia, {
+          familia: row.familia,
+          unidad: row.unidad || "",
+          prev: row.n.prev,
+          existencia: row.n.existencia,
+          sums: { compras: 0, usado: 0, vendido: 0, dif: 0, difCosto: 0, usadoCosto: 0, vendidoCosto: 0, ingresos: 0 },
+        });
+        order.push(row.familia);
+      }
+      const acc = byFamily.get(row.familia);
+      for (const key of Object.keys(acc.sums)) acc.sums[key] += Number(row.n[key]) || 0;
+      acc.existencia = Number(row.n.existencia) || acc.existencia;
+    }
+  }
+  return order.map((name) => {
+    const acc = byFamily.get(name);
+    const sums = acc.sums;
+    return {
+      familia: name,
+      unidad: acc.unidad,
+      prev: acc.prev,
+      existencia: acc.existencia,
+      compras: sums.compras,
+      usado: sums.usado,
+      vendido: sums.vendido,
+      dif: sums.dif,
+      difPct: sums.vendido ? (sums.dif / sums.vendido) * 100 : 0,
+      difCosto: sums.difCosto,
+      usadoCosto: sums.usadoCosto,
+      vendidoCosto: sums.vendidoCosto,
+      ingresos: sums.ingresos,
+      costoPct: sums.ingresos ? (sums.usadoCosto / sums.ingresos) * 100 : 0,
+      idealPct: sums.ingresos ? (sums.vendidoCosto / sums.ingresos) * 100 : 0,
+    };
+  });
+}
+
+// Stock Efficiency Report del dashboard de Sculpture (solo Beverage):
+// POST /reportHistorical/get cmd=deadstock. La ventana es movil: ~5 periodos
+// que terminan en el pid indicado (asi lo muestra el propio dashboard).
+// Validado 1:1 contra el export de Pedro (Bardot, Jun 25 - Jul 29).
+async function fetchStockEfficiency({ client, pid }) {
+  const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
+  if (!cid || !pid) return null;
+  const baseUrl = client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(client?.area || "Beverage");
+  const { cookie, referer } = await activateSculptureContext({ baseUrl, cid, accountId: client?.sculptureAccountId || "" });
+  const response = await fetch(new URL("/reportHistorical/get", baseUrl).toString(), {
+    method: "POST",
+    headers: {
+      cookie,
+      referer,
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "x-requested-with": "XMLHttpRequest",
+    },
+    body: `cid=${encodeURIComponent(cid)}&pid=${encodeURIComponent(pid)}&cmd=deadstock`,
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!response.ok) throw new Error(`Stock Efficiency respondió ${response.status}`);
+  const parsed = await response.json();
+  const rows = (parsed?.data?.data || []).filter((row) => row && row.className && row.className !== "?");
+  if (!rows.length) return null;
+  const toNumber = (value) => Number(value) || 0;
+  const isDead = (row) => String(row.is_deadstock) === "1" || row.is_deadstock === true;
+  const isSlow = (row) => String(row.is_slowmoving) === "1" || row.is_slowmoving === true;
+
+  const familyOrder = [];
+  const byFamily = new Map();
+  let total = 0; let deadTotal = 0; let slowTotal = 0;
+  for (const row of rows) {
+    const value = toNumber(row.onhand_m);
+    total += value;
+    if (!byFamily.has(row.className)) { byFamily.set(row.className, { family: row.className, total: 0, dead: 0, slow: 0 }); familyOrder.push(row.className); }
+    const family = byFamily.get(row.className);
+    family.total += value;
+    if (isDead(row)) { family.dead += value; deadTotal += value; }
+    if (isSlow(row)) { family.slow += value; slowTotal += value; }
+  }
+  const topDead = rows.filter(isDead)
+    .sort((left, right) => toNumber(right.onhand_m) - toNumber(left.onhand_m))
+    .slice(0, 10)
+    .map((row) => ({
+      name: row.name,
+      onhand: `${row.onhand} ${row.description || ""}`.trim(),
+      value: Math.round(toNumber(row.onhand_m)),
+    }));
+  return {
+    total: Math.round(total),
+    deadTotal: Math.round(deadTotal),
+    deadPct: total ? (deadTotal / total) * 100 : 0,
+    slowTotal: Math.round(slowTotal),
+    slowPct: total ? (slowTotal / total) * 100 : 0,
+    healthyPct: total ? (1 - (deadTotal + slowTotal) / total) * 100 : 0,
+    families: familyOrder.map((name) => {
+      const family = byFamily.get(name);
+      return {
+        family: name,
+        total: Math.round(family.total),
+        dead: Math.round(family.dead),
+        deadPct: family.total ? (family.dead / family.total) * 100 : 0,
+        slow: Math.round(family.slow),
+        slowPct: family.total ? (family.slow / family.total) * 100 : 0,
+      };
+    }),
+    topDead,
+  };
+}
+
 // Reporte MENSUAL: acumula los periodos semanales seleccionados de un mes.
 // Regla del equipo: ingresos/ventas/compras se SUMAN; existencias/stock y
 // sugerencia de compra se toman del ULTIMO periodo. El resultado se guarda
@@ -8414,7 +8675,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
     const period = ensurePeriod(store, rawPeriod);
     if (!period) continue;
     const weekly = reportForClientPeriod(store, client.id, period.id);
-    if (!(weekly.summary?.revenue > 0)) {
+    if (!(weekly.summary?.revenue > 0) || !(weekly.familySummaryTotals || []).some((row) => row && row.n)) {
       try {
         await syncSculptureSources(store, weekly, {
           cid: sculptureCid,
@@ -8435,6 +8696,28 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
   }
 
   const accumulated = accumulateReportPayloads(payloads);
+
+  // Stock Efficiency (solo barra): ventana del dashboard que termina en el
+  // ULTIMO periodo del mes. Rango mostrado: inicio ~5 semanas antes.
+  let stockEfficiencyReport = null;
+  if (/beverage|barra/i.test(client.area || "")) {
+    try {
+      const orderedChosen = [...chosen].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+      const lastChosen = orderedChosen[orderedChosen.length - 1];
+      stockEfficiencyReport = await fetchStockEfficiency({ client, pid: lastChosen?.sculpturePid || lastChosen?.pid });
+      if (stockEfficiencyReport) {
+        const orderedAll = [...clientPeriods].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+        const lastIndex = orderedAll.findIndex((period) => period.id === lastChosen.id);
+        const windowStart = orderedAll[Math.max(0, lastIndex - 4)];
+        stockEfficiencyReport.rangeLabel = windowStart && lastChosen
+          ? `${String(windowStart.label || "").split(" to ")[0]} to ${String(lastChosen.label || "").split(" to ").pop()}`
+          : "";
+      }
+    } catch (error) {
+      console.error("[stock-efficiency] no disponible:", error.message);
+    }
+  }
+
   const [yearText, monthNumber] = monthKey.split("-");
   const monthLabel = `${MONTH_NAMES_ES[Number(monthNumber) - 1]} ${yearText}`;
 
@@ -8469,6 +8752,8 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
     purchaseSuggestions: accumulated.purchaseSuggestions,
     monthlyHistory: accumulated.monthlyHistory,
     stockEfficiency: accumulated.stockEfficiency,
+    familyMonthlyTable: accumulateFamilySummaryTotals(payloads),
+    stockEfficiencyReport,
     includedPeriods: accumulated.includedPeriods,
     sourceStatus: accumulated.sourceStatus,
     analysis: null,
