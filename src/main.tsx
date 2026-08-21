@@ -2888,6 +2888,18 @@ function App() {
     }
   }, [authStatus, activeView]);
 
+  // La vista SEMANAL muestra solo reportes semanales: si quedó abierto el
+  // mensual (que ahora vive en su propia vista), al entrar aquí se limpia
+  // la selección para no mezclar "Mes de agosto" entre las semanas.
+  useEffect(() => {
+    if (activeView === "module1" && selectedReport?.monthly) {
+      setSelectedReport(null);
+      setCommentsDraft("");
+      setEmailDraft("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
+
   // Pestañas que quedan abiertas horas/días: al volver a la pestaña se
   // refrescan las tareas para que el tablero muestre los pases de estado
   // automáticos del servidor (máx. una vez por minuto).
