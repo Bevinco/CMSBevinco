@@ -8667,19 +8667,29 @@ app.post("/api/module1/reports/:reportId/chat/learn", requireAuth, async (reques
   );
   const existingRules = learningDoc ? String(learningDoc.text || "") : "";
 
-  const transcript = chat
-    .map((message) => `${message.role === "user" ? "EQUIPO" : "AGENTE"}: ${String(message.content || "").slice(0, 1200)}`)
-    .join("\n")
-    .slice(0, 12000);
+  // Solo la ULTIMA instruccion del equipo (reunion 21-ago): destilar toda
+  // la conversacion podia guardar reglas que nadie pidio si un usuario
+  // junior apretaba el boton. La respuesta del agente va solo como contexto.
+  const lastUserIndex = chat.map((message) => message.role).lastIndexOf("user");
+  const lastUser = lastUserIndex >= 0 ? chat[lastUserIndex] : null;
+  if (!lastUser) {
+    response.status(400).json({ error: "No hay una instrucción del equipo que guardar." });
+    return;
+  }
+  const lastReply = chat.slice(lastUserIndex + 1).find((message) => message.role === "assistant");
+  const transcript = [
+    `EQUIPO (instrucción a guardar): ${String(lastUser.content || "").slice(0, 4000)}`,
+    lastReply ? `AGENTE (solo contexto, NO extraer reglas de aquí): ${String(lastReply.content || "").slice(0, 1500)}` : "",
+  ].filter(Boolean).join("\n");
 
   const prompt = `
 ${generalScope
     ? `Eres el curador de la memoria del agente de reportes Bevinco. Estas reglas son el conocimiento base de la CASA y aplican a TODOS los clientes de la cartera.
 
-De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES y GENERALES que sirvan para cualquier cliente: metodologia de analisis, reglas de estilo o formato, criterios de interpretacion y correcciones transversales. EXCLUYE datos, cifras o preferencias propios de un cliente en particular.`
+De la instruccion del equipo de abajo, extrae SOLO instrucciones PERDURABLES y GENERALES que sirvan para cualquier cliente: metodologia de analisis, reglas de estilo o formato, criterios de interpretacion y correcciones transversales. EXCLUYE datos, cifras o preferencias propios de un cliente en particular.`
     : `Eres el curador de la memoria del agente de reportes Bevinco para el cliente "${clientName}".
 
-De la conversacion de abajo, extrae SOLO instrucciones PERDURABLES que deban aplicarse en TODOS los futuros reportes de este cliente: reglas de estilo o formato, preferencias del equipo, datos permanentes del negocio u operacion, y correcciones que deban recordarse siempre.`}
+De la instruccion del equipo de abajo, extrae SOLO instrucciones PERDURABLES que deban aplicarse en TODOS los futuros reportes de este cliente: reglas de estilo o formato, preferencias del equipo, datos permanentes del negocio u operacion, y correcciones que deban recordarse siempre.`}
 
 IGNORA: pedidos puntuales de este periodo (cifras, productos o hechos de esta semana), saludos, agradecimientos y todo lo que no sirva para el proximo reporte.
 
@@ -9543,6 +9553,7 @@ async function buildVarianceCsvAttachment(store, report) {
   };
 
   const lines = [];
+  const tableRows = [];
   let headersWritten = false;
   for (const period of targetPeriods) {
     const pid = configuredIdentifier(period.sculpturePid, period.pid);
@@ -9556,20 +9567,49 @@ async function buildVarianceCsvAttachment(store, report) {
     }
     if (!data.rows?.length) continue;
     if (!headersWritten) {
-      lines.push([...(report.monthly ? ["Semana"] : []), ...(data.headers || [])].map(escapeCsv).join(";"));
+      const headerValues = [...(report.monthly ? ["Semana"] : []), ...(data.headers || [])];
+      lines.push(headerValues.map(escapeCsv).join(";"));
+      tableRows.push(headerValues);
       headersWritten = true;
     }
     for (const row of data.rows) {
-      lines.push([...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])].map(escapeCsv).join(";"));
+      const rowValues = [...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])];
+      lines.push(rowValues.map(escapeCsv).join(";"));
+      tableRows.push(rowValues);
     }
   }
   if (!lines.length) return null;
 
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
-  const filename = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
+  const baseName = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
     .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")
-    .slice(0, 120) + ".csv";
-  return { filename, text: lines.join("\n"), buffer: Buffer.from("\uFEFF" + lines.join("\r\n"), "utf8") };
+    .slice(0, 120);
+
+  // Adjunto en EXCEL (pedido de Pedro, 21-ago): el CSV se conserva como
+  // texto interno porque el chat del agente lo consume en ese formato.
+  const { default: ExcelJS } = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Variance detallado");
+  tableRows.forEach((values, index) => {
+    const row = sheet.addRow(values.map((value) => {
+      const numeric = Number(String(value).replace(/[$,%\s]/g, ""));
+      return String(value).trim() !== "" && Number.isFinite(numeric) && /^[\d.,$%\s-]+$/.test(String(value)) ? numeric : value;
+    }));
+    if (index === 0) {
+      row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      row.eachCell((cellRef) => { cellRef.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF001E43" } }; });
+    }
+  });
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.columns.forEach((column, index) => { column.width = index === 0 ? 32 : 14; });
+  const xlsxBuffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+  return {
+    filename: baseName + ".xlsx",
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    text: lines.join("\n"),
+    buffer: xlsxBuffer,
+  };
 }
 
 // El variance detallado COMPLETO para el chat (todas las filas, como los
@@ -9656,7 +9696,9 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   const isMonthly = Boolean(report.monthly);
-  const defaultSubject = `Reporte ${isMonthly ? "mensual" : "semanal"} Bevinco - ${client?.name || report.clientId}`;
+  // Asunto con la fecha del periodo auditado (pedido de Paulina, 21-ago).
+  const periodForSubject = store.periods.find((candidate) => candidate.id === report.periodId);
+  const defaultSubject = `Reporte ${isMonthly ? "mensual" : "semanal"} Bevinco - ${client?.name || report.clientId}${periodForSubject?.label ? ` - ${periodForSubject.label}` : ""}`;
   const subject = String(request.body?.subject || "").trim().slice(0, 160) || defaultSubject;
 
   if (!gmailConfigured && !process.env.RESEND_API_KEY) {
@@ -9703,7 +9745,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
         html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
         attachments: [
           { filename: pdfFilename, content: reportPdf, contentType: "application/pdf" },
-          ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer, contentType: "text/csv" }] : []),
+          ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer, contentType: varianceCsv.contentType || "text/csv" }] : []),
         ],
       });
     } catch (gmailError) {

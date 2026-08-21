@@ -309,6 +309,7 @@ type NativeTask = {
   attachments?: Array<{ id: string; name: string; url: string; by: string; at: string }>;
   recurringWeeks?: number;
   recurringMonthly?: boolean;
+  cycles?: Array<{ dueDate: string; status: string; at: string }>;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -2800,7 +2801,7 @@ function App() {
     );
     setEmailSubject(
       selectedReport?.emailLog?.subject ||
-        `Reporte ${selectedReport?.monthly ? "mensual" : "semanal"} Bevinco - ${selectedReport?.client?.name || ""}`.trim(),
+        `Reporte ${selectedReport?.monthly ? "mensual" : "semanal"} Bevinco - ${selectedReport?.client?.name || ""}${selectedReport?.period?.label ? ` - ${selectedReport.period.label}` : ""}`.trim(),
     );
     setEmailRecipientInput("");
   }, [selectedReport?.id]);
@@ -3378,7 +3379,30 @@ function App() {
                           })
                           .map((task) => ({ task, carried: true }))
                       : [];
-                    const dayTasks = [...exactDay, ...carriedOver];
+                    // Auditorías ya ENVIADAS de esta semana: la tarjeta rotó a la
+                    // semana siguiente, pero el ciclo cerrado queda registrado y se
+                    // muestra en su día (Pedro 21-ago: ver TODAS las auditorías de
+                    // la semana, sin importar el estado).
+                    const sentCycles = nativeTasks.flatMap((nativeTask) => (nativeTask.cycles || [])
+                      .filter((cycle) => cycle.dueDate && new Date(`${cycle.dueDate}T12:00:00`).toDateString() === dayKey)
+                      .map((cycle) => ({
+                        task: {
+                          id: nativeTask.id,
+                          name: nativeTask.name,
+                          status: cycle.status || "Reporte Enviado",
+                          statusColor: TASK_STATUS_COLORS[cycle.status || "Reporte Enviado"] || "#0b2c50",
+                          native: true,
+                          url: "",
+                          dueDate: String(new Date(`${cycle.dueDate}T12:00:00`).getTime()),
+                          assignees: [],
+                          tags: [],
+                          subtasks: [],
+                          tagDetails: [],
+                        } as unknown as ClickupTask,
+                        carried: false,
+                        sent: true,
+                      })));
+                    const dayTasks = [...exactDay.map((entry) => ({ ...entry, sent: false })), ...carriedOver.map((entry) => ({ ...entry, sent: false })), ...sentCycles];
                     const isToday = dayKey === today.toDateString();
                     return (
                       <div className={`week-day ${isToday ? "is-today" : ""}`} key={label}>
@@ -3386,7 +3410,7 @@ function App() {
                           <strong>{label}</strong>
                           <span>{day.getDate()}/{day.getMonth() + 1}</span>
                         </header>
-                        {dayTasks.length ? dayTasks.map(({ task, carried }) => {
+                        {dayTasks.length ? dayTasks.map(({ task, carried, sent }) => {
                           const accent = task.tagDetails?.[0]?.bg || task.statusColor || "#8bc6c1";
                           const inner = (
                             <>
@@ -3402,6 +3426,7 @@ function App() {
                                 <i className="week-status-dot" style={{ backgroundColor: task.statusColor || "#9db0aa" }} />
                                 <small>{task.status}</small>
                                 {carried ? <small className="week-late">Atrasada · {new Date(Number(task.dueDate)).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })}</small> : null}
+                                {sent ? <small className="week-sent">✓ enviado</small> : null}
                                 <span className="week-avatars">
                                   {(task.assignees || []).slice(0, 3).map((person) => (
                                     <b key={person.id || person.initials} style={{ backgroundColor: person.color || "#054372" }} title={person.username || ""}>
@@ -3695,11 +3720,11 @@ function App() {
               <div className="chat-learn-bar">
                 <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("client")}>
                   {chatLearning === "client" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {chatLearning === "client" ? "Guardando memoria..." : "Guardar aprendizajes del cliente"}
+                  {chatLearning === "client" ? "Guardando memoria..." : "Guardar última instrucción (este cliente)"}
                 </button>
                 <button className="secondary-button" disabled={Boolean(chatLearning)} type="button" onClick={() => learnFromChat("general")}>
                   {chatLearning === "general" ? <span className="btn-spinner btn-spinner-dark" /> : <BookOpenCheck size={16} />}
-                  {chatLearning === "general" ? "Guardando memoria..." : "Guardar para TODOS los clientes"}
+                  {chatLearning === "general" ? "Guardando memoria..." : "Última instrucción para TODOS los clientes"}
                 </button>
                 <small>La IA extrae solo las reglas perdurables del chat (ignora pedidos puntuales). "Del cliente" las suma a la skill de {selectedClient?.name || "este cliente"}; "para TODOS" las guarda como conocimiento base de la casa, que aplica a toda la cartera.</small>
               </div>
