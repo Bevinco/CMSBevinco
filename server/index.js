@@ -3868,7 +3868,44 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           learnedFamilies[leaf] = family;
         }
         if (client) client.categoryFamilies = learnedFamilies;
-        const familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
+        // COCINA: la sugerencia se agrupa por la MISMA familia superior del
+        // arbol de Sculpture (Carnes, Pescado, Lacteos...), identica a la
+        // del variance summary. Se acabaron los "pescado/pescados" y
+        // "carne/vacuno" duplicados y el "Otros" del grafico de compras
+        // (QA 22-ago). Un encabezado de familia es una fila SIN ":" cuyo
+        // nombre tiene su "Total X:" y cuya fila siguiente es una hoja "Y:".
+        let familySuggested = null;
+        if (/food/i.test(area)) {
+          const rowNames = data.rows.map((row) => String(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values?.[0] || "")).trim());
+          const totalNames = new Set(rowNames.filter((name) => /^total\s+/i.test(name)).map((name) => cleanTotalName(name).toLowerCase()));
+          const order = [];
+          const sums = new Map();
+          let currentTop = "";
+          rowNames.forEach((name, index) => {
+            if (!name || /grand\s+total/i.test(name)) return;
+            const isTotal = /^total\s+/i.test(name);
+            const isLeafHeader = /:\s*$/.test(name);
+            if (isTotal || isLeafHeader) return;
+            const nextName = rowNames.slice(index + 1).find((candidate) => candidate);
+            if (totalNames.has(name.toLowerCase()) && nextName && /:\s*$/.test(nextName)) {
+              currentTop = name;
+              if (!sums.has(currentTop)) { sums.set(currentTop, 0); order.push(currentTop); }
+              return;
+            }
+            if (!currentTop) return;
+            const orderCost = parseNumber(
+              pickRecordValue(data.rows[index].record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
+              pickRecordValueFuzzy(data.rows[index].record, /(costo|cost).*(pedido|sugerid|order)|(pedido|order).*(costo|cost)/i),
+            );
+            if (orderCost > 0) sums.set(currentTop, sums.get(currentTop) + orderCost);
+          });
+          if (order.length >= 2) {
+            familySuggested = order.map((family) => ({ family, suggested: Math.round(sums.get(family) || 0) }));
+          }
+        }
+        if (!familySuggested) {
+          familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
+        }
         if (familySuggested.some((item) => item.suggested)) {
           report.familySuggested = familySuggested;
           report.summary = report.summary || {};
@@ -3962,9 +3999,16 @@ async function syncSculptureSources(store, report, requestBody = {}) {
 
   report.updatedAt = new Date().toISOString();
   report.extractorVersion = EXTRACTOR_VERSION;
-  report.analysis = previousAnalysis && summarySignature(report.summary) === previousSignature
-    ? previousAnalysis
-    : null;
+  // El trabajo del equipo SIEMPRE se conserva al regenerar (pedido de
+  // Tamara 22-ago: quedaba el analisis inicial y se perdia el ultimo
+  // resumen trabajado). Si las cifras cambiaron, se marca para que el
+  // equipo decida si lo refresca con "Redactar con IA".
+  if (previousAnalysis) {
+    report.analysis = previousAnalysis;
+    if (summarySignature(report.summary) !== previousSignature) report.analysisStale = true;
+  } else {
+    report.analysis = null;
+  }
   return syncResults;
 }
 
@@ -5063,16 +5107,22 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const suggestedSource = (priorWeekly?.familySuggested?.length
     ? priorWeekly.familySuggested
     : (priorPick.any ? [] : payload.familySuggested)) || [];
-  const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
-  const familyNames = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys(), ...REPORT_FAMILIES])];
-  const familyPurchaseRows = familyNames
-    .map((family) => ({
-      family,
-      purchased: purchasesMap.get(family) || 0,
-      suggested: suggestedMap.get(family) || 0,
-    }))
+  const familyKeyOfPdf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const mergedPdfFamilies = new Map();
+  for (const [family, purchased] of purchasesMap.entries()) {
+    const key = familyKeyOfPdf(family);
+    if (!mergedPdfFamilies.has(key)) mergedPdfFamilies.set(key, { family, purchased: 0, suggested: 0 });
+    mergedPdfFamilies.get(key).purchased += purchased || 0;
+  }
+  for (const item of suggestedSource) {
+    const key = familyKeyOfPdf(item.family);
+    if (!mergedPdfFamilies.has(key)) mergedPdfFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
+    mergedPdfFamilies.get(key).suggested += item.suggested || 0;
+  }
+  const familyPurchaseRows = [...mergedPdfFamilies.values()]
+    .filter((item) => item.purchased || item.suggested)
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
-    .slice(0, 7);
+    .slice(0, 9);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
     ? payload.summary.savingsTotal
     : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
@@ -5930,13 +5980,25 @@ function dynamicReportData(store, report) {
   const suggestedSource = (priorWeekly?.familySuggested?.length
     ? priorWeekly.familySuggested
     : (priorPick.any ? [] : payload.familySuggested)) || [];
-  const suggestedMap = new Map(suggestedSource.map((item) => [item.family, item.suggested || 0]));
-  const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
-  const familyPurchases = [...new Set([...purchasesMap.keys(), ...suggestedMap.keys()])]
-    .map((family) => ({ family, purchased: purchasesMap.get(family) || 0, suggested: suggestedMap.get(family) || 0 }))
+  // Fusion por clave NORMALIZADA (sin tildes ni plural): "Pescados" del
+  // Intelipar y "Pescado" del variance son la misma familia y antes salian
+  // como dos barras, una siempre en 0 (QA 22-ago).
+  const familyKeyOf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const mergedFamilies = new Map();
+  for (const item of payload.familyPurchases || []) {
+    const key = familyKeyOf(item.family);
+    if (!mergedFamilies.has(key)) mergedFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
+    mergedFamilies.get(key).purchased += item.purchased || 0;
+  }
+  for (const item of suggestedSource) {
+    const key = familyKeyOf(item.family);
+    if (!mergedFamilies.has(key)) mergedFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
+    mergedFamilies.get(key).suggested += item.suggested || 0;
+  }
+  const familyPurchases = [...mergedFamilies.values()]
     .filter((item) => item.purchased || item.suggested)
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
-    .slice(0, 7);
+    .slice(0, 9);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
     ? payload.summary.savingsTotal
     : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
@@ -6364,6 +6426,10 @@ function renderDynamicReportHtml(store, report) {
   function renderFamChart(data) {
     destroyChart("fam");
     var rows = data.familyVariances.slice().sort(function (a, b) { return b.amount - a.amount; });
+    // Altura segun cantidad de familias: con 8-9 (cocina) las etiquetas se
+    // encimaban en el alto fijo (QA 22-ago).
+    var famWrap = document.getElementById("famChart").parentElement;
+    if (famWrap) famWrap.style.height = Math.max(260, rows.length * 34 + 60) + "px";
     charts.fam = new Chart(document.getElementById("famChart"), {
       type: "bar",
       data: {
@@ -6428,13 +6494,17 @@ function renderDynamicReportHtml(store, report) {
   function renderFamBuyChart(data) {
     destroyChart("famBuy");
     var rows = data.familyPurchases;
+    var famBuyWrap = document.getElementById("famBuyChart").parentElement;
+    if (famBuyWrap) famBuyWrap.style.height = Math.max(260, rows.length * 44 + 70) + "px";
     charts.famBuy = new Chart(document.getElementById("famBuyChart"), {
       type: "bar",
       data: {
         labels: rows.map(function (r) { return r.family; }),
         datasets: [
-          { label: "Sugerida (sem. previa)", data: rows.map(function (r) { return r.suggested; }), backgroundColor: GREEN, maxBarThickness: 20 },
-          { label: "Comprada", data: rows.map(function (r) { return r.purchased; }), backgroundColor: NAVY, maxBarThickness: 20 }
+          { label: "Sugerida (sem. previa)", data: rows.map(function (r) { return r.suggested; }), backgroundColor: GREEN, maxBarThickness: 18,
+            datalabels: { display: function (ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, anchor: "end", align: "end", clamp: true, color: "#5c8f1e", font: { weight: 800, size: 9.5 }, formatter: fmtK } },
+          { label: "Comprada", data: rows.map(function (r) { return r.purchased; }), backgroundColor: NAVY, maxBarThickness: 18,
+            datalabels: { display: function (ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, anchor: "end", align: "end", clamp: true, color: NAVY, font: { weight: 800, size: 9.5 }, formatter: fmtK } }
         ]
       },
       options: {
