@@ -3564,13 +3564,17 @@ const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0
 const UNIT_COST_OUTLIER_FACTOR = 50;
 const UNIT_COST_SAMPLE_MIN = 8;
 
-function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {} } = {}) {
+function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = false } = {}) {
   const { suggestionDays, extraDays, coverage } = { ...KITCHEN_PURCHASE_DEFAULTS, ...params };
   const hasNativeSuggestion = (rows || []).some((row) => {
     const record = row.record || {};
     return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
   });
-  if (hasNativeSuggestion || !rows?.length) return false;
+  // force (cocinas): cuando Sculpture agrego sus columnas Par/Orden a los
+  // Intelipar de cocina (22-ago), el CMS dejaba de calcular y pasaba el
+  // numero ingenuo del sistema (PAR completo ignorando stock). En cocina la
+  // formula del CMS SIEMPRE sobreescribe la nativa.
+  if ((hasNativeSuggestion && !force) || !rows?.length) return false;
 
   // Mediana de costos unitarios de ESTA tabla (solo filas de producto). Se usa
   // la mediana y no el promedio porque el outlier que buscamos arrastraria el
@@ -3767,12 +3771,10 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           ? Date.parse(periodForDays.endsAt) - Date.parse(periodForDays.startsAt)
           : 0;
         const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
-        const isKitchenTable = !(data.rows || []).some((row) => {
-          const record = row.record || {};
-          return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
-        });
+        // Por AREA, no por columnas (Sculpture agrego Par/Orden a cocina).
+        const isKitchenTable = /food/i.test(area);
         if (isKitchenTable) applyEffectiveInventory(data.rows, detailedStockUnits, client);
-        enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
+        enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable });
 
         // Lo que hay que comprar primero: mayor costo de pedido o exceso.
         const suggestionRows = [...data.rows]
@@ -9485,10 +9487,11 @@ async function computeSuggestionItems({ client, period, mixStock }) {
 
   const periodMs = period?.startsAt && period?.endsAt ? Date.parse(period.endsAt) - Date.parse(period.startsAt) : 0;
   const daysInPeriod = periodMs > 0 ? Math.round(periodMs / 86400000) + 1 : 7;
-  const isKitchenTable = !(data.rows || []).some((row) => {
-    const record = row.record || {};
-    return record.par !== undefined || record.orden !== undefined || record.costoPedido !== undefined;
-  });
+  // Cocina se decide por el AREA del cliente, no por las columnas: desde que
+  // Sculpture agrego Par/Orden a los Intelipar de cocina, detectar por
+  // columnas hacia pasar el calculo ingenuo del sistema (bug 24-ago,
+  // reportado por Paulina: "no considera la totalidad del stock").
+  const isKitchenTable = /food/i.test(client?.area || "Food");
   if (isKitchenTable) {
     try {
       const area = client?.area || "Food";
@@ -9502,7 +9505,7 @@ async function computeSuggestionItems({ client, period, mixStock }) {
   } else {
     applyBarMixInventory(data.rows, client, mixStock);
   }
-  enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams });
+  enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable });
 
   const items = data.rows
     .map((row) => {
