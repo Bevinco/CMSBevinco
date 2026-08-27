@@ -1588,9 +1588,10 @@ function familyForCategory(name) {
   if (/schop|barril/.test(text)) return "Barriles";
   if (/espumante|champagne|sparkling|prosecco|brut|spritz/.test(text)) return "Espumantes";
   if (/cerveza|sidra|beer|cider/.test(text)) return "Cervezas y Sidra";
-  if (/agua|bebida|energizante|kombucha|jugo|gaseosa|sin alcohol|s\/alcohol|cafe|café|leche|nectar|néctar/.test(text)) return "Sin Alcohol";
-  if (/cabernet|carmenere|carménère|chardonnay|merlot|pinot|sauvignon|syrah|ensamblaje|late harvest|vino|rosé|rose\b|blend|malbec|riesling|viognier|moscato|torontel|cinsault|garnacha|tempranillo|zinfandel|petit|sangria|sangría/.test(text)) return "Vinos";
+  if (/agua|bebida|energizante|energetica|energética|mixer|kombucha|jugo|gaseosa|sin alcohol|s\/alcohol|cafe|café|leche|nectar|néctar/.test(text)) return "Sin Alcohol";
+  if (/cabernet|carmenere|carménère|chardonnay|merlot|pinot|sauvignon|syrah|ensamblaje|late harvest|vino|rosé|rose\b|blend|malbec|riesling|viognier|moscato|torontel|cinsault|garnacha|tempranillo|zinfandel|petit|sangria|sangría|oporto/.test(text)) return "Vinos";
   if (/whisk|bourbon|scotch|irish|vodka|gin\b|ron\b|rum\b|tequila|mezcal|pisco|licor|aperitivo|vermouth|vermut|brandy|cognac|cachaca|cachaça|destilado|amargo|bitter|anis|anís|grappa|sake|soju|absenta|premium|coctel|cóctel|cocktail|mixolog/.test(text)) return "Destilados";
+  if (/postre|torta|brownie|dulce|tartatela|quiche|empanada|pasteler|colacion|colación|^pan$|^mini\b|galleta|cheesecake/.test(text)) return "Cocina";
   return "Otros";
 }
 
@@ -6944,12 +6945,24 @@ app.get("/api/module1/sculpture-source", requireAuth, async (request, response) 
     response.status(400).json({ error: "Indica type (varianceDetailed|varianceSummary|intelipar), cid y pid." });
     return;
   }
+  // Resolucion de cuenta como en el endpoint de periodos: sin accountId, un
+  // cid de otra nube devolvia una pagina vacia con la cuenta principal.
+  let accountId = String(request.query.accountId || "");
+  let baseUrl = String(request.query.baseUrl || "") || baseUrlForSculptureArea(area);
+  if (!accountId) {
+    try {
+      const store = await readStore();
+      const known = (store.clients || []).find((client) => String(client.sculptureCid || client.cid || "") === cid && client.sculptureAccountId);
+      if (known) {
+        accountId = known.sculptureAccountId;
+        baseUrl = String(request.query.baseUrl || "") || known.sculptureBaseUrl || baseUrl;
+      }
+    } catch {
+      // se intenta con la cuenta principal
+    }
+  }
   try {
-    const data = await fetchSculptureInternalReport({
-      type, cid, pid, area,
-      baseUrl: String(request.query.baseUrl || "") || baseUrlForSculptureArea(area),
-      accountId: String(request.query.accountId || ""),
-    });
+    const data = await fetchSculptureInternalReport({ type, cid, pid, area, baseUrl, accountId });
     const rows = data.rows || [];
     response.json({
       type, cid, pid,
