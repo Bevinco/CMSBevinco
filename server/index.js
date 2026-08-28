@@ -5196,7 +5196,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       return (present.length > 1 ? `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.4"/>` : "") +
         present.map(({ p, i }) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
     };
-    const clampChip = (cy) => Math.min(Math.max(cy, T + 9), B - 10);
+    const clampChip = (cy) => Math.min(Math.max(cy, T + 9), B - 31);
     const chips = history.map((p, i) => {
       if (!p.costPercent && !p.idealCostPercent) return "";
       const x = xAt(i);
@@ -5266,6 +5266,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const label = fmtK(amount);
       const pillW = 16 + label.length * 6.4; const pillH = 16;
       let pillX = amount >= 0 ? x1 + 4 : x1 - 4 - pillW;
+      if (amount < 0 && pillX < L + 2) pillX = x1 + 4;
       pillX = Math.max(2, Math.min(pillX, W - pillW - 2));
       return `<text x="${L - 8}" y="${yc + 4}" text-anchor="end" class="fam">${escapeHtml(item.family)}</text>` +
         `<rect x="${bx}" y="${yc - barH / 2}" width="${bw}" height="${barH}" fill="${color}"/>` +
@@ -5423,7 +5424,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de inventario para las semanas consultadas.</text>`;
     const xLabels = history.map((p, i) =>
-      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${ddmmyyyy(p.endsAt) || escapeHtml(p.label)}</text>`).join("");
+      `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${history.length > 4 ? (ddmmyyyy(p.endsAt) || "").slice(0, 5) : (ddmmyyyy(p.endsAt) || escapeHtml(p.label))}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
       <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.rotlab{font:700 11px Calibri,Arial;fill:#fff}.chipteal{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
@@ -5612,32 +5613,43 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       </table>
     </section>` : "";
 
-  // ---- Pagina 3 (solo mensual): resumen por categoria + Stock Efficiency --
+  // ---- Paginas del REPORTE MENSUAL (rediseño 28-ago, criterio UX):
+  // pag 1 = historia del mes (costo por semana + ahorro/faltantes +
+  // comentarios del mes editables); pag 2 = resumen por categoria a todo el
+  // ancho + cobertura; pag 3 (solo barra) = Stock Efficiency holgado.
+  // Fuera: merma, top-10 de uso y compra realizada (decision del equipo).
   const fmt1 = (value) => Number(value || 0).toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  // Cantidades como en el ejemplo de Pedro: enteros grandes sin decimal
-  // (1.257.062), fracciones chicas con uno (742,1).
-  const fmtQty = (value) => {
-    const numberValue = Number(value || 0);
-    return Math.abs(numberValue) >= 1000
-      ? numberValue.toLocaleString("es-CL", { maximumFractionDigits: 0 })
-      : numberValue.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  };
   const fmt0 = (value) => Number(value || 0).toLocaleString("es-CL", { maximumFractionDigits: 0 });
-  const monthlyTableRows = (payload.familyMonthlyTable || []).map((row, index) => `
+  const monthlyCommentsText = String(payload.comments || "").trim();
+  const monthlyCommentsBlock = `
+    <section class="bv-comments bv-month-comments">
+      <h3>Comentarios del mes</h3>
+      ${monthlyCommentsText
+        ? monthlyCommentsText.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br/>")}</p>`).join("")
+        : commentBlock("Lo mejor del mes:", analysis.bestOfWeek) + commentBlock("Desafíos del mes:", analysis.weeklyChallenges)}
+    </section>`;
+  const monthlyTableRows = (payload.familyMonthlyTable || []).map((row, index) => {
+    // ml -> botellas de 700cc (reunion 28-ago): mientras se implementa la
+    // equivalencia editable por producto, la botella estandar es 700 ml.
+    const inMl = /^ml$/i.test(String(row.unidad || "").trim());
+    const qty = (value) => fmt1(inMl ? (value || 0) / 700 : value);
+    const unitLabel = inMl ? "bot. 700cc" : row.unidad;
+    return `
     <tr class="${index % 2 ? "alt" : ""}">
-      <td class="tname">Total ${escapeHtml(row.familia)}${row.unidad ? ` (${escapeHtml(row.unidad)})` : ""}</td>
-      <td class="tnum">${fmtQty(row.prev)}</td>
-      <td class="tnum">${fmtQty(row.compras)}</td>
-      <td class="tnum">${fmtQty(row.existencia)}</td>
-      <td class="tnum">${fmtQty(row.usado)}</td>
-      <td class="tnum">${fmtQty(row.vendido)}</td>
-      <td class="tnum ${row.dif < 0 ? "neg" : ""}">${fmtQty(row.dif)}</td>
+      <td class="tname">Total ${escapeHtml(row.familia)}${unitLabel ? ` (${escapeHtml(unitLabel)})` : ""}</td>
+      <td class="tnum">${qty(row.prev)}</td>
+      <td class="tnum">${qty(row.compras)}</td>
+      <td class="tnum">${qty(row.existencia)}</td>
+      <td class="tnum">${qty(row.usado)}</td>
+      <td class="tnum">${qty(row.vendido)}</td>
+      <td class="tnum ${row.dif < 0 ? "neg" : ""}">${qty(row.dif)}</td>
       <td class="tnum ${row.difPct < 0 ? "neg" : ""}">${fmt1(row.difPct)}%</td>
       <td class="tnum ${row.difCosto < 0 ? "neg" : ""}">$${fmt0(row.difCosto)}</td>
       <td class="tnum">${fmt1(row.costoPct)}%</td>
       <td class="tnum">${fmt1(row.idealPct)}%</td>
       <td class="tnum">$${fmt0(row.ingresos)}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   const monthlyGrand = (payload.familyMonthlyTable || []).reduce((acc, row) => ({
     difCosto: acc.difCosto + (row.difCosto || 0),
     usadoCosto: acc.usadoCosto + (row.usadoCosto || 0),
@@ -5649,7 +5661,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     <tr class="${index % 2 ? "alt" : ""}">
       <td class="tname">${escapeHtml(row.family)}</td>
       <td class="tnum">$${fmt0(row.total)}</td>
-      <td class="tnum">$${fmt0(row.dead)} (${fmt1(row.deadPct)}%)</td>
+      <td class="tnum ${row.dead ? "neg" : ""}">$${fmt0(row.dead)} (${fmt1(row.deadPct)}%)</td>
       <td class="tnum">$${fmt0(row.slow)} (${fmt1(row.slowPct)}%)</td>
     </tr>`).join("");
   const seTopDead = (seData?.topDead || []).map((row, index) => `
@@ -5658,13 +5670,11 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       <td class="tnum">${escapeHtml(row.onhand)}</td>
       <td class="tnum">$${fmt0(row.value)}</td>
     </tr>`).join("");
-  const monthlyExtrasPage = `
-  <main class="bv-page page-break bv-monthly-page">
-    <header class="bv-head bv-monthly-head">
-      <div class="bv-brand"><strong>Resumen del mes por categoría</strong><span>${escapeHtml(clientTitle)} · ${escapeHtml(payload.period?.label || report.periodId)}</span></div>
-    </header>
-    ${payload.familyMonthlyTable?.length ? `
-    <section class="bv-table-wrap">
+  const monthlyCategoryPage = payload.familyMonthlyTable?.length ? `
+  <main class="bv-page page-break">
+    ${pageHeader}
+    <section class="bv-panel bv-panel-wide">
+      <h2>Resumen del mes por categoría</h2>
       <table class="bv-table bv-monthly-table">
         <thead>
           <tr>
@@ -5683,33 +5693,42 @@ function renderTwoPageReportHtml(store, report, options = {}) {
           </tr>
         </tbody>
       </table>
-    </section>` : ""}
-    ${seData ? `
-    <h3 class="bv-se-title">Stock Efficiency Report${seData.rangeLabel ? ` · ${escapeHtml(seData.rangeLabel)}` : ""}</h3>
-    <section class="bv-kpis bv-se-kpis">
-      <article><span>Inventario total</span><strong>$${fmt0(seData.total)}</strong></article>
-      <article><span>Stock sin movimiento</span><strong class="neg">$${fmt0(seData.deadTotal)} (${fmt1(seData.deadPct)}%)</strong></article>
-      <article><span>Movimiento lento</span><strong>$${fmt0(seData.slowTotal)} (${fmt1(seData.slowPct)}%)</strong></article>
-      <article><span>Rotación saludable</span><strong class="pos">${fmt1(seData.healthyPct)}%</strong></article>
     </section>
-    <section class="bv-grid2 bv-stockeff">
-      <table class="bv-table">
+    <section class="bv-panel bv-panel-wide">
+      <h2>Cobertura de inventario</h2>
+      ${coverageSvg()}
+    </section>
+    ${pageFooter}
+  </main>` : "";
+  const monthlySePage = seData ? `
+  <main class="bv-page page-break">
+    ${pageHeader}
+    <section class="bv-panel bv-panel-wide">
+      <h2>Stock Efficiency Report${seData.rangeLabel ? ` · ${escapeHtml(seData.rangeLabel)}` : ""}</h2>
+      <section class="bv-kpis bv-se-kpis">
+        <article><span>Inventario total</span><strong>$${fmt0(seData.total)}</strong></article>
+        <article><span>Stock sin movimiento</span><strong class="neg">$${fmt0(seData.deadTotal)} (${fmt1(seData.deadPct)}%)</strong></article>
+        <article><span>Movimiento lento</span><strong>$${fmt0(seData.slowTotal)} (${fmt1(seData.slowPct)}%)</strong></article>
+        <article><span>Rotación saludable</span><strong class="pos">${fmt1(seData.healthyPct)}%</strong></article>
+      </section>
+      <table class="bv-table bv-se-table">
         <thead>
           <tr><th colspan="4" class="bv-table-title">Stock por categoría</th></tr>
           <tr><th>Categoría</th><th>Stock total</th><th>Sin movimiento</th><th>Mov. lento</th></tr>
         </thead>
         <tbody>${seFamilies}</tbody>
       </table>
-      <table class="bv-table">
+      <table class="bv-table bv-se-table">
         <thead>
           <tr><th colspan="3" class="bv-table-title">Top 10 sin movimiento por valor</th></tr>
           <tr><th>Producto</th><th>On-hand</th><th>Stock al costo</th></tr>
         </thead>
         <tbody>${seTopDead || '<tr><td class="tname" colspan="3">Sin productos detenidos en la ventana.</td></tr>'}</tbody>
       </table>
-    </section>` : ""}
+    </section>
     ${pageFooter}
-  </main>`;
+  </main>` : "";
+  const monthlyPages = monthlyCategoryPage + monthlySePage;
 
   const productRows = tableProducts.map((item, index) => {
     const neg = (item.varianceAmount || 0) < 0;
@@ -5771,7 +5790,14 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-monthly-head .bv-brand strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
     .bv-monthly-head .bv-brand span { color: #6b7c8f; font-size: 11px; }
     .bv-monthly-table { table-layout: fixed; width: 100%; }
-    .bv-monthly-table th, .bv-monthly-table td { font-size: 7.7px; padding: 3px; }
+    .bv-monthly-table th, .bv-monthly-table td { font-size: 9.3px; padding: 4px 5px; }
+    .bv-panel-wide { padding: 12px 14px; }
+    .bv-panel-wide h2 { border-left: 4px solid #90BF4F; color: #333; font-size: 16px; padding-left: 8px; text-align: left; }
+    .bv-se-table { margin-top: 10px; }
+    .bv-se-kpis { padding-top: 0 !important; }
+    .bv-panel-wide .bv-svg { margin: 0 auto; max-width: 540px; }
+    .bv-month-comments h3 { color: #5c8f1e; font-size: 15px; margin: 4px 0 8px; }
+    .bv-month-comments p { color: #404040; font-size: 12.5px; line-height: 1.6; margin: 0 0 8px; }
     .bv-monthly-table th:last-child, .bv-monthly-table td:last-child { width: 11.5%; }
     .bv-monthly-table th:nth-child(8), .bv-monthly-table td:nth-child(8) { width: 6%; }
     .bv-monthly-table th:first-child, .bv-monthly-table td:first-child { width: 12%; }
@@ -5892,19 +5918,19 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       <aside class="bv-kpis">
         ${kpiBox("Suma de ahorros", `$${fmtMoney(savings)}`)}
         ${kpiBox("Suma de faltantes", `$${fmtMoney(shortages)}`)}
-        ${kpiBox("Merma reportada al $", waste ? `-$${fmtMoney(waste)}` : "$0")}
+        ${isMonthlyReport ? "" : kpiBox("Merma reportada al $", waste ? `-$${fmtMoney(waste)}` : "$0")}
         ${kpiArrow}
       </aside>
     </section>
-    <section class="bv-comments-grid">
+    ${isMonthlyReport ? monthlyCommentsBlock : `<section class="bv-comments-grid">
       <div class="bv-comments">
         ${commentBlock("Lo mejor de la semana:", analysis.bestOfWeek)}
       </div>
       <div class="bv-comments">
         ${commentBlock("Los desafíos de la semana:", analysis.weeklyChallenges)}
       </div>
-    </section>
-    <table class="bv-table">
+    </section>`}
+    ${isMonthlyReport ? "" : `<table class="bv-table">
       <thead>
         <tr><th colspan="5" class="bv-table-title">Desempeño de los 10 productos con mayor uso ($)</th></tr>
         <tr>
@@ -5912,24 +5938,14 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         </tr>
       </thead>
       <tbody>${productRows}</tbody>
-    </table>
+    </table>`}
     ${pageFooter}
   </main>
 
-  <main class="bv-page page-break">
+  ${isMonthlyReport ? monthlyPages : `<main class="bv-page page-break">
     ${pageHeader}
-    ${isMonthlyReport ? `
-    <section class="bv-grid2">
-      <div class="bv-panel">
-        <h2>Compra Realizada vs Sugerida</h2>
-        ${purchaseAreaSvg()}
-      </div>
-      <div class="bv-panel">
-        <h2>Cobertura de inventario</h2>
-        ${coverageSvg()}
-      </div>
-    </section>` : `
-    <section class="bv-grid2">
+    `
+    + `<section class="bv-grid2">
       <div class="bv-col">
         <div class="bv-panel">
           <h2>Compra Realizada vs Sugerida</h2>
@@ -5944,14 +5960,12 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         <h2>Compra Realizada vs Sugerida por familia</h2>
         ${familyPurchaseSvg()}
       </div>
-    </section>`}
-    ${isMonthlyReport && !payload.stockEfficiencyReport ? stockEfficiencySection : ""}
+    </section>
     <section class="bv-comments">
       ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
     ${pageFooter}
-  </main>
-  ${isMonthlyReport && (payload.familyMonthlyTable?.length || payload.stockEfficiencyReport) ? monthlyExtrasPage : ""}
+  </main>`}
   ${webMode ? `<footer class="web-footer">Tú te encargas del sabor. <b>Nosotros del margen.</b> — Bevinco · Sculpture Hospitality</footer>` : ""}
 </body>
 </html>`;

@@ -3299,6 +3299,39 @@ function App() {
                   <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
                 </label>
               </div>
+              {selectedReport?.monthly ? (
+                <label className="email-body-field month-comments-field">
+                  Comentarios del mes
+                  <textarea
+                    aria-label="Comentarios del mes"
+                    placeholder="Comentarios generales del mes: aparecen en la primera página del PDF mensual. Escríbelos aquí o deja que el resumen con IA los complete."
+                    value={commentsDraft}
+                    onChange={(event) => setCommentsDraft(event.target.value)}
+                  />
+                  <small className="email-hint">Se imprimen como "Comentarios del mes" en el PDF. Se guardan al usar Vista Previa o Enviar, o con este botón.</small>
+                  <button
+                    className="ghost-button month-comments-save"
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedReport) return;
+                      try {
+                        await readJson(await fetch(`/api/module1/reports/${selectedReport.id}`, {
+                          method: "PATCH",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ comments: commentsDraft }),
+                        }));
+                        setError("Comentarios del mes guardados.");
+                        setWorkStatus("idle");
+                      } catch (saveError) {
+                        setError(saveError instanceof Error ? saveError.message : "No se pudieron guardar los comentarios.");
+                        setWorkStatus("error");
+                      }
+                    }}
+                  >
+                    Guardar comentarios
+                  </button>
+                </label>
+              ) : null}
               <label className="email-body-field">
                 Cuerpo del correo
                 <textarea
