@@ -2157,7 +2157,9 @@ async function generateReportAnalysisAI(payload) {
     // nivel macro del metodo; sin el, la IA no podia comentar "Total
     // Barriles" ni separar merma de faltante injustificado.
     familias: payload.familyVariances || [],
-    totalesFamiliaSummary: payload.familySummaryTotals || [],
+    totalesFamiliaSummary: isMonthly && (payload.familyMonthlyTable || []).length
+      ? payload.familyMonthlyTable
+      : (payload.familySummaryTotals || []),
     categorias: (payload.categoryVariances || []).slice(0, 40),
     productos: (payload.topProducts || []).slice(0, 20),
     productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
@@ -9273,6 +9275,14 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
     "Usa solo las cifras entregadas; nunca inventes datos.",
     "",
     BEVINCO_ANALYSIS_METHOD,
+    ...(report.monthly ? [
+      "",
+      "⚠ ESTE ES UN REPORTE MENSUAL (acumulado del mes). El FORMATO DE ENTREGA semanal de arriba queda REEMPLAZADO:",
+      "- PROHIBIDO responder con las secciones 'DIAGNOSTICO (interno)', 'Lo mejor de la semana', 'Los desafios de la semana' y 'EFICIENCIA DE STOCK Y COMPRA'. El reporte mensual lleva UN unico texto: 'Comentarios del mes'.",
+      "- Cuando pidan redactar, detallar o ajustar, entrega los Comentarios del mes listos para pegar: parrafos y bullets que cubran (1) evolucion semanal del costo real vs ideal citando semanas y cifras, (2) lectura por familia usando 'totalesFamiliaSummary' (cantidad con SU unidad, %, $), (3) ahorros y faltantes del mes con los productos responsables, (4) compra vs sugerido y cobertura del mes, y (5) 'stockEfficiency' del extracto si trae datos (inventario sin movimiento y lento, top detenidos). Cierra con recomendaciones accionables.",
+      "- En el mensual, 'totalesFamiliaSummary' son los TOTALES POR FAMILIA DEL MES: el CMS los acumula desde el variance summary de Sculpture (prev/compras/existencia/usado/vendido/dif con su unidad, difPct, difCosto, costoPct, idealPct, ingresos). Usalos tal cual; NUNCA digas que faltan o que vienen vacios.",
+      "- Habla siempre de 'el mes', nunca de 'la semana'.",
+    ] : []),
     "",
     `Criterios del cliente (${clientName}):`,
     criteria.length ? JSON.stringify(criteria) : "Sin criterios específicos; aplica la metodología estándar.",
@@ -9296,8 +9306,13 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       // "no tengo el variance de Total Barriles" (reclamo de Pedro, 04-ago).
       familias: payload.familyVariances || [],
       // Filas "Total <familia>" del summary TAL CUAL (cantidad con unidad,
-      // % y $): la fuente oficial para totales por familia.
-      totalesFamiliaSummary: payload.familySummaryTotals || [],
+      // % y $): la fuente oficial para totales por familia. En el MENSUAL
+      // es la tabla acumulada del mes (familyMonthlyTable), que antes no
+      // llegaba y el chat respondia "viene vacio" (QA 28-ago).
+      totalesFamiliaSummary: report.monthly && (payload.familyMonthlyTable || []).length
+        ? payload.familyMonthlyTable
+        : (payload.familySummaryTotals || []),
+      stockEfficiency: report.monthly ? (payload.stockEfficiencyReport || undefined) : undefined,
       categorias: (payload.categoryVariances || []).slice(0, 40),
       productos: (payload.topProducts || []).slice(0, 20),
       productosMayorUso: (payload.topUsageProducts || []).slice(0, 15),
@@ -9308,7 +9323,7 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       // detallado "por familia" y respondia que le faltaban datos.
       mapaCategoriaFamilia: payload.client?.categoryFamilies || {},
       sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 10),
-      historico: (payload.history || []).slice(0, 4),
+      historico: (payload.history || []).slice(0, report.monthly ? 8 : 4),
     }),
     "",
     "",
