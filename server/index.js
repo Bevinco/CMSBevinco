@@ -6353,7 +6353,15 @@ function renderDynamicReportHtml(store, report) {
       // Primer punto con dato: la etiqueta hacia la DERECHA del punto, si no
       // la mitad queda montada sobre el eje Y / fuera del recuadro (QA 17-ago).
       var firstWithData = own.findIndex(function (v) { return v != null; });
-      if (i === firstWithData) return "right";
+      if (i === firstWithData) {
+        // Primer punto: si las dos curvas parten pegadas, dos pildoras
+        // "a la derecha" se montan una sobre otra (QA 26-ago). Se separan
+        // en diagonal: la serie mayor arriba-derecha, la menor abajo-derecha.
+        var mineFirst = own[i];
+        var theirsFirst = other ? other[i] : null;
+        if (theirsFirst == null) return "right";
+        return mineFirst >= theirsFirst ? 315 : 45;
+      }
       var mine = own[i];
       var theirs = other ? other[i] : null;
       if (mine == null) return preferTop ? "top" : "bottom";
