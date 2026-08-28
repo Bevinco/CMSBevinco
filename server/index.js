@@ -6514,7 +6514,8 @@ function renderDynamicReportHtml(store, report) {
       },
       options: {
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
-        layout: { padding: { left: 6 } },
+        // padding derecho: la etiqueta de la barra mas larga salia cortada
+        layout: { padding: { left: 6, right: 46 } },
         plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmtMoney(ctx.parsed.x); } } } },
         scales: { x: { ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
