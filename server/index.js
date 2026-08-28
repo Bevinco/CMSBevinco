@@ -5296,7 +5296,12 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       `<text x="${L - 5}" y="${yAt(v) + 3}" text-anchor="end" class="ax">${v ? fmtK(v) : "0"}</text>`).join("");
     // Dibuja solo los tramos con dato real (>0). Las semanas sin reporte
     // guardado no tienen sugerencia: antes se pintaban como caidas falsas a 0.
-    const drawSeries = (values, color, opacity) => {
+    // Lineas estilo web (puntos + cifras), sin relleno: el area de la compra
+    // realizada parecia "cortada" cuando la sugerida seguia hasta "Prox."
+    // (QA 26-ago). Cada punto lleva su cifra: arriba si la serie va sobre la
+    // otra en esa semana, abajo si va por debajo; el primer punto se corre a
+    // la derecha para no chocar con el eje.
+    const drawSeries = (values, color, otherValues) => {
       const segments = [];
       let segment = [];
       values.forEach((value, i) => {
@@ -5304,14 +5309,21 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         else { if (segment.length) segments.push(segment); segment = []; }
       });
       if (segment.length) segments.push(segment);
+      const label = ({ value, i }) => {
+        const other = otherValues?.[i] || 0;
+        const above = !other || value >= other;
+        const isFirst = i === 0;
+        const x = isFirst ? xAt(i) + 6 : xAt(i);
+        let y = above ? yAt(value) - 7 : yAt(value) + 15;
+        // pegada al eje: la cifra saltaria sobre las fechas -> va arriba
+        if (y > B - 3) y = yAt(value) - 7;
+        return `<text x="${x}" y="${y}" text-anchor="${isFirst ? "start" : "middle"}" class="vline" fill="${color}">${fmtK(value)}</text>`;
+      };
       return segments.map((points) => {
-        if (points.length === 1) {
-          const { value, i } = points[0];
-          return `<circle cx="${xAt(i)}" cy="${yAt(value)}" r="3.4" fill="${color}"/>`;
-        }
         const pts = points.map(({ value, i }) => `${xAt(i)},${yAt(value)}`).join(" ");
-        return `<polygon points="${xAt(points[0].i)},${B} ${pts} ${xAt(points[points.length - 1].i)},${B}" fill="${color}" opacity="${opacity}"/>` +
-          `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`;
+        return (points.length > 1 ? `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.2"/>` : "") +
+          points.map(({ value, i }) => `<circle cx="${xAt(i)}" cy="${yAt(value)}" r="3.6" fill="${color}"/>`).join("") +
+          points.map(label).join("");
       }).join("");
     };
     // La sugerencia de la semana N se compra en la semana N+1: se desplaza la
@@ -5347,9 +5359,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       ? ""
       : `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle" class="leg">Sin datos de compra para las semanas consultadas.</text>`;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.ax-next{font:700 10.5px Calibri,Arial;fill:${GREEN}}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.ax-next{font:700 10.5px Calibri,Arial;fill:${GREEN}}.leg{font:11.5px Calibri,Arial;fill:${GRAY_TXT}}.vline{font:700 10px Calibri,Arial}</style>
       ${grid}${emptyNote}
-      ${rawMaxPurchase ? drawSeries(suggestedShifted, GREEN, 0.5) + drawSeries(purchasedSeries, NAVY, 0.42) : ""}
+      ${rawMaxPurchase ? drawSeries(suggestedShifted, GREEN, purchasedSeries) + drawSeries(purchasedSeries, NAVY, suggestedShifted) : ""}
       ${xLabels}
       <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#bfbfbf"/>
       <rect x="${W / 2 - 108}" y="${legendY - 8}" width="9" height="9" fill="${GREEN}"/><text x="${W / 2 - 96}" y="${legendY}" class="leg">Compra Sugerida</text>
@@ -5396,10 +5408,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     }).join("");
     const covered = history.map((p, i) => ({ i, days: coverage[i] })).filter((item) => item.days > 0);
     const linePts = covered.map((item) => `${xAt(item.i)},${yDays(item.days)}`).join(" ");
-    const chips = covered.map((item) => {
-      const x = xAt(item.i); const y = Math.max(T + 12, yDays(item.days) - 16);
-      return `<rect x="${x - 32}" y="${y - 10}" width="64" height="18" rx="2" fill="${TEAL}"/>` +
-        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${Math.round(item.days)} días</text>`;
+    const chips = covered.map((item, index) => {
+      const x = xAt(item.i);
+      // Compactos ("16 d") y escalonados: con semanas de cobertura parecida
+      // los chips anchos se montaban entre si y sobre la linea (QA 26-ago).
+      const y = Math.max(T + 12, yDays(item.days) - (index % 2 ? 34 : 16));
+      return `<rect x="${x - 23}" y="${y - 10}" width="46" height="18" rx="9" fill="${TEAL}"/>` +
+        `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${Math.round(item.days)} d</text>`;
     }).join("");
     const covEmptyNote = rawMaxCov
       ? ""
@@ -5447,7 +5462,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const yc = T + (i + 0.5) * groupH;
       const bar = (v, y, color) => {
         if (!v) {
-          return `<text x="${L + 5}" y="${y + pairBarH / 2 + 3.5}" class="vzero">0</text>`;
+          // Cero real (ej. sugerida $0 por stock sobre PAR): stub de 3px +
+          // "$0" tenue, en vez de un "0" flotante que parecia dato roto.
+          return `<rect x="${L}" y="${y}" width="3" height="${pairBarH}" fill="${color}" opacity="0.35"/>` +
+            `<text x="${L + 8}" y="${y + pairBarH / 2 + 3.5}" class="vzero">$0</text>`;
         }
         const bw = Math.max(2, xAt(v) - L);
         const fitsInside = bw > 58;
