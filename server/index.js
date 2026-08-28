@@ -5730,7 +5730,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         </tbody>
       </table>
     </section>
-    <section class="bv-panel bv-panel-wide">
+    <section class="bv-panel bv-panel-wide bv-panel-snug">
       <h2>Cobertura de inventario</h2>
       ${coverageSvg()}
     </section>
@@ -5922,18 +5922,19 @@ function renderTwoPageReportHtml(store, report, options = {}) {
        dos columnas de lectura. */
     .bv-page { max-width: 1160px; }
     .toolbar { max-width: 1160px; }
-    .bv-panel:not(.bv-panel-wide) > .bv-svg { display: block; margin: 0 auto; max-width: 620px; }
-    .bv-panel-wide .bv-svg { max-width: 480px; }
-    .bv-costgrid { align-items: center; display: grid; gap: 22px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
-    .bv-costgrid-chart .bv-svg { max-width: 100%; }
+    .bv-costgrid { align-items: center; display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .bv-costgrid-chart .bv-svg { display: block; margin: 0 auto; max-width: 640px; }
     .bv-costgrid-table .bv-difftable { margin-top: 0; }
     .bv-costgrid-table .bv-difftable td, .bv-costgrid-table .bv-difftable th { font-size: 11px; padding: 6px 8px; }
-    .bv-row { grid-template-columns: minmax(0, 1fr) 240px; }
+    .bv-costgrid-table .bv-difftable td:first-child, .bv-costgrid-table .bv-difftable th:first-child { white-space: nowrap; }
+    .bv-row { grid-template-columns: minmax(0, 1fr) 250px; margin-left: auto; margin-right: auto; max-width: 960px; }
+    .bv-row .bv-panel .bv-svg { display: block; margin: 0 auto; max-width: 640px; }
+    .bv-panel-snug { margin-left: auto; margin-right: auto; max-width: 660px; }
+    .bv-panel-wide .bv-svg { display: block; margin: 0 auto; max-width: 540px; }
     .bv-monthly-table th, .bv-monthly-table td { font-size: 10.5px; padding: 6px 8px; }
     .bv-monthly-table th + th, .bv-monthly-table td + td,
     .bv-difftable th + th, .bv-difftable td + td,
     .bv-se-table th + th, .bv-se-table td + td { border-left: 1px solid #e4e0d2; }
-    .bv-difftable td, .bv-difftable th { font-size: 12px; }
     .bv-mc-flow { column-count: 2; column-gap: 36px; }
     .bv-mc-flow p, .bv-mc-flow li { break-inside: avoid; }
     ` : ""}
