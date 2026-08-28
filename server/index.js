@@ -6641,7 +6641,10 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
           maxBarThickness: 34,
           // Pildora navy con texto blanco: el gris anterior se perdia sobre
           // las barras de color (QA 12-ago). Mismo estilo del grafico de costo.
-          datalabels: { display: true, anchor: "end", align: function (ctx) { return ctx.dataset.data[ctx.dataIndex] < 0 ? "start" : "end"; },
+          // Negativos: la pildora va HACIA ADENTRO de la barra (align end).
+          // Hacia afuera, en barras largas se salia del area y tapaba los
+          // nombres de familia (QA cocina 28-ago, mismo fix que el PDF).
+          datalabels: { display: true, anchor: "end", align: "end",
             clip: false, clamp: true, color: "#fff", backgroundColor: NAVY, borderRadius: 4, padding: { top: 2, bottom: 1, left: 6, right: 6 },
             font: { weight: 800, size: 11 }, formatter: fmtK }
         }]
