@@ -3909,7 +3909,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         if (!familySuggested) {
           familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
         }
-        if (familySuggested.some((item) => item.suggested)) {
+        if (familySuggested.length) {
           report.familySuggested = familySuggested;
           report.summary = report.summary || {};
           report.summary.suggestedCost = familySuggested.reduce((total, item) => total + (item.suggested || 0), 0);
@@ -5099,7 +5099,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     const currentEnd = String(payload.period?.endsAt || "");
     if (!currentEnd) return { near: null, any: null };
     const earlier = (store.reports || [])
-      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
+      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).length)
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
       .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
@@ -5111,13 +5111,14 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     ? priorWeekly.familySuggested
     : (priorPick.any ? [] : payload.familySuggested)) || [];
   const familyKeyOfPdf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
   const mergedPdfFamilies = new Map();
-  for (const [family, purchased] of purchasesMap.entries()) {
+  for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
     const key = familyKeyOfPdf(family);
     if (!mergedPdfFamilies.has(key)) mergedPdfFamilies.set(key, { family, purchased: 0, suggested: 0 });
     mergedPdfFamilies.get(key).purchased += purchased || 0;
   }
-  for (const item of suggestedSource) {
+  for (const item of suggestedSource.filter((entry) => !isAdminGroupPdf(entry.family))) {
     const key = familyKeyOfPdf(item.family);
     if (!mergedPdfFamilies.has(key)) mergedPdfFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
     mergedPdfFamilies.get(key).suggested += item.suggested || 0;
@@ -5327,7 +5328,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     let previousSuggested = 0;
     if (firstEndsAt) {
       const prior = (store.reports || [])
-        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && (candidate.summary?.suggestedCost || 0) > 0)
+        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && Number.isFinite(candidate.summary?.suggestedCost))
         .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
         .filter(({ period }) => period?.endsAt && String(period.endsAt) < firstEndsAt && !String(period.id || "").startsWith("mensual-"))
         .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0];
@@ -5961,14 +5962,14 @@ function dynamicReportData(store, report) {
   // Todas las familias guardadas se muestran, aunque esten en $0 (QA: "si
   // Vinos esta en 0 no lo muestra"): en barra son las 6 clasicas y en
   // cocina las del summary de Sculpture (Carnes, Lacteos, Verduras...).
-  const familyVariances = payload.familyVariances || [];
+  const familyVariances = (payload.familyVariances || []).filter((item) => !/no auditado|unknown|sin categor/i.test(String(item.family || "")));
   // Compra sugerida comparable con la compra de esta semana: la emitida la
   // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
   const priorPick = (() => {
     const currentEnd = String(payload.period?.endsAt || "");
     if (!currentEnd) return { near: null, any: null };
     const earlier = (store.reports || [])
-      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).some((item) => item.suggested))
+      .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).length)
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
       .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
@@ -5987,13 +5988,14 @@ function dynamicReportData(store, report) {
   // Intelipar y "Pescado" del variance son la misma familia y antes salian
   // como dos barras, una siempre en 0 (QA 22-ago).
   const familyKeyOf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const isAdminGroup = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
   const mergedFamilies = new Map();
-  for (const item of payload.familyPurchases || []) {
+  for (const item of (payload.familyPurchases || []).filter((entry) => !isAdminGroup(entry.family))) {
     const key = familyKeyOf(item.family);
     if (!mergedFamilies.has(key)) mergedFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
     mergedFamilies.get(key).purchased += item.purchased || 0;
   }
-  for (const item of suggestedSource) {
+  for (const item of suggestedSource.filter((entry) => !isAdminGroup(entry.family))) {
     const key = familyKeyOf(item.family);
     if (!mergedFamilies.has(key)) mergedFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
     mergedFamilies.get(key).suggested += item.suggested || 0;
@@ -6024,7 +6026,7 @@ function dynamicReportData(store, report) {
   const firstEndsAt = String(history[0]?.endsAt || "");
   const priorForLine = firstEndsAt
     ? (store.reports || [])
-        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && (candidate.summary?.suggestedCost || 0) > 0)
+        .filter((candidate) => candidate.clientId === report.clientId && !candidate.monthly && Number.isFinite(candidate.summary?.suggestedCost))
         .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
         .filter(({ period }) => period?.endsAt && String(period.endsAt) < firstEndsAt && !String(period.id || "").startsWith("mensual-"))
         .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)))[0]
@@ -6444,7 +6446,7 @@ function renderDynamicReportHtml(store, report) {
           // Pildora navy con texto blanco: el gris anterior se perdia sobre
           // las barras de color (QA 12-ago). Mismo estilo del grafico de costo.
           datalabels: { display: true, anchor: "end", align: function (ctx) { return ctx.dataset.data[ctx.dataIndex] < 0 ? "start" : "end"; },
-            clip: false, color: "#fff", backgroundColor: NAVY, borderRadius: 4, padding: { top: 2, bottom: 1, left: 6, right: 6 },
+            clip: false, clamp: true, color: "#fff", backgroundColor: NAVY, borderRadius: 4, padding: { top: 2, bottom: 1, left: 6, right: 6 },
             font: { weight: 800, size: 11 }, formatter: fmtK }
         }]
       },
