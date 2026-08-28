@@ -2165,6 +2165,20 @@ async function generateReportAnalysisAI(payload) {
     sugerenciaPorFamilia: payload.familySuggested || [],
     sugerenciasCompra: (payload.purchaseSuggestions || []).slice(0, 12),
     historico: (payload.history || []).slice(0, 6),
+    tablaMensualPorFamilia: isMonthly ? (payload.familyMonthlyTable || []).slice(0, 20) : undefined,
+    stockEfficiencyReporte: isMonthly && payload.stockEfficiencyReport
+      ? {
+          rango: payload.stockEfficiencyReport.rangeLabel || "",
+          inventarioTotal: payload.stockEfficiencyReport.total || 0,
+          sinMovimiento: payload.stockEfficiencyReport.deadTotal || 0,
+          sinMovimientoPct: payload.stockEfficiencyReport.deadPct || 0,
+          movimientoLento: payload.stockEfficiencyReport.slowTotal || 0,
+          movimientoLentoPct: payload.stockEfficiencyReport.slowPct || 0,
+          rotacionSaludablePct: payload.stockEfficiencyReport.healthyPct || 0,
+          porCategoria: (payload.stockEfficiencyReport.families || []).slice(0, 12),
+          topSinMovimiento: (payload.stockEfficiencyReport.topDead || []).slice(0, 10),
+        }
+      : undefined,
   };
 
   const monthlyNote = isMonthly ? `
@@ -2174,6 +2188,7 @@ INSTRUCCIONES PARA REPORTE MENSUAL
 - Usa el historico (las semanas incluidas) para describir la tendencia dentro del mes: que semanas explican el resultado y si hay mejora o deterioro sostenido.
 - Redacta los hallazgos como "lo mejor del mes" y "los desafios del mes" (manten las mismas claves JSON bestOfWeek/weeklyChallenges).
 - En eficiencia de stock y compra evalua el comportamiento del mes completo (compra vs consumo acumulado, tendencia de cobertura), no la foto de la ultima semana.
+- El campo "comments" del JSON son los "COMENTARIOS DEL MES": lo UNICO que el cliente lee como analisis en el reporte mensual (PDF y web). Debe ser un resumen ejecutivo DETALLADO de 3 a 6 parrafos que cubra en orden: (1) evolucion semanal del costo real vs ideal citando semanas y cifras, (2) lectura de la tabla mensual por familia (tablaMensualPorFamilia: diferencias en $ y %, familias que explican el resultado), (3) ahorros y faltantes del mes con los productos responsables, (4) compra y cobertura de inventario, y (5) stock efficiency si hay datos (stockEfficiencyReporte: inventario sin movimiento y lento, productos detenidos de mayor valor). Cierra con recomendaciones accionables. No uses encabezados tipo "lo mejor de la semana".
 ` : "";
 
   const prompt = `
@@ -5626,7 +5641,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       <h3>Comentarios del mes</h3>
       ${monthlyCommentsText
         ? monthlyCommentsText.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br/>")}</p>`).join("")
-        : commentBlock("Lo mejor del mes:", analysis.bestOfWeek) + commentBlock("Desafíos del mes:", analysis.weeklyChallenges)}
+        : `<p class="bv-month-empty">Aún sin comentarios del mes: redáctalos en el CMS o usa "Redactar con IA".</p>`}
     </section>`;
   const monthlyTableRows = (payload.familyMonthlyTable || []).map((row, index) => {
     // ml -> botellas de 700cc (reunion 28-ago): mientras se implementa la
@@ -5798,6 +5813,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-panel-wide .bv-svg { margin: 0 auto; max-width: 540px; }
     .bv-month-comments h3 { color: #5c8f1e; font-size: 15px; margin: 4px 0 8px; }
     .bv-month-comments p { color: #404040; font-size: 12.5px; line-height: 1.6; margin: 0 0 8px; }
+    .bv-month-empty { color: #8c8c8c; font-size: 12px; font-style: italic; }
     .bv-monthly-table th:last-child, .bv-monthly-table td:last-child { width: 11.5%; }
     .bv-monthly-table th:nth-child(8), .bv-monthly-table td:nth-child(8) { width: 6%; }
     .bv-monthly-table th:first-child, .bv-monthly-table td:first-child { width: 12%; }
@@ -6082,7 +6098,11 @@ function dynamicReportData(store, report) {
     summary: {
       revenue: payload.summary?.revenue || 0,
       costPercent: payload.summary?.costPercent || lastHistory.costPercent || 0,
-      idealCostPercent: lastHistory.idealCostPercent || 0,
+      // Mensual: % ideal ponderado por los ingresos de cada semana, para que
+      // el KPI coincida con el Total de la tabla de diferencia (y el PDF).
+      idealCostPercent: report.monthly && history.length
+        ? history.reduce((sum, p) => sum + (p.revenue || 0) * (p.idealCostPercent || 0), 0) / Math.max(history.reduce((sum, p) => sum + (p.revenue || 0), 0), 1)
+        : lastHistory.idealCostPercent || 0,
       varianceAmount: payload.summary?.varianceAmount || 0,
       variancePercent: payload.summary?.variancePercent || 0,
       savings,
@@ -6093,6 +6113,11 @@ function dynamicReportData(store, report) {
     familyVariances,
     familyPurchases,
     topProducts,
+    // Paridad PDF <-> web del reporte MENSUAL (QA Tamara 28-ago): la pagina
+    // dinamica muestra las mismas secciones que el PDF mensual.
+    monthlyTable: report.monthly ? (payload.familyMonthlyTable || []) : [],
+    stockEfficiency: report.monthly ? (payload.stockEfficiencyReport || null) : null,
+    monthComments: report.monthly ? String(payload.comments || "").trim() : "",
     analysis: {
       // Cada campo es una LISTA de hallazgos (igual que los usa el PDF).
       bestOfWeek: [].concat(payload.analysis?.bestOfWeek || []).filter(Boolean),
@@ -6230,6 +6255,8 @@ function renderDynamicReportHtml(store, report) {
     .footer { color: var(--navy); font-size: 13.5px; font-weight: 700; margin: 8px auto 34px; max-width: 1180px; padding: 0 22px; text-align: center; }
     .footer b { color: #5c8f1e; }
     .loading { opacity: 0.45; pointer-events: none; transition: opacity 0.15s; }
+    #comments .comment-card-month { grid-column: 1 / -1; }
+    .comment-card-month p { color: var(--text-light); font-size: 13.5px; line-height: 1.7; margin: 0 0 10px; }
     @media (max-width: 900px) {
       .grid-2, .grid-var { grid-template-columns: minmax(0, 1fr); }
       .side-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -6268,13 +6295,22 @@ function renderDynamicReportHtml(store, report) {
 
   <div class="kpis" id="kpis"></div>
 
-  <section class="section">
+  <section class="section" id="costSection">
     <h2 class="section-title"><span class="num">01</span> Costo real vs Costo ideal <span class="hint">Ingresos por semana y ambas curvas de costo</span></h2>
     <div class="card"><div class="chart-wrap tall"><canvas id="costChart"></canvas></div></div>
+    <div class="card" id="costDiffCard" hidden style="margin-top: 14px;">
+      <div class="card-header"><div class="card-title">Diferencia de costo: real vs ideal <span class="tag">Semana a semana</span></div></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Costo usado ($)</th><th class="num">% Costo Real</th><th class="num">% Costo Ideal</th><th class="num">Dif. (pp)</th><th class="num">Dif. de costo ($)</th></tr></thead>
+          <tbody id="costDiffRows"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
-  <section class="section">
-    <h2 class="section-title"><span class="num">02</span> Ahorro y faltantes de inventario <span class="hint">Diferencia al costo por familia · semana actual</span></h2>
+  <section class="section" id="varSection">
+    <h2 class="section-title"><span class="num">02</span> Ahorro y faltantes de inventario <span class="hint" id="varHint">Diferencia al costo por familia · semana actual</span></h2>
     <div class="grid-var">
       <div class="card">
         <div class="card-header"><div class="card-title">Diferencia por familia <span class="tag">Variance · Sculpture</span></div></div>
@@ -6284,7 +6320,7 @@ function renderDynamicReportHtml(store, report) {
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="buySection">
     <h2 class="section-title"><span class="num">03</span> Compras <span class="hint">La sugerencia emitida una semana se compara con la compra de la siguiente</span></h2>
     <div class="grid-2">
       <div class="card">
@@ -6298,17 +6334,17 @@ function renderDynamicReportHtml(store, report) {
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="covSection">
     <h2 class="section-title"><span class="num">04</span> Cobertura de inventario <span class="hint">Inventario al costo vs consumo, y días de cobertura</span></h2>
     <div class="card"><div class="chart-wrap"><canvas id="covChart"></canvas></div></div>
   </section>
 
-  <section class="section">
-    <h2 class="section-title"><span class="num">05</span> Análisis de la semana <span class="hint">Comentarios del equipo auditor</span></h2>
+  <section class="section" id="commentsSection">
+    <h2 class="section-title"><span class="num">05</span> <span id="commentsTitle">Análisis de la semana</span> <span class="hint" id="commentsHint">Comentarios del equipo auditor</span></h2>
     <div class="comments-grid" id="comments"></div>
   </section>
 
-  <section class="section">
+  <section class="section" id="productSection">
     <h2 class="section-title"><span class="num">06</span> Top 10 productos por uso <span class="hint">Dónde está la plata: uso, ahorro/faltante y costo real</span></h2>
     <div class="card">
       <div class="table-scroll">
@@ -6323,6 +6359,43 @@ function renderDynamicReportHtml(store, report) {
   <section class="section" id="stockSection" hidden>
     <h2 class="section-title"><span class="num">07</span> Eficiencia de stock y compra <span class="hint">Cobertura, compra vs consumo y sugerencias</span></h2>
     <div class="comments-grid" id="commentsStock"></div>
+  </section>
+
+  <section class="section" id="monthlySection" hidden>
+    <h2 class="section-title"><span class="num">08</span> Resumen del mes por categoría <span class="hint">Totales del mes por familia · botellas de 700cc donde aplica</span></h2>
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Nombre Artículo</th><th class="num">Exist. Previa</th><th class="num">Compras</th><th class="num">Existencia</th><th class="num">Usado</th><th class="num">Vendido</th><th class="num">Diferencia</th><th class="num">% Dif.</th><th class="num">Diferencia ($)</th><th class="num">% Costo</th><th class="num">% Costo Ideal</th><th class="num">Ingresos</th></tr></thead>
+          <tbody id="monthlyRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="seSection" hidden>
+    <h2 class="section-title"><span class="num">09</span> Stock Efficiency <span class="hint" id="seHint">Inventario detenido y de baja rotación</span></h2>
+    <div class="kpis" id="seKpis"></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Stock por categoría <span class="tag">Sculpture</span></div></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Categoría</th><th class="num">Stock total</th><th class="num">Sin movimiento</th><th class="num">Mov. lento</th></tr></thead>
+            <tbody id="seFamilyRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Top 10 sin movimiento por valor</div></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Producto</th><th class="num">On-hand</th><th class="num">Stock al costo</th></tr></thead>
+            <tbody id="seTopRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -6420,11 +6493,11 @@ function renderDynamicReportHtml(store, report) {
     var s = data.summary;
     var cards = [
       { label: "Ingresos", value: fmtMoney(s.revenue), chip: "" },
-      { label: "% Costo real", value: fmtPct(s.costPercent), chip: kpiChip(s.costPercent, prev ? prev.costPercent : null, true) },
+      { label: "% Costo real", value: fmtPct(s.costPercent), chip: data.monthly ? "" : kpiChip(s.costPercent, prev ? prev.costPercent : null, true) },
       { label: "% Costo ideal", value: fmtPct(s.idealCostPercent), chip: "" },
-      { label: "Diferencia al costo", value: fmtMoney(s.varianceAmount), tone: s.varianceAmount < 0 ? "neg" : "pos", chip: "" },
-      { label: "Merma reportada", value: s.waste ? "-" + fmtMoney(s.waste) : "$0", tone: s.waste ? "neg" : "", chip: "" }
+      { label: "Diferencia al costo", value: fmtMoney(s.varianceAmount), tone: s.varianceAmount < 0 ? "neg" : "pos", chip: "" }
     ];
+    if (!data.monthly) cards.push({ label: "Merma reportada", value: s.waste ? "-" + fmtMoney(s.waste) : "$0", tone: s.waste ? "neg" : "", chip: "" });
     document.getElementById("kpis").innerHTML = cards.map(function (card) {
       return '<div class="kpi-card"><div class="kpi-label">' + card.label + '</div>' +
         '<div class="kpi-value ' + (card.tone || "") + '">' + card.value + "</div>" + (card.chip || "") + "</div>";
@@ -6504,7 +6577,7 @@ function renderDynamicReportHtml(store, report) {
     document.getElementById("varKpis").innerHTML =
       '<div class="kpi-card"><div class="kpi-label">Suma de ahorros</div><div class="kpi-value pos">' + fmtMoney(s.savings) + "</div></div>" +
       '<div class="kpi-card"><div class="kpi-label">Suma de faltantes</div><div class="kpi-value neg">' + fmtMoney(s.shortages) + "</div></div>" +
-      '<div class="kpi-card"><div class="kpi-label">Merma reportada al $</div><div class="kpi-value ' + (s.waste ? "neg" : "") + '">' + (s.waste ? "-" + fmtMoney(s.waste) : "$0") + "</div></div>";
+      (data.monthly ? "" : '<div class="kpi-card"><div class="kpi-label">Merma reportada al $</div><div class="kpi-value ' + (s.waste ? "neg" : "") + '">' + (s.waste ? "-" + fmtMoney(s.waste) : "$0") + "</div></div>");
   }
 
   function renderBuyChart(data) {
@@ -6597,6 +6670,26 @@ function renderDynamicReportHtml(store, report) {
   }
 
   function renderComments(data) {
+    var titleEl = document.getElementById("commentsTitle");
+    var hintEl = document.getElementById("commentsHint");
+    if (data.monthly) {
+      // Mensual: UNA sola caja "Comentarios del mes" (pedido Tamara 28-ago);
+      // nada de "lo mejor/desafios de la semana" en este contexto.
+      titleEl.textContent = "Comentarios del mes";
+      hintEl.textContent = "Resumen ejecutivo del equipo auditor";
+      var text = (data.monthComments || "").trim();
+      document.getElementById("comments").innerHTML =
+        '<div class="card comment-card comment-card-month">' +
+        (text
+          ? text.split(/\\n{2,}/).map(function (p) { return "<p>" + esc(p).replace(/\\n/g, "<br/>") + "</p>"; }).join("")
+          : "<p>Aún sin comentarios del mes.</p>") +
+        "</div>";
+      document.getElementById("stockSection").hidden = true;
+      document.getElementById("commentsStock").innerHTML = "";
+      return;
+    }
+    titleEl.textContent = "Análisis de la semana";
+    hintEl.textContent = "Comentarios del equipo auditor";
     var blocks = [
       { title: "Lo mejor de la semana", items: data.analysis.bestOfWeek },
       { title: "Los desafíos de la semana", items: data.analysis.weeklyChallenges }
@@ -6614,6 +6707,102 @@ function renderDynamicReportHtml(store, report) {
       : "";
   }
 
+  function qtyMes(value, inMl) {
+    return new Intl.NumberFormat("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(inMl ? (value || 0) / 700 : (value || 0));
+  }
+  function renderCostDiff(data) {
+    var rows = data.history || [];
+    var t = { rev: 0, used: 0, dif: 0 };
+    var body = rows.filter(function (p) { return p.revenue || p.usedCost; }).map(function (p) {
+      var difPp = Math.round(((p.costPercent || 0) - (p.idealCostPercent || 0)) * 10) / 10;
+      var difCash = Math.round((p.revenue || 0) * difPp / 100);
+      t.rev += p.revenue || 0; t.used += p.usedCost || 0; t.dif += difCash;
+      return "<tr><td><b>" + esc(ddmm(p.endsAt) || p.label) + "</b></td>" +
+        '<td class="num">' + fmtMoney(p.revenue) + "</td>" +
+        '<td class="num">' + fmtMoney(p.usedCost) + "</td>" +
+        '<td class="num">' + fmtPct(p.costPercent) + "</td>" +
+        '<td class="num">' + fmtPct(p.idealCostPercent) + "</td>" +
+        '<td class="num"><span class="' + (difPp > 0.05 ? "neg" : "pos") + '">' + (difPp >= 0 ? "+" : "") + difPp.toFixed(1) + " pp</span></td>" +
+        '<td class="num"><span class="' + (difCash > 0 ? "neg" : "pos") + '">' + fmtMoney(difCash) + "</span></td></tr>";
+    }).join("");
+    var pctReal = t.rev ? (t.used / t.rev) * 100 : 0;
+    var totPp = t.rev ? Math.round((t.dif / t.rev) * 1000) / 10 : 0;
+    document.getElementById("costDiffRows").innerHTML = body +
+      (rows.length
+        ? '<tr><td><b>Total</b></td><td class="num"><b>' + fmtMoney(t.rev) + '</b></td><td class="num"><b>' + fmtMoney(t.used) + '</b></td><td class="num"><b>' + fmtPct(pctReal) + '</b></td><td class="num"><b>' + fmtPct(pctReal - totPp) + '</b></td><td class="num"><span class="' + (totPp > 0.05 ? "neg" : "pos") + '"><b>' + (totPp >= 0 ? "+" : "") + totPp.toFixed(1) + ' pp</b></span></td><td class="num"><span class="' + (t.dif > 0 ? "neg" : "pos") + '"><b>' + fmtMoney(t.dif) + "</b></span></td></tr>"
+        : "");
+  }
+  function renderMonthlyTable(data) {
+    var rows = data.monthlyTable || [];
+    var grand = { difCosto: 0, usadoCosto: 0, vendidoCosto: 0, ingresos: 0 };
+    var body = rows.map(function (row) {
+      var inMl = /^ml$/i.test(String(row.unidad || "").trim());
+      var unit = inMl ? "bot. 700cc" : (row.unidad || "");
+      grand.difCosto += row.difCosto || 0; grand.usadoCosto += row.usadoCosto || 0;
+      grand.vendidoCosto += row.vendidoCosto || 0; grand.ingresos += row.ingresos || 0;
+      return "<tr><td><b>Total " + esc(row.familia) + (unit ? " (" + esc(unit) + ")" : "") + "</b></td>" +
+        ["prev", "compras", "existencia", "usado", "vendido"].map(function (k) { return '<td class="num">' + qtyMes(row[k], inMl) + "</td>"; }).join("") +
+        '<td class="num"><span class="' + ((row.dif || 0) < 0 ? "neg" : "") + '">' + qtyMes(row.dif, inMl) + "</span></td>" +
+        '<td class="num"><span class="' + ((row.difPct || 0) < 0 ? "neg" : "") + '">' + fmtPct(row.difPct) + "</span></td>" +
+        '<td class="num"><span class="' + ((row.difCosto || 0) < 0 ? "neg" : "pos") + '">' + fmtMoney(row.difCosto) + "</span></td>" +
+        '<td class="num">' + fmtPct(row.costoPct) + "</td>" +
+        '<td class="num">' + fmtPct(row.idealPct) + "</td>" +
+        '<td class="num">' + fmtMoney(row.ingresos) + "</td></tr>";
+    }).join("");
+    document.getElementById("monthlyRows").innerHTML = body +
+      (rows.length
+        ? "<tr><td><b>GRAND TOTAL</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>" +
+          '<td class="num"><span class="' + (grand.difCosto < 0 ? "neg" : "pos") + '"><b>' + fmtMoney(grand.difCosto) + "</b></span></td>" +
+          '<td class="num"><b>' + fmtPct(grand.ingresos ? (grand.usadoCosto / grand.ingresos) * 100 : 0) + "</b></td>" +
+          '<td class="num"><b>' + fmtPct(grand.ingresos ? (grand.vendidoCosto / grand.ingresos) * 100 : 0) + "</b></td>" +
+          '<td class="num"><b>' + fmtMoney(grand.ingresos) + "</b></td></tr>"
+        : "");
+  }
+  function renderSE(data) {
+    var se = data.stockEfficiency;
+    if (!se) return;
+    document.getElementById("seHint").textContent = se.rangeLabel || "Inventario detenido y de baja rotación";
+    var kpi = function (label, value, tone) {
+      return '<div class="kpi-card"><div class="kpi-label">' + label + '</div><div class="kpi-value ' + (tone || "") + '">' + value + "</div></div>";
+    };
+    document.getElementById("seKpis").innerHTML =
+      kpi("Inventario total", fmtMoney(se.total)) +
+      kpi("Stock sin movimiento", fmtMoney(se.deadTotal) + " (" + fmtPct(se.deadPct) + ")", se.deadTotal ? "neg" : "") +
+      kpi("Movimiento lento", fmtMoney(se.slowTotal) + " (" + fmtPct(se.slowPct) + ")") +
+      kpi("Rotación saludable", fmtPct(se.healthyPct), "pos");
+    document.getElementById("seFamilyRows").innerHTML = (se.families || []).map(function (row) {
+      return "<tr><td><b>" + esc(row.family) + "</b></td>" +
+        '<td class="num">' + fmtMoney(row.total) + "</td>" +
+        '<td class="num"><span class="' + (row.dead ? "neg" : "") + '">' + fmtMoney(row.dead) + " (" + fmtPct(row.deadPct) + ")</span></td>" +
+        '<td class="num">' + fmtMoney(row.slow) + " (" + fmtPct(row.slowPct) + ")</td></tr>";
+    }).join("");
+    document.getElementById("seTopRows").innerHTML = (se.topDead || []).map(function (row) {
+      return "<tr><td><b>" + esc(row.name) + "</b></td>" +
+        '<td class="num">' + esc(row.onhand || "") + "</td>" +
+        '<td class="num">' + fmtMoney(row.value) + "</td></tr>";
+    }).join("") || '<tr><td colspan="3">Sin productos detenidos en la ventana.</td></tr>';
+  }
+  // El mensual reordena las secciones para calcar el PDF: costo -> familias
+  // -> comentarios del mes -> tabla por categoria -> cobertura -> stock
+  // efficiency; y renumera solo las visibles.
+  function orderSections(monthly) {
+    var main = document.getElementById("main");
+    var order = monthly
+      ? ["costSection", "varSection", "commentsSection", "monthlySection", "covSection", "seSection", "buySection", "productSection", "stockSection"]
+      : ["costSection", "varSection", "buySection", "covSection", "commentsSection", "productSection", "stockSection", "monthlySection", "seSection"];
+    for (var i = 0; i < order.length; i++) {
+      var el = document.getElementById(order[i]);
+      if (el) main.appendChild(el);
+    }
+    var sections = main.querySelectorAll("section.section");
+    var count = 0;
+    for (var j = 0; j < sections.length; j++) {
+      if (sections[j].hidden) continue;
+      count++;
+      var num = sections[j].querySelector(".num");
+      if (num) num.textContent = count < 10 ? "0" + count : String(count);
+    }
+  }
   function renderProducts(data) {
     document.getElementById("productRows").innerHTML = data.topProducts.map(function (item) {
       var tone = item.varianceAmount < 0 ? "neg" : "pos";
@@ -6630,14 +6819,32 @@ function renderDynamicReportHtml(store, report) {
     document.getElementById("periodTag").textContent = data.period.label || "";
     document.getElementById("areaTag").textContent = (data.monthly ? "Mensual · " : "Semanal · ") + (data.client.area || "");
     document.getElementById("pdfBtn").href = "/r/" + boot.token + "/print?period=" + encodeURIComponent(data.reportId);
+    var monthly = !!data.monthly;
+    document.getElementById("buySection").hidden = monthly;
+    document.getElementById("productSection").hidden = monthly;
+    document.getElementById("costDiffCard").hidden = !monthly;
+    document.getElementById("monthlySection").hidden = !monthly || !(data.monthlyTable || []).length;
+    document.getElementById("seSection").hidden = !monthly || !data.stockEfficiency;
+    document.getElementById("varHint").textContent = monthly
+      ? "Diferencia al costo por familia · mes completo"
+      : "Diferencia al costo por familia · semana actual";
     renderKpis(data);
     renderCostChart(data);
     renderFamChart(data);
-    renderBuyChart(data);
-    renderFamBuyChart(data);
     renderCovChart(data);
     renderComments(data);
-    renderProducts(data);
+    if (monthly) {
+      destroyChart("buy");
+      destroyChart("famBuy");
+      renderCostDiff(data);
+      renderMonthlyTable(data);
+      renderSE(data);
+    } else {
+      renderBuyChart(data);
+      renderFamBuyChart(data);
+      renderProducts(data);
+    }
+    orderSections(monthly);
   }
 
   var select = document.getElementById("periodSelect");

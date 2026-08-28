@@ -3299,39 +3299,6 @@ function App() {
                   <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
                 </label>
               </div>
-              {selectedReport?.monthly ? (
-                <label className="email-body-field month-comments-field">
-                  Comentarios del mes
-                  <textarea
-                    aria-label="Comentarios del mes"
-                    placeholder="Comentarios generales del mes: aparecen en la primera página del PDF mensual. Escríbelos aquí o deja que el resumen con IA los complete."
-                    value={commentsDraft}
-                    onChange={(event) => setCommentsDraft(event.target.value)}
-                  />
-                  <small className="email-hint">Se imprimen como "Comentarios del mes" en el PDF. Se guardan al usar Vista Previa o Enviar, o con este botón.</small>
-                  <button
-                    className="ghost-button month-comments-save"
-                    type="button"
-                    onClick={async () => {
-                      if (!selectedReport) return;
-                      try {
-                        await readJson(await fetch(`/api/module1/reports/${selectedReport.id}`, {
-                          method: "PATCH",
-                          headers: { "content-type": "application/json" },
-                          body: JSON.stringify({ comments: commentsDraft }),
-                        }));
-                        setError("Comentarios del mes guardados.");
-                        setWorkStatus("idle");
-                      } catch (saveError) {
-                        setError(saveError instanceof Error ? saveError.message : "No se pudieron guardar los comentarios.");
-                        setWorkStatus("error");
-                      }
-                    }}
-                  >
-                    Guardar comentarios
-                  </button>
-                </label>
-              ) : null}
               <label className="email-body-field">
                 Cuerpo del correo
                 <textarea
@@ -3398,8 +3365,8 @@ function App() {
             <section className="panel agent-panel">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Análisis del agente</p>
-                  <h2>Lectura ejecutiva del periodo</h2>
+                  <p className="eyebrow">{selectedReport.monthly ? "Comentarios del mes" : "Análisis del agente"}</p>
+                  <h2>{selectedReport.monthly ? "Lo que el cliente leerá en el PDF y el reporte web" : "Lectura ejecutiva del periodo"}</h2>
                 </div>
                 <span className={`analysis-source ${selectedReport.analysisSource === "openai" ? "is-ai" : ""}`}>
                   {selectedReport.analysisSource === "openai"
@@ -3407,6 +3374,40 @@ function App() {
                     : "Plantilla automática — usa Redactar con IA para aplicar los criterios"}
                 </span>
               </div>
+              {selectedReport.monthly ? (
+                <div className="month-comments-field">
+                  <textarea
+                    aria-label="Comentarios del mes"
+                    placeholder="Comentarios generales del mes: costo real vs ideal semana a semana, familias que explican el resultado, stock efficiency y recomendaciones. Escríbelos aquí o usa Redactar con IA para generarlos con todos los datos del mes."
+                    value={commentsDraft}
+                    onChange={(event) => setCommentsDraft(event.target.value)}
+                  />
+                  <div className="month-comments-foot">
+                    <small className="email-hint">Es el único texto de análisis del reporte mensual: se imprime en el PDF y en el enlace dinámico. También se guarda al usar Vista Previa o Enviar.</small>
+                    <button
+                      className="ghost-button month-comments-save"
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedReport) return;
+                        try {
+                          await readJson(await fetch(`/api/module1/reports/${selectedReport.id}`, {
+                            method: "PATCH",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ comments: commentsDraft }),
+                          }));
+                          setError("Comentarios del mes guardados.");
+                          setWorkStatus("idle");
+                        } catch (saveError) {
+                          setError(saveError instanceof Error ? saveError.message : "No se pudieron guardar los comentarios.");
+                          setWorkStatus("error");
+                        }
+                      }}
+                    >
+                      Guardar comentarios
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <div className="agent-analysis-grid">
                 {[
                   {
@@ -3460,7 +3461,8 @@ function App() {
                     </article>
                   ))}
               </div>
-              {!selectedReport.analysis.criteriaApplied?.length ? (
+              )}
+              {!selectedReport.monthly && !selectedReport.analysis.criteriaApplied?.length ? (
                 <p className="analysis-note">Sin criterios adicionales cargados para este reporte. Sube los criterios del cliente en la sección Criterios.</p>
               ) : null}
             </section>
