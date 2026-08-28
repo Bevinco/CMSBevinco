@@ -5390,8 +5390,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   // ---- Pagina 2: Cobertura de inventario (barras + linea de dias) ----
   function coverageSvg() {
-    const W = 340; const H = 252;
-    const L = 48; const R = 296; const T = 26; const B = 188;
+    const extraW = Math.max(0, history.length - 5) * 42;
+    const W = 340 + extraW; const H = 252;
+    const L = 48; const R = 296 + extraW; const T = 26; const B = 188;
     const plotW = R - L; const plotH = B - T;
     const n = Math.max(history.length, 1);
     const rawMaxCov = Math.max(...history.map((p) => Math.max(p.inventoryCost || 0, p.usedCost || 0)), 0);
@@ -5431,7 +5432,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const x = xAt(item.i);
       // Compactos ("16 d") y escalonados: con semanas de cobertura parecida
       // los chips anchos se montaban entre si y sobre la linea (QA 26-ago).
-      const y = Math.max(T + 12, yDays(item.days) - (index % 2 ? 34 : 16));
+      const y = Math.max(T + 12, yDays(item.days) - ((index % 3) * 18 + 16));
       return `<rect x="${x - 23}" y="${y - 10}" width="46" height="18" rx="9" fill="${TEAL}"/>` +
         `<text x="${x}" y="${y + 3}" text-anchor="middle" class="chipteal">${Math.round(item.days)} d</text>`;
     }).join("");
@@ -5636,12 +5637,32 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const fmt1 = (value) => Number(value || 0).toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const fmt0 = (value) => Number(value || 0).toLocaleString("es-CL", { maximumFractionDigits: 0 });
   const monthlyCommentsText = String(payload.comments || "").trim();
+  // La IA escribe markdown ligero: **negritas** y listas con "-". Se
+  // convierte a HTML real (antes salian los asteriscos impresos, QA 28-ago).
+  const mdInline = (text) => escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  const monthlyCommentsHtml = (() => {
+    if (!monthlyCommentsText) return `<p class="bv-month-empty">Aún sin comentarios del mes: redáctalos en el CMS o usa "Redactar con IA".</p>`;
+    let html = "";
+    let inList = false;
+    for (const rawLine of monthlyCommentsText.split(/\n/)) {
+      const line = rawLine.trim();
+      if (!line) { if (inList) { html += "</ul>"; inList = false; } continue; }
+      const bullet = line.match(/^[-•*]\s+(.*)$/);
+      if (bullet) {
+        if (!inList) { html += '<ul class="bv-mc-list">'; inList = true; }
+        html += `<li>${mdInline(bullet[1])}</li>`;
+      } else {
+        if (inList) { html += "</ul>"; inList = false; }
+        html += `<p>${mdInline(line)}</p>`;
+      }
+    }
+    if (inList) html += "</ul>";
+    return html;
+  })();
   const monthlyCommentsBlock = `
     <section class="bv-comments bv-month-comments">
       <h3>Comentarios del mes</h3>
-      ${monthlyCommentsText
-        ? monthlyCommentsText.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br/>")}</p>`).join("")
-        : `<p class="bv-month-empty">Aún sin comentarios del mes: redáctalos en el CMS o usa "Redactar con IA".</p>`}
+      <div class="bv-mc-flow">${monthlyCommentsHtml}</div>
     </section>`;
   const monthlyTableRows = (payload.familyMonthlyTable || []).map((row, index) => {
     // ml -> botellas de 700cc (reunion 28-ago): mientras se implementa la
@@ -5767,7 +5788,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />` : ""}
   <style>
-    @page { margin: 7mm; size: A4 portrait; }
+    @page { margin: 7mm; size: A4 ${isMonthlyReport ? "landscape" : "portrait"}; }
     * { box-sizing: border-box; }
     body { background: #e9edef; color: #333; font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 0; padding: 16px; }
     .toolbar { display: flex; justify-content: flex-end; margin: 0 auto 12px; max-width: 800px; }
@@ -5895,6 +5916,24 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     }
     @media print { .web-toolbar, .web-footer { display: none; } }
     ` : ""}
+    ${isMonthlyReport ? `
+    /* Mensual horizontal (QA Tamara 28-ago): la pagina usa todo el ancho,
+       las tablas separan columnas con lineas y los comentarios fluyen en
+       dos columnas de lectura. */
+    .bv-page { max-width: 1160px; }
+    .toolbar { max-width: 1160px; }
+    .bv-panel:not(.bv-panel-wide) > .bv-svg { display: block; margin: 0 auto; max-width: 900px; }
+    .bv-panel-wide .bv-svg { max-width: 700px; }
+    .bv-monthly-table th, .bv-monthly-table td { font-size: 10.5px; padding: 6px 8px; }
+    .bv-monthly-table th + th, .bv-monthly-table td + td,
+    .bv-difftable th + th, .bv-difftable td + td,
+    .bv-se-table th + th, .bv-se-table td + td { border-left: 1px solid #e4e0d2; }
+    .bv-difftable td, .bv-difftable th { font-size: 12px; }
+    .bv-mc-flow { column-count: 2; column-gap: 36px; }
+    .bv-mc-flow p, .bv-mc-flow li { break-inside: avoid; }
+    ` : ""}
+    .bv-mc-list { margin: 0 0 8px; padding-left: 16px; }
+    .bv-mc-list li { color: #404040; font-size: 12.5px; line-height: 1.55; margin: 0 0 6px; }
     @media print {
       body { background: #fff; padding: 0; }
       .toolbar { display: none; }
@@ -6257,6 +6296,10 @@ function renderDynamicReportHtml(store, report) {
     .loading { opacity: 0.45; pointer-events: none; transition: opacity 0.15s; }
     #comments .comment-card-month { grid-column: 1 / -1; }
     .comment-card-month p { color: var(--text-light); font-size: 13.5px; line-height: 1.7; margin: 0 0 10px; }
+    .comment-card-month b { color: var(--text); }
+    .comment-card-month .mc-list { color: var(--text-light); font-size: 13.5px; line-height: 1.7; margin: 0 0 10px; padding-left: 20px; }
+    .comment-card-month .mc-list li { margin: 0 0 6px; }
+    @media (min-width: 900px) { .comment-card-month { column-count: 2; column-gap: 36px; } .comment-card-month p, .comment-card-month li { break-inside: avoid; } }
     @media (max-width: 900px) {
       .grid-2, .grid-var { grid-template-columns: minmax(0, 1fr); }
       .side-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -6678,11 +6721,31 @@ function renderDynamicReportHtml(store, report) {
       titleEl.textContent = "Comentarios del mes";
       hintEl.textContent = "Resumen ejecutivo del equipo auditor";
       var text = (data.monthComments || "").trim();
+      var mdb = function (t) {
+        var parts = esc(t).split("**");
+        var out = "";
+        for (var i = 0; i < parts.length; i++) out += i % 2 ? "<b>" + parts[i] + "</b>" : parts[i];
+        return out;
+      };
+      var NL = String.fromCharCode(10);
+      var html = "";
+      var inList = false;
+      text.split(NL).forEach(function (rawLine) {
+        var line = rawLine.trim();
+        if (!line) { if (inList) { html += "</ul>"; inList = false; } return; }
+        var isBullet = line.charAt(0) === "-" || line.charAt(0) === "•" || line.charAt(0) === "*";
+        if (isBullet) {
+          if (!inList) { html += '<ul class="mc-list">'; inList = true; }
+          html += "<li>" + mdb(line.slice(1).trim()) + "</li>";
+        } else {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<p>" + mdb(line) + "</p>";
+        }
+      });
+      if (inList) html += "</ul>";
       document.getElementById("comments").innerHTML =
         '<div class="card comment-card comment-card-month">' +
-        (text
-          ? text.split(/\\n{2,}/).map(function (p) { return "<p>" + esc(p).replace(/\\n/g, "<br/>") + "</p>"; }).join("")
-          : "<p>Aún sin comentarios del mes.</p>") +
+        (html || "<p>Aún sin comentarios del mes.</p>") +
         "</div>";
       document.getElementById("stockSection").hidden = true;
       document.getElementById("commentsStock").innerHTML = "";
