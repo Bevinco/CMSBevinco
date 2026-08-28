@@ -10118,9 +10118,19 @@ app.get("/api/module1/reports/:reportId/email-preview", requireAuth, async (requ
     return;
   }
   const client = store.clients.find((candidate) => candidate.id === report.clientId);
+  // La vista previa debe mostrar el correo EXACTO que sale, incluido el boton
+  // al reporte dinamico (QA Tamara 28-ago: el link no aparecia en la preview).
+  // El token se crea aqui si no existe y se persiste, para que el enlace de
+  // la preview sea el mismo que llegara al cliente.
+  if (!report.webToken) {
+    report.webToken = crypto.randomBytes(9).toString("hex");
+    await writeStore(store);
+  }
+  const previewProto = String(request.headers["x-forwarded-proto"] || request.protocol || "https").split(",")[0];
   response.type("html").send(renderEmailShellHtml({
     clientName: client?.name || report.clientId,
     bodyText: report.emailDraft || "(El cuerpo del correo está vacío: escríbelo en la pestaña Enviar o usa Redactar con IA.)",
+    reportUrl: `${previewProto}://${request.headers.host}/r/${report.webToken}`,
   }));
 });
 
@@ -10163,7 +10173,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   // Enlace al reporte dinamico dentro del correo (reunion 28-ago): se crea
   // (o reusa) el token publico del reporte y se arma la URL absoluta.
   if (!report.webToken) report.webToken = crypto.randomBytes(9).toString("hex");
-  const emailProto = String(request.headers["x-forwarded-proto"] || "https").split(",")[0];
+  const emailProto = String(request.headers["x-forwarded-proto"] || request.protocol || "https").split(",")[0];
   const dynamicReportUrl = `${emailProto}://${request.headers.host}/r/${report.webToken}`;
 
   const isMonthly = Boolean(report.monthly);
