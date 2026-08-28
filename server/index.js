@@ -6196,7 +6196,8 @@ function clientReportPeriodList(store, clientId) {
     .sort((left, right) => String(right.endsAt).localeCompare(String(left.endsAt)));
 }
 
-function renderDynamicReportHtml(store, report) {
+function renderDynamicReportHtml(store, report, options = {}) {
+  const printMode = Boolean(options.print);
   const NAVY = "#001E43";
   const GREEN = "#90BF4F";
   const boot = {
@@ -6313,6 +6314,25 @@ function renderDynamicReportHtml(store, report) {
     .comment-card-month .mc-list { color: var(--text-light); font-size: 13.5px; line-height: 1.7; margin: 0 0 10px; padding-left: 20px; }
     .comment-card-month .mc-list li { margin: 0 0 6px; }
     @media (min-width: 900px) { .comment-card-month { column-count: 2; column-gap: 36px; } .comment-card-month p, .comment-card-month li { break-inside: avoid; } }
+    ${printMode ? `
+    /* Variante impresion: identica a la pagina, acotada al ancho util de
+       una A4 horizontal, sin barra superior ni scrolls internos. */
+    @page { size: A4 landscape; margin: 7mm; }
+    body { background: #fff; }
+    .topbar { display: none; }
+    .main { max-width: 1050px; padding: 8px 0 24px; }
+    .printbar { display: flex; justify-content: flex-end; margin: 12px auto 4px; max-width: 1050px; }
+    .printbar button { background: var(--navy); border: 0; border-radius: 100px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
+    .table-scroll { max-height: none; overflow: visible; }
+    thead th { position: static; }
+    .card, .kpis, .comment-card { break-inside: avoid; }
+    .section-title { break-after: avoid; }
+    @media print {
+      .printbar, .footer { display: none; }
+      body { padding: 0; }
+      .card { border: 1px solid var(--line); box-shadow: none; }
+    }
+    ` : ""}
     @media (max-width: 900px) {
       .grid-2, .grid-var { grid-template-columns: minmax(0, 1fr); }
       .side-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -6324,6 +6344,7 @@ function renderDynamicReportHtml(store, report) {
   </style>
 </head>
 <body>
+${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar como PDF</button></div>` : ""}
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
@@ -6472,6 +6493,7 @@ function renderDynamicReportHtml(store, report) {
   var charts = {};
   var boot = window.__BOOT__;
   Chart.register(ChartDataLabels);
+  ${printMode ? "Chart.defaults.animation = false; Chart.defaults.devicePixelRatio = 2;" : ""}
   Chart.defaults.font.family = '"Inter", "Segoe UI", Arial, sans-serif';
   Chart.defaults.color = "#8b95a5";
   Chart.defaults.plugins.datalabels.display = false;
@@ -6624,7 +6646,7 @@ function renderDynamicReportHtml(store, report) {
       },
       options: {
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
-        layout: { padding: { left: 6, right: 34 } },
+        layout: { padding: { left: 6, right: 52 } },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return fmtMoney(ctx.parsed.x); } } } },
         scales: { x: { ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
       }
@@ -9727,7 +9749,7 @@ app.get("/r/:token/print", async (request, response) => {
     return;
   }
   response.setHeader("content-type", "text/html; charset=utf-8");
-  response.send(renderTwoPageReportHtml(store, report, { web: true }));
+  response.send(renderDynamicReportHtml(store, report, { print: true }));
 });
 
 app.get("/r/:token/data", async (request, response) => {
