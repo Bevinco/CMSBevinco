@@ -5415,7 +5415,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     // Barras del par pegadas (sin aire al medio) y ocupando el grueso del
     // espacio de su semana, como la referencia del equipo.
     const slotW = plotW / n;
-    const pairBarW = Math.min(slotW * 0.42, 34);
+    const pairBarW = Math.min(slotW * 0.42, 26);
     const bars = history.map((p, i) => {
       const x = xAt(i);
       const yu = yAt(p.usedCost); const yi = yAt(p.inventoryCost);
@@ -5922,8 +5922,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
        dos columnas de lectura. */
     .bv-page { max-width: 1160px; }
     .toolbar { max-width: 1160px; }
-    .bv-panel:not(.bv-panel-wide) > .bv-svg { display: block; margin: 0 auto; max-width: 900px; }
-    .bv-panel-wide .bv-svg { max-width: 700px; }
+    .bv-panel:not(.bv-panel-wide) > .bv-svg { display: block; margin: 0 auto; max-width: 620px; }
+    .bv-panel-wide .bv-svg { max-width: 480px; }
+    .bv-costgrid { align-items: center; display: grid; gap: 22px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+    .bv-costgrid-chart .bv-svg { max-width: 100%; }
+    .bv-costgrid-table .bv-difftable { margin-top: 0; }
+    .bv-costgrid-table .bv-difftable td, .bv-costgrid-table .bv-difftable th { font-size: 11px; padding: 6px 8px; }
+    .bv-row { grid-template-columns: minmax(0, 1fr) 240px; }
     .bv-monthly-table th, .bv-monthly-table td { font-size: 10.5px; padding: 6px 8px; }
     .bv-monthly-table th + th, .bv-monthly-table td + td,
     .bv-difftable th + th, .bv-difftable td + td,
@@ -5960,11 +5965,18 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   <main class="bv-page">
     ${pageHeader}
+    ${isMonthlyReport ? `
+    <section class="bv-panel">
+      <h2>Costo real vs Costo Ideal</h2>
+      <div class="bv-costgrid">
+        <div class="bv-costgrid-chart">${costComboSvg()}</div>
+        <div class="bv-costgrid-table">${costDiffTable}</div>
+      </div>
+    </section>` : `
     <section class="bv-panel">
       <h2>Costo real vs Costo Ideal</h2>
       ${costComboSvg()}
-      ${isMonthlyReport ? costDiffTable : ""}
-    </section>
+    </section>`}
     <section class="bv-row">
       <div class="bv-panel">
         <h2>Ahorro/faltantes inventario ($)</h2>
@@ -7257,8 +7269,8 @@ app.get("/api/module1/sculpture-source", requireAuth, async (request, response) 
   const cid = configuredIdentifier(request.query.cid);
   const pid = String(request.query.pid || "");
   const area = String(request.query.area || "Food");
-  if (!["varianceDetailed", "varianceSummary", "intelipar"].includes(type) || !cid || !pid) {
-    response.status(400).json({ error: "Indica type (varianceDetailed|varianceSummary|intelipar), cid y pid." });
+  if (!["varianceDetailed", "varianceSummary", "intelipar", "deadstock"].includes(type) || !cid || !pid) {
+    response.status(400).json({ error: "Indica type (varianceDetailed|varianceSummary|intelipar|deadstock), cid y pid." });
     return;
   }
   // Resolucion de cuenta como en el endpoint de periodos: sin accountId, un
@@ -7278,6 +7290,14 @@ app.get("/api/module1/sculpture-source", requireAuth, async (request, response) 
     }
   }
   try {
+    // deadstock: el Stock Efficiency crudo (auditoria del mensual: agosto
+    // llego con todo en $0 y hay que ver que devuelve Sculpture realmente).
+    if (type === "deadstock") {
+      const seClient = { sculptureCid: cid, cid, area, sculptureBaseUrl: baseUrl, sculptureAccountId: accountId };
+      const se = await fetchStockEfficiency({ client: seClient, pid });
+      response.json({ type, cid, pid, stockEfficiency: se });
+      return;
+    }
     const data = await fetchSculptureInternalReport({ type, cid, pid, area, baseUrl, accountId });
     const rows = data.rows || [];
     response.json({
@@ -8969,6 +8989,9 @@ async function fetchStockEfficiency({ client, pid }) {
   const rows = (parsed?.data?.data || []).filter((row) => row && row.className && row.className !== "?");
   if (!rows.length) return null;
   const toNumber = (value) => Number(value) || 0;
+  // Snapshot sin consolidar: Sculpture responde las filas con onhand_m = 0
+  // hasta que procesa el periodo. Mejor "sin datos" que un reporte en $0.
+  if (!rows.some((row) => toNumber(row.onhand_m) > 0)) return null;
   const isDead = (row) => String(row.is_deadstock) === "1" || row.is_deadstock === true;
   const isSlow = (row) => String(row.is_slowmoving) === "1" || row.is_slowmoving === true;
 
@@ -9104,14 +9127,20 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
   if (/beverage|barra/i.test(client.area || "")) {
     try {
       const orderedChosen = [...chosen].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
-      const lastChosen = orderedChosen[orderedChosen.length - 1];
-      stockEfficiencyReport = await fetchStockEfficiency({ client, pid: lastChosen?.sculpturePid || lastChosen?.pid });
+      // Si Sculpture aun no consolido el deadstock de la ultima semana (todo
+      // llega con onhand_m = 0, QA 28-ago: "Bardot barra llega todo en cero"),
+      // se retrocede a la semana anterior del mes en vez de guardar un $0.
+      let seChosen = null;
+      for (let index = orderedChosen.length - 1; index >= 0 && !stockEfficiencyReport; index--) {
+        seChosen = orderedChosen[index];
+        stockEfficiencyReport = await fetchStockEfficiency({ client, pid: seChosen?.sculpturePid || seChosen?.pid });
+      }
       if (stockEfficiencyReport) {
         const orderedAll = [...clientPeriods].sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
-        const lastIndex = orderedAll.findIndex((period) => period.id === lastChosen.id);
+        const lastIndex = orderedAll.findIndex((period) => period.id === seChosen.id);
         const windowStart = orderedAll[Math.max(0, lastIndex - 4)];
-        stockEfficiencyReport.rangeLabel = windowStart && lastChosen
-          ? `${String(windowStart.label || "").split(" to ")[0]} to ${String(lastChosen.label || "").split(" to ").pop()}`
+        stockEfficiencyReport.rangeLabel = windowStart && seChosen
+          ? `${String(windowStart.label || "").split(" to ")[0]} to ${String(seChosen.label || "").split(" to ").pop()}`
           : "";
       }
     } catch (error) {
