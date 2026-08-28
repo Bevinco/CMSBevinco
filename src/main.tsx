@@ -4352,8 +4352,10 @@ function App() {
               </div>
               <div className="action-row wrap-actions">
                 {comprasData ? (
-                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=xlsx${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
-                    <FileSpreadsheet size={17} /> Descargar Excel para enviar
+                  // El Excel descarga lo que muestra la pestaña activa
+                  // (Por comprar / Con exceso / Todos) — reunión 28-ago.
+                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=xlsx&scope=${comprasFilter}${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
+                    <FileSpreadsheet size={17} /> Descargar Excel ({comprasFilter === "comprar" ? "por comprar" : comprasFilter === "exceso" ? "con exceso" : "todos"})
                   </a>
                 ) : null}
               </div>

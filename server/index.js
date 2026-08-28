@@ -316,11 +316,14 @@ async function getGmailTransport() {
   return gmailTransportPromise;
 }
 
-function renderEmailShellHtml({ clientName, bodyText }) {
+function renderEmailShellHtml({ clientName, bodyText, reportUrl }) {
   const paragraphs = String(bodyText || "")
     .split(/\n{2,}/)
     .map((block) => `<p style="margin:0 0 14px;color:#333333;font-size:14.5px;line-height:1.65;">${escapeHtml(block).replace(/\n/g, "<br/>")}</p>`)
-    .join("");
+    .join("") + (reportUrl
+      ? `<p style="margin:18px 0 6px;"><a href="${reportUrl}" style="background:#001E43;border-radius:999px;color:#ffffff;display:inline-block;font-size:14px;font-weight:700;padding:11px 22px;text-decoration:none;">Ver el reporte interactivo →</a></p>
+         <p style="margin:0 0 14px;color:#8a8a8a;font-size:12px;">Gráficos en vivo, período por período, desde cualquier dispositivo.</p>`
+      : "");
 
   return `<!doctype html><html><body style="margin:0;padding:0;background:#eef2f1;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f1;padding:26px 12px;">
@@ -9576,8 +9579,16 @@ async function computeSuggestionItems({ client, period, mixStock }) {
         alerta: pickRecordValue(record, ["alertaCosto"], ""),
       };
     })
-    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0))
-    .sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
+    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0));
+  // Proveedor vacio: la tabla de Sculpture solo lo trae en la primera fila
+  // del grupo; se hereda hacia abajo para que ninguna celda quede en blanco
+  // (pedido de Pedro, reunion 28-ago: camaron/corvina/pulpo son de Bondai).
+  let carryProvider = "";
+  for (const item of items) {
+    if (item.provider && item.provider !== "Por validar") carryProvider = item.provider;
+    else if (carryProvider) item.provider = carryProvider;
+  }
+  items.sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
   return { items };
 }
 
@@ -9677,6 +9688,9 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       items = firstResult.items;
     }
     const exportFormat = String(request.query.format || "");
+    // scope (reunion 28-ago): descargar solo "por comprar", solo "con
+    // exceso" o el listado completo (ambas secciones).
+    const exportScope = ["comprar", "exceso", "todos"].includes(String(request.query.scope || "")) ? String(request.query.scope) : "todos";
     if (exportFormat === "xlsx") {
       // Excel con estilos (decision de la reunion 10-ago: reemplaza al CSV
       // plano). Carga perezosa de exceljs para no gastar memoria en el boot.
@@ -9714,9 +9728,9 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
         });
         return row;
       };
-      addHeader(headerCells);
       const toBuy = items.filter((item) => item.suggested > 0);
       const withExcess = items.filter((item) => !(item.suggested > 0) && item.excessCost > 0);
+      if (exportScope !== "exceso") addHeader(headerCells);
       const moneyCell = (cell) => { cell.numFmt = money0; cell.alignment = { horizontal: "right" }; };
       let lastProvider = "";
       let providerTotal = 0;
@@ -9731,7 +9745,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
         moneyCell(row.getCell(8));
         row.getCell(8).font = { bold: true, color: { argb: NAVY_X } };
       };
-      for (const item of toBuy) {
+      for (const item of (exportScope === "exceso" ? [] : toBuy)) {
         if (item.provider !== lastProvider) {
           pushSubtotal();
           providerTotal = 0;
@@ -9755,6 +9769,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
         orderTotal += item.orderCost || 0;
       }
       pushSubtotal();
+      if (exportScope !== "exceso") {
       const totalRow = sheet.addRow(["", "TOTAL DEL PEDIDO", "", "", "", "", "", orderTotal, "", ""]);
       totalRow.height = 22;
       totalRow.eachCell({ includeEmpty: true }, (cell) => {
@@ -9762,7 +9777,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       });
       moneyCell(totalRow.getCell(8));
       totalRow.getCell(8).font = { bold: true, size: 11, color: { argb: NAVY_X } };
-      if (withExcess.length) {
+      }
+      if (withExcess.length && exportScope !== "comprar") {
         sheet.addRow([]);
         const excessTitle = sheet.addRow(["EXCESO DE INVENTARIO (capital inmovilizado — no comprar)"]);
         sheet.mergeCells(excessTitle.number, 1, excessTitle.number, 10);
@@ -9785,7 +9801,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
           row.getCell(7).font = { bold: true, color: { argb: RED_X } };
         }
       }
-      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}`
+      const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
+      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}${scopeName}`
         .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
       const buffer = await workbook.xlsx.writeBuffer();
       response.setHeader("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -9845,7 +9862,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
           ].map(escapeCsv).join(";"));
         }
       }
-      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}`
+      const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
+      const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}${scopeName}`
         .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "").slice(0, 120);
       response.setHeader("content-type", "text/csv; charset=utf-8");
       response.setHeader("content-disposition", `attachment; filename="${fileName}.csv"`);
@@ -9992,18 +10010,49 @@ async function buildVarianceCsvAttachment(store, report) {
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Variance detallado");
+  // Formato estilo export de Sculpture (pedido de Pedro, 28-ago): montos $
+  // sin decimales, porcentajes con 1 decimal y simbolo %, cantidades con 1
+  // decimal, negativos en rojo, totales por categoria destacados y GRAND
+  // TOTAL en verde.
+  const headerNames = (tableRows[0] || []).map((header) => String(header).toLowerCase());
+  const columnKind = headerNames.map((name) => {
+    if (/\(costo\)|^ingresos$/.test(name)) return "money";
+    if (/%|porcentaje|costo de alimentos/.test(name)) return "percent";
+    if (/nombre|semana|art/.test(name)) return "text";
+    return "qty";
+  });
   tableRows.forEach((values, index) => {
-    const row = sheet.addRow(values.map((value) => {
-      const numeric = Number(String(value).replace(/[$,%\s]/g, ""));
-      return String(value).trim() !== "" && Number.isFinite(numeric) && /^[\d.,$%\s-]+$/.test(String(value)) ? numeric : value;
+    const isHeader = index === 0;
+    const firstText = String(values[0] || "").trim();
+    const isGrand = /grand\s*total/i.test(firstText);
+    const isTotal = !isGrand && /^total\s+/i.test(firstText);
+    const row = sheet.addRow(values.map((value, columnIndex) => {
+      if (isHeader) return value;
+      const kind = columnKind[columnIndex] || "qty";
+      const text = String(value ?? "").trim();
+      if (kind === "text" || text === "") return value;
+      const numeric = parseNumber(text);
+      if (!Number.isFinite(numeric)) return value;
+      if (kind === "money") return Math.round(numeric);
+      if (kind === "percent") return numeric / 100;
+      return numeric;
     }));
-    if (index === 0) {
-      row.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      row.eachCell((cellRef) => { cellRef.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF001E43" } }; });
-    }
+    row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+      const kind = columnKind[columnNumber - 1] || "qty";
+      if (isHeader) {
+        cell.style = { font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } }, fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF001E43" } }, alignment: { vertical: "middle", horizontal: columnNumber === 1 ? "left" : "center", wrapText: true } };
+        return;
+      }
+      if (kind === "money") { cell.numFmt = '"$"#,##0;[Red]-"$"#,##0'; cell.alignment = { horizontal: "right" }; }
+      if (kind === "percent") { cell.numFmt = "0.0%;[Red]-0.0%"; cell.alignment = { horizontal: "right" }; }
+      if (kind === "qty") { cell.numFmt = "#,##0.0;[Red]-#,##0.0"; cell.alignment = { horizontal: "right" }; }
+      if (isGrand) { cell.font = { bold: true, size: 10.5, color: { argb: "FF1E3A0F" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC9DFA5" } }; }
+      else if (isTotal) { cell.font = { bold: true, color: { argb: "FF001E43" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1EDE0" } }; }
+    });
+    if (isHeader) row.height = 20;
   });
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.columns.forEach((column, index) => { column.width = index === 0 ? 32 : 14; });
+  sheet.columns.forEach((column, index) => { column.width = index === 0 ? 34 : 13; });
   const xlsxBuffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
   return {
@@ -10097,6 +10146,12 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     return;
   }
 
+  // Enlace al reporte dinamico dentro del correo (reunion 28-ago): se crea
+  // (o reusa) el token publico del reporte y se arma la URL absoluta.
+  if (!report.webToken) report.webToken = crypto.randomBytes(9).toString("hex");
+  const emailProto = String(request.headers["x-forwarded-proto"] || "https").split(",")[0];
+  const dynamicReportUrl = `${emailProto}://${request.headers.host}/r/${report.webToken}`;
+
   const isMonthly = Boolean(report.monthly);
   // Asunto con la fecha del periodo auditado (pedido de Paulina, 21-ago).
   const periodForSubject = store.periods.find((candidate) => candidate.id === report.periodId);
@@ -10144,7 +10199,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
         ...(cc.length ? { cc: cc.join(", ") } : {}),
         replyTo: process.env.REPORTS_REPLY_TO || gmailUser,
         subject,
-        html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
+        html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "", reportUrl: dynamicReportUrl }),
         attachments: [
           { filename: pdfFilename, content: reportPdf, contentType: "application/pdf" },
           ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer, contentType: varianceCsv.contentType || "text/csv" }] : []),
@@ -10187,7 +10242,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
       // un dominio de envio (Resend) distinto.
       reply_to: process.env.REPORTS_REPLY_TO || undefined,
       subject,
-      html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "" }),
+      html: renderEmailShellHtml({ clientName: client?.name || report.clientId, bodyText: report.emailDraft || "", reportUrl: dynamicReportUrl }),
       attachments: [
         { filename: pdfFilename, content: reportPdf.toString("base64") },
         ...(varianceCsv ? [{ filename: varianceCsv.filename, content: varianceCsv.buffer.toString("base64") }] : []),
