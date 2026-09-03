@@ -6359,6 +6359,11 @@ function renderDynamicReportHtml(store, report, options = {}) {
     #monthlySection tbody td { font-size: 11px; padding: 7px 6px; }
     #seSection thead th { font-size: 9.5px; padding: 7px 8px; }
     #seSection tbody td { font-size: 11.5px; padding: 7px 8px; }
+    /* Graficos algo mas bajos al imprimir: la tabla de diferencia alcanza a
+       compartir hoja con el grafico de costo y las paginas no quedan con
+       medio folio en blanco. */
+    .chart-wrap { height: 260px; }
+    .chart-wrap.tall { height: 290px; }
     .kpis, .comment-card { break-inside: avoid; }
     .card { break-inside: avoid; }
     tbody tr { break-inside: avoid; }
