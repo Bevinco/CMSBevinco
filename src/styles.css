@@ -5057,3 +5057,11 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .bottle-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
 .bottle-grid label small { color: #7a8a80; font-weight: 500; }
 .bottle-grid input { border: 1px solid #d9e0da; border-radius: 8px; font: inherit; padding: 7px 10px; width: 160px; }
+
+/* Vista previa de litrajes -> botellas */
+.bottle-preview { background: #f8faf5; border: 1px solid #e3ead8; border-radius: 10px; margin: 4px 0 12px; padding: 10px 14px 12px; }
+.bottle-preview .eyebrow { margin-bottom: 6px; }
+.bottle-preview table { border-collapse: collapse; width: 100%; }
+.bottle-preview th { color: #6b7c8f; font-size: 11px; letter-spacing: 0.04em; padding: 4px 8px; text-align: left; text-transform: uppercase; }
+.bottle-preview td { border-top: 1px solid #ecf0e6; font-size: 13px; padding: 5px 8px; }
+.bottle-preview td.is-converted { color: #4a7a1e; font-weight: 700; }

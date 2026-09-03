@@ -259,10 +259,11 @@ async function getPdfBrowser() {
   return pdfBrowserPromise;
 }
 
-async function renderReportPdf(store, report, attempt = 0) {
+async function renderReportPdf(store, report, attempt = 0, forceDynamic = false) {
   // Mensual: el PDF es la pagina dinamica (paridad total con el enlace,
-  // pedido de Pedro 28-ago). Semanal: template clasico de dos paginas.
-  const isMonthlyPdf = Boolean(report.monthly);
+  // pedido de Pedro 28-ago). Semanal: template clasico de dos paginas,
+  // salvo cuando el boton del enlace dinamico pide SU misma vista.
+  const isMonthlyPdf = forceDynamic || Boolean(report.monthly);
   const html = isMonthlyPdf
     ? renderDynamicReportHtml(store, report, { print: true })
     : renderTwoPageReportHtml(store, report);
@@ -275,7 +276,7 @@ async function renderReportPdf(store, report, attempt = 0) {
   } catch (error) {
     // El navegador pudo morir (memoria/reinicio): resetear y reintentar una vez.
     pdfBrowserPromise = null;
-    if (attempt < 1) return renderReportPdf(store, report, attempt + 1);
+    if (attempt < 1) return renderReportPdf(store, report, attempt + 1, forceDynamic);
     console.error("[pdf] launch fallo:", error.stack || error.message);
     throw error;
   }
@@ -6352,8 +6353,18 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .printbar button { background: var(--navy); border: 0; border-radius: 100px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
     .table-scroll { max-height: none; overflow: visible; }
     thead th { position: static; }
-    .card, .kpis, .comment-card { break-inside: avoid; }
+    /* La tabla mensual (12 columnas) debe caber en el ancho util de la A4
+       horizontal (~1069px): celdas compactas solo en la vista de impresion. */
+    #monthlySection thead th { font-size: 9px; padding: 7px 6px; }
+    #monthlySection tbody td { font-size: 11px; padding: 7px 6px; }
+    #seSection thead th { font-size: 9.5px; padding: 7px 8px; }
+    #seSection tbody td { font-size: 11.5px; padding: 7px 8px; }
+    .kpis, .comment-card { break-inside: avoid; }
+    .card { break-inside: avoid; }
+    tbody tr { break-inside: avoid; }
+    thead { break-after: avoid; }
     .section-title { break-after: avoid; }
+    .section { margin-bottom: 18px; }
     @media print {
       .printbar, .footer { display: none; }
       body { padding: 0; }
@@ -6385,7 +6396,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         <span class="select-wrap"><select id="periodSelect" class="select"></select></span>
       </div>
       <div class="live-pill"><span class="dot"></span> Datos del CMS</div>
-      <a class="pdf-btn" id="pdfBtn" href="#" target="_blank" rel="noreferrer">Descargar PDF</a>
+      <a class="pdf-btn" id="pdfBtn" href="#">Descargar PDF</a>
     </div>
   </div>
 </header>
@@ -6962,7 +6973,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     document.getElementById("clientName").textContent = data.client.name;
     document.getElementById("periodTag").textContent = data.period.label || "";
     document.getElementById("areaTag").textContent = (data.monthly ? "Mensual · " : "Semanal · ") + (data.client.area || "");
-    document.getElementById("pdfBtn").href = "/r/" + boot.token + "/print?period=" + encodeURIComponent(data.reportId);
+    document.getElementById("pdfBtn").href = "/r/" + boot.token + "/pdf?period=" + encodeURIComponent(data.reportId);
     var monthly = !!data.monthly;
     document.getElementById("buySection").hidden = monthly;
     document.getElementById("productSection").hidden = monthly;
@@ -9825,6 +9836,30 @@ app.get("/r/:token", async (request, response) => {
   }
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.send(renderDynamicReportHtml(store, report));
+});
+
+// Descarga DIRECTA del PDF de la vista dinamica (QA Tamara 28-ago: el boton
+// no debe abrir otra pagina con otro boton, debe bajar el archivo).
+app.get("/r/:token/pdf", async (request, response) => {
+  const { store, report } = await reportForToken(request);
+  if (!report) {
+    response.status(404).send("Reporte no disponible.");
+    return;
+  }
+  try {
+    const pdf = await renderReportPdf(store, report, 0, true);
+    const client = store.clients.find((candidate) => candidate.id === report.clientId);
+    const period = store.periods.find((candidate) => candidate.id === report.periodId);
+    const fileName = `Reporte ${client?.name || report.clientId} - ${period?.label || report.periodLabel || report.periodId}`
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w\s.-]/g, "").trim().slice(0, 110);
+    response.setHeader("content-type", "application/pdf");
+    response.setHeader("content-disposition", `attachment; filename="${fileName}.pdf"`);
+    response.send(pdf);
+  } catch (error) {
+    console.error("[pdf-directo]", error.message);
+    response.status(502).send("No se pudo generar el PDF; intenta de nuevo en unos segundos.");
+  }
 });
 
 app.get("/r/:token/print", async (request, response) => {

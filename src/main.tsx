@@ -3168,7 +3168,7 @@ function App() {
               <div className="chat-thread" aria-live="polite">
                 {!chatMessages.length ? (
                   <div className="chat-empty">
-                    <p>El agente ya conoce los datos de la semana y los criterios de {selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
+                    <p>El agente ya conoce los datos {selectedReport?.monthly ? "del mes" : "de la semana"} y los criterios de {selectedReport?.client?.name || selectedClient?.name || "este cliente"}. Pídele lo que necesites:</p>
                     <div className="chat-suggestions">
                       {["Menciona que en Schop puede faltar una factura", "Haz el resumen más breve y directo", "Redacta el correo en tono más formal"].map((suggestion) => (
                         <button key={suggestion} type="button" onClick={() => setChatInput(suggestion)}>{suggestion}</button>
@@ -3490,6 +3490,15 @@ function App() {
             const seTop = ((selectedReport as unknown as { stockEfficiencyReport?: { topDead?: Array<{ name: string; onhand: string }> } }).stockEfficiencyReport?.topDead || [])
               .filter((item) => /ml/i.test(item.onhand || ""));
             if (!seTop.length) return null;
+            const previewOnhand = (item: { name: string; onhand: string }) => {
+              const size = bottleSizes[item.name.trim().toLowerCase()];
+              if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return item.onhand;
+              const digits = (item.onhand.match(/\d+/) || [""])[0];
+              const ml = Number(digits);
+              if (!ml) return item.onhand;
+              const bottles = Math.round((ml / size) * 10) / 10;
+              return `${bottles === Math.round(bottles) ? Math.round(bottles) : bottles.toFixed(1)} botellas · ${item.onhand}`;
+            };
             return (
               <section className="panel bottle-sizes-panel">
                 <div className="panel-header">
@@ -3518,6 +3527,22 @@ function App() {
                       />
                     </label>
                   ))}
+                </div>
+                <div className="bottle-preview">
+                  <p className="eyebrow">Vista previa · así quedará la tabla</p>
+                  <table>
+                    <thead>
+                      <tr><th>Producto</th><th>On-hand</th></tr>
+                    </thead>
+                    <tbody>
+                      {seTop.map((item) => (
+                        <tr key={item.name}>
+                          <td>{item.name}</td>
+                          <td className={typeof bottleSizes[item.name.trim().toLowerCase()] === "number" && (bottleSizes[item.name.trim().toLowerCase()] as number) > 0 ? "is-converted" : ""}>{previewOnhand(item)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
                 <button
                   className="ghost-button"
