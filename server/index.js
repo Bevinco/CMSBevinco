@@ -260,7 +260,12 @@ async function getPdfBrowser() {
 }
 
 async function renderReportPdf(store, report, attempt = 0) {
-  const html = renderTwoPageReportHtml(store, report);
+  // Mensual: el PDF es la pagina dinamica (paridad total con el enlace,
+  // pedido de Pedro 28-ago). Semanal: template clasico de dos paginas.
+  const isMonthlyPdf = Boolean(report.monthly);
+  const html = isMonthlyPdf
+    ? renderDynamicReportHtml(store, report, { print: true })
+    : renderTwoPageReportHtml(store, report);
   // No cerrar el navegador mientras hay un PDF en curso.
   clearTimeout(pdfBrowserIdleTimer);
   let browser;
@@ -277,14 +282,21 @@ async function renderReportPdf(store, report, attempt = 0) {
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
-    const pdf = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      // El lienzo del reporte mide ~810px y el A4 util ~740px: se escala para
-      // que cada pagina del reporte entre exacta en una hoja.
-      scale: 0.88,
-      margin: { top: "7mm", bottom: "7mm", left: "6mm", right: "6mm" },
-    });
+    if (isMonthlyPdf) {
+      // Esperar a que Chart.js pinte los canvas antes de imprimir.
+      await page.waitForFunction("window.__RENDER_DONE__ === true", { timeout: 20000 }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    const pdf = await page.pdf(isMonthlyPdf
+      ? { format: "A4", landscape: true, printBackground: true, margin: { top: "7mm", bottom: "7mm", left: "6mm", right: "6mm" } }
+      : {
+          format: "A4",
+          printBackground: true,
+          // El lienzo del reporte mide ~810px y el A4 util ~740px: se escala para
+          // que cada pagina del reporte entre exacta en una hoja.
+          scale: 0.88,
+          margin: { top: "7mm", bottom: "7mm", left: "6mm", right: "6mm" },
+        });
     return Buffer.from(pdf);
   } finally {
     await page.close().catch(() => {});
@@ -5214,6 +5226,14 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         present.map(({ p, i }) => `<circle cx="${xAt(i)}" cy="${yPct(p[key])}" r="2.6" fill="${color}"/>`).join("");
     };
     const clampChip = (cy) => Math.min(Math.max(cy, T + 9), B - 31);
+    // Zona de la cifra flotante sobre barras CORTAS (barlab-out): los chips
+    // no pueden pisarla (QA Radici 28-ago). Las cifras dentro de la barra ya
+    // quedan protegidas por el tope B-31 del clamp.
+    const labelZones = history.map((p) => {
+      if (!p.revenue) return null;
+      const barTop = yRev(p.revenue);
+      return (B - barTop) > 26 ? null : barTop - 5;
+    });
     const chips = history.map((p, i) => {
       if (!p.costPercent && !p.idealCostPercent) return "";
       const x = xAt(i);
@@ -5221,7 +5241,11 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const realAbove = yr <= yi;
       let cyReal = clampChip(realAbove ? yr - 14 : yr + 16);
       let cyIdeal = clampChip(realAbove ? yi + 16 : yi - 14);
-      if (Math.abs(cyReal - cyIdeal) < 21) cyIdeal = clampChip(cyReal - 23) === cyReal ? cyReal + 23 : cyReal - 23;
+      const zone = labelZones[i];
+      const dodge = (cy) => (zone !== null && Math.abs(cy - (zone - 5)) < 18 ? clampChip(zone - 27) : cy);
+      cyReal = dodge(cyReal);
+      cyIdeal = dodge(cyIdeal);
+      if (Math.abs(cyReal - cyIdeal) < 21) cyIdeal = cyReal - 23 >= T + 9 ? cyReal - 23 : cyReal + 23;
       const chip = (cy, color, text) =>
         `<g><rect x="${x - 31}" y="${cy - 10}" width="62" height="19" rx="2" fill="${color}"/>` +
         `<text x="${x}" y="${cy + 4}" text-anchor="middle" class="chip">${text}</text></g>`;
@@ -6170,6 +6194,7 @@ function dynamicReportData(store, report) {
     // Paridad PDF <-> web del reporte MENSUAL (QA Tamara 28-ago): la pagina
     // dinamica muestra las mismas secciones que el PDF mensual.
     monthlyTable: report.monthly ? (payload.familyMonthlyTable || []) : [],
+    bottleSizes: report.monthly ? (payload.client?.bottleSizes || {}) : undefined,
     stockEfficiency: report.monthly ? (payload.stockEfficiencyReport || null) : null,
     monthComments: report.monthly ? String(payload.comments || "").trim() : "",
     analysis: {
@@ -6441,7 +6466,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   </section>
 
   <section class="section" id="monthlySection" hidden>
-    <h2 class="section-title"><span class="num">08</span> Resumen del mes por categoría <span class="hint">Totales del mes por familia · botellas de 700cc donde aplica</span></h2>
+    <h2 class="section-title"><span class="num">08</span> Resumen del mes por categoría <span class="hint">Totales del mes por familia · unidades de Sculpture</span></h2>
     <div class="card">
       <div class="table-scroll">
         <table>
@@ -6839,8 +6864,8 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     var rows = data.monthlyTable || [];
     var grand = { difCosto: 0, usadoCosto: 0, vendidoCosto: 0, ingresos: 0 };
     var body = rows.map(function (row) {
-      var inMl = /^ml$/i.test(String(row.unidad || "").trim());
-      var unit = inMl ? "bot. 700cc" : (row.unidad || "");
+      var inMl = false;
+      var unit = row.unidad || "";
       grand.difCosto += row.difCosto || 0; grand.usadoCosto += row.usadoCosto || 0;
       grand.vendidoCosto += row.vendidoCosto || 0; grand.ingresos += row.ingresos || 0;
       return "<tr><td><b>Total " + esc(row.familia) + (unit ? " (" + esc(unit) + ")" : "") + "</b></td>" +
@@ -6879,9 +6904,25 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         '<td class="num"><span class="' + (row.dead ? "neg" : "") + '">' + fmtMoney(row.dead) + " (" + fmtPct(row.deadPct) + ")</span></td>" +
         '<td class="num">' + fmtMoney(row.slow) + " (" + fmtPct(row.slowPct) + ")</td></tr>";
     }).join("");
+    var sizes = data.bottleSizes || {};
     document.getElementById("seTopRows").innerHTML = (se.topDead || []).map(function (row) {
+      var onhand = String(row.onhand || "");
+      var size = sizes[String(row.name || "").trim().toLowerCase()];
+      if (size && onhand.toLowerCase().indexOf("ml") >= 0) {
+        var digits = "";
+        for (var ci = 0; ci < onhand.length; ci++) {
+          var ch = onhand.charAt(ci);
+          if (ch >= "0" && ch <= "9") digits += ch;
+          else if (digits) break;
+        }
+        var ml = Number(digits);
+        if (ml > 0) {
+          var bottles = Math.round((ml / size) * 10) / 10;
+          onhand = (bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1)) + " botellas · " + onhand;
+        }
+      }
       return "<tr><td><b>" + esc(row.name) + "</b></td>" +
-        '<td class="num">' + esc(row.onhand || "") + "</td>" +
+        '<td class="num">' + esc(onhand) + "</td>" +
         '<td class="num">' + fmtMoney(row.value) + "</td></tr>";
     }).join("") || '<tr><td colspan="3">Sin productos detenidos en la ventana.</td></tr>';
   }
@@ -6891,7 +6932,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   function orderSections(monthly) {
     var main = document.getElementById("main");
     var order = monthly
-      ? ["costSection", "varSection", "commentsSection", "monthlySection", "covSection", "seSection", "buySection", "productSection", "stockSection"]
+      ? ["costSection", "varSection", "monthlySection", "commentsSection", "seSection", "covSection", "buySection", "productSection", "stockSection"]
       : ["costSection", "varSection", "buySection", "covSection", "commentsSection", "productSection", "stockSection", "monthlySection", "seSection"];
     for (var i = 0; i < order.length; i++) {
       var el = document.getElementById(order[i]);
@@ -6925,6 +6966,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     var monthly = !!data.monthly;
     document.getElementById("buySection").hidden = monthly;
     document.getElementById("productSection").hidden = monthly;
+    document.getElementById("covSection").hidden = monthly;
     document.getElementById("costDiffCard").hidden = !monthly;
     document.getElementById("monthlySection").hidden = !monthly || !(data.monthlyTable || []).length;
     document.getElementById("seSection").hidden = !monthly || !data.stockEfficiency;
@@ -6934,7 +6976,8 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     renderKpis(data);
     renderCostChart(data);
     renderFamChart(data);
-    renderCovChart(data);
+    if (!monthly) renderCovChart(data);
+    else destroyChart("cov");
     renderComments(data);
     if (monthly) {
       destroyChart("buy");
@@ -6968,9 +7011,10 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   // Con la fuente ya cargada: Chart.js mide las etiquetas al crear el
   // grafico y si Inter llega despues, los textos quedan cortados.
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(function () { renderAll(boot.data); });
+    document.fonts.ready.then(function () { renderAll(boot.data); window.__RENDER_DONE__ = true; });
   } else {
     renderAll(boot.data);
+    window.__RENDER_DONE__ = true;
   }
 })();
 </script>
@@ -7345,6 +7389,27 @@ app.get("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request,
   const store = await readStore();
   const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
   response.json({ barMixes: client?.barMixes || [] });
+});
+
+// Litraje REAL por botella (Pedro, 28-ago): el equipo completa la
+// equivalencia a medida que aparecen productos en ml en el Top 10 sin
+// movimiento (ej: Magnum 1.75l => 1750). { "producto en minusculas": ml }.
+app.patch("/api/module1/clients/:clientId/bottle-sizes", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) {
+    response.status(404).json({ error: "No se encontró el restaurante." });
+    return;
+  }
+  const incoming = request.body?.bottleSizes || {};
+  const clean = {};
+  for (const [name, ml] of Object.entries(incoming)) {
+    const size = Number(ml);
+    if (String(name).trim() && Number.isFinite(size) && size > 0) clean[String(name).trim().toLowerCase()] = size;
+  }
+  client.bottleSizes = clean;
+  await writeStore(store);
+  response.json({ bottleSizes: client.bottleSizes });
 });
 
 app.patch("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request, response) => {
@@ -9705,7 +9770,8 @@ app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, re
   }
 
   response.setHeader("content-type", "text/html; charset=utf-8");
-  response.send(renderTwoPageReportHtml(store, report));
+  // Mensual: misma vista dinamica que el enlace (paridad, Pedro 28-ago).
+  response.send(report.monthly ? renderDynamicReportHtml(store, report, { print: true }) : renderTwoPageReportHtml(store, report));
 });
 
 // Link web compartible del reporte, al estilo de los reportes HTML de la

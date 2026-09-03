@@ -1085,6 +1085,14 @@ function App() {
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [commentsDraft, setCommentsDraft] = useState("");
+  // Litraje real por botella (Pedro, 28-ago): editable por cliente, aplica
+  // al Top 10 sin movimiento del mensual (PDF y enlace dinamico).
+  const [bottleSizes, setBottleSizes] = useState<Record<string, number | "">>({});
+  useEffect(() => {
+    const clientSizes = (selectedReport as unknown as { client?: { bottleSizes?: Record<string, number> } } | null)?.client?.bottleSizes;
+    setBottleSizes(clientSizes || {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport?.id]);
   const [emailDraft, setEmailDraft] = useState("");
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [criteriaDocuments, setCriteriaDocuments] = useState<CriteriaDocument[]>([]);
@@ -3477,6 +3485,68 @@ function App() {
               ) : null}
             </section>
           ) : null}
+
+          {selectedReport?.monthly ? (() => {
+            const seTop = ((selectedReport as unknown as { stockEfficiencyReport?: { topDead?: Array<{ name: string; onhand: string }> } }).stockEfficiencyReport?.topDead || [])
+              .filter((item) => /ml/i.test(item.onhand || ""));
+            if (!seTop.length) return null;
+            return (
+              <section className="panel bottle-sizes-panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Stock Efficiency · Top 10 sin movimiento</p>
+                    <h2>Litraje real por botella</h2>
+                  </div>
+                </div>
+                <p className="analysis-note">
+                  Los productos que Sculpture entrega en ml se muestran en botellas usando el litraje que definas aquí (ej: Magnum 1.75L = 1750).
+                  Queda guardado para este restaurante y se aplica al PDF y al enlace dinámico al volver a abrirlos.
+                </p>
+                <div className="bottle-grid">
+                  {seTop.map((item) => (
+                    <label key={item.name}>
+                      <span>{item.name} <small>({item.onhand})</small></span>
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="ml por botella"
+                        value={bottleSizes[item.name.trim().toLowerCase()] ?? ""}
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          setBottleSizes((current) => ({ ...current, [item.name.trim().toLowerCase()]: raw === "" ? "" : Number(raw) }));
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={async () => {
+                    if (!selectedReport) return;
+                    const clean: Record<string, number> = {};
+                    for (const [name, ml] of Object.entries(bottleSizes)) {
+                      if (typeof ml === "number" && Number.isFinite(ml) && ml > 0) clean[name] = ml;
+                    }
+                    try {
+                      await readJson(await fetch(`/api/module1/clients/${selectedReport.clientId}/bottle-sizes`, {
+                        method: "PATCH",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ bottleSizes: clean }),
+                      }));
+                      setError("Litrajes guardados: recarga el PDF o el enlace dinámico para verlos en botellas.");
+                      setWorkStatus("idle");
+                    } catch (saveError) {
+                      setError(saveError instanceof Error ? saveError.message : "No se pudieron guardar los litrajes.");
+                      setWorkStatus("error");
+                    }
+                  }}
+                >
+                  Guardar litrajes
+                </button>
+              </section>
+            );
+          })() : null}
 
           <section className="panel">
             <div className="panel-header">
