@@ -9284,6 +9284,7 @@ app.post("/api/module1/reports/:reportId/chat", requireAuth, async (request, res
       "- PROHIBIDO responder con las secciones 'DIAGNOSTICO (interno)', 'Lo mejor de la semana', 'Los desafios de la semana' y 'EFICIENCIA DE STOCK Y COMPRA'. El reporte mensual lleva UN unico texto: 'Comentarios del mes'.",
       "- Cuando pidan redactar, detallar o ajustar, entrega los Comentarios del mes listos para pegar: parrafos y bullets que cubran (1) evolucion semanal del costo real vs ideal citando semanas y cifras, (2) lectura por familia usando 'totalesFamiliaSummary' (cantidad con SU unidad, %, $), (3) ahorros y faltantes del mes con los productos responsables, (4) compra vs sugerido y cobertura del mes, y (5) 'stockEfficiency' del extracto si trae datos (inventario sin movimiento y lento, top detenidos). Cierra con recomendaciones accionables.",
       "- En el mensual, 'totalesFamiliaSummary' son los TOTALES POR FAMILIA DEL MES: el CMS los acumula desde el variance summary de Sculpture (prev/compras/existencia/usado/vendido/dif con su unidad, difPct, difCosto, costoPct, idealPct, ingresos). Usalos tal cual; NUNCA digas que faltan o que vienen vacios.",
+      "- El VARIANCE DETALLADO llega AGREGADO POR PRODUCTO para el mes completo (una fila por producto/subcategoria con las semanas sumadas): usalo para citar subcategorias y productos del mes (Gin, Tequila, etc.). Si un producto no aparece ahi, no tuvo variance en el mes.",
       "- Habla siempre de 'el mes', nunca de 'la semana'.",
     ] : []),
     "",
@@ -10329,6 +10330,15 @@ async function buildVarianceCsvAttachment(store, report) {
   const lines = [];
   const tableRows = [];
   let headersWritten = false;
+  // Agregado del MES por producto (solo para el texto del chat en
+  // mensuales): una fila por producto con las semanas sumadas.
+  const agg = report.monthly
+    ? { headers: null, kinds: null, prevIdx: new Set(), existIdx: new Set(), cats: new Map(), order: [], currentCat: "" }
+    : null;
+  const aggBucket = (name) => {
+    if (!agg.cats.has(name)) { agg.cats.set(name, { order: [], rows: new Map() }); agg.order.push(name); }
+    return agg.cats.get(name);
+  };
   for (const period of targetPeriods) {
     const pid = configuredIdentifier(period.sculpturePid, period.pid);
     if (!pid) continue;
@@ -10350,9 +10360,69 @@ async function buildVarianceCsvAttachment(store, report) {
       const rowValues = [...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])];
       lines.push(rowValues.map(escapeCsv).join(";"));
       tableRows.push(rowValues);
+      if (!agg) continue;
+      if (!agg.headers) {
+        agg.headers = data.headers || [];
+        agg.kinds = agg.headers.map((header, index) => {
+          const name = String(header).toLowerCase();
+          if (index === 0 || /nombre|art/.test(name)) return "text";
+          if (/\(costo\)|^ingresos$/.test(name)) return "money";
+          if (/%|porcentaje|costo de alimentos/.test(name)) return "percent";
+          return "qty";
+        });
+        agg.headers.forEach((header, index) => {
+          const name = String(header).toLowerCase();
+          if (/previa/.test(name)) agg.prevIdx.add(index);
+          else if (/existencia/.test(name)) agg.existIdx.add(index);
+        });
+      }
+      const values = row.values || [];
+      const rowName = String(values[0] || "").trim();
+      if (!rowName) continue;
+      const restEmpty = values.slice(1).every((value) => String(value ?? "").trim() === "");
+      if (restEmpty && !/^total\s/i.test(rowName)) { agg.currentCat = rowName; aggBucket(rowName); continue; }
+      const bucket = aggBucket(agg.currentCat);
+      let acc = bucket.rows.get(rowName);
+      if (!acc) { acc = { name: rowName, first: {}, last: {}, sums: {} }; bucket.rows.set(rowName, acc); bucket.order.push(rowName); }
+      values.forEach((value, index) => {
+        if (index === 0) return;
+        const kind = agg.kinds[index] || "qty";
+        if (kind === "percent") return;
+        if (agg.prevIdx.has(index)) { if (acc.first[index] === undefined && String(value ?? "").trim() !== "") acc.first[index] = value; return; }
+        if (agg.existIdx.has(index)) { if (String(value ?? "").trim() !== "") acc.last[index] = value; return; }
+        const numeric = parseNumber(String(value ?? ""));
+        if (Number.isFinite(numeric)) acc.sums[index] = (acc.sums[index] || 0) + numeric;
+      });
     }
   }
   if (!lines.length) return null;
+
+  // Texto agregado del mes para el chat
+  let monthlyChatText = "";
+  if (agg && agg.headers) {
+    const cell = (index, acc) => {
+      if (agg.prevIdx.has(index)) return acc.first[index] ?? "";
+      if (agg.existIdx.has(index)) return acc.last[index] ?? "";
+      if ((agg.kinds[index] || "qty") === "percent") return "";
+      const value = acc.sums[index];
+      if (value === undefined) return "";
+      return (agg.kinds[index] === "money") ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
+    };
+    const aggLines = [
+      `VARIANCE DEL MES AGREGADO POR PRODUCTO — sumas de ${targetPeriods.length} semanas. 'Existencia Previa' = primera semana; 'Existencia' = ultima; columnas % vacias a proposito (a nivel mes se recalculan: dif% = Diferencia/Vendido) — no las inventes.`,
+      agg.headers.map(escapeCsv).join(";"),
+    ];
+    for (const categoryName of agg.order) {
+      const bucket = agg.cats.get(categoryName);
+      if (!bucket.order.length) { if (categoryName) aggLines.push(escapeCsv(categoryName)); continue; }
+      if (categoryName) aggLines.push(escapeCsv(categoryName));
+      for (const key of bucket.order) {
+        const acc = bucket.rows.get(key);
+        aggLines.push([acc.name, ...agg.headers.slice(1).map((_, offset) => cell(offset + 1, acc))].map(escapeCsv).join(";"));
+      }
+    }
+    monthlyChatText = aggLines.join("\n");
+  }
 
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
   const baseName = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
@@ -10413,6 +10483,7 @@ async function buildVarianceCsvAttachment(store, report) {
     filename: baseName + ".xlsx",
     contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     text: lines.join("\n"),
+    monthlyChatText,
     buffer: xlsxBuffer,
   };
 }
@@ -10427,7 +10498,7 @@ async function varianceDetailForChat(store, report) {
   let text = "";
   try {
     const attachment = await buildVarianceCsvAttachment(store, report);
-    text = String(attachment?.text || "").slice(0, 60000);
+    text = String((report.monthly && attachment?.monthlyChatText) || attachment?.text || "").slice(0, 60000);
   } catch (error) {
     console.error(`[chat] variance detallado no disponible (${report.id}):`, error.message);
   }
