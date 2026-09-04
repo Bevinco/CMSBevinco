@@ -282,6 +282,13 @@ async function renderReportPdf(store, report, attempt = 0, forceDynamic = false)
   }
   const page = await browser.newPage();
   try {
+    if (isMonthlyPdf) {
+      // El viewport DEBE medir lo mismo que el ancho util de la A4 horizontal:
+      // los canvas de Chart.js se dibujan al ancho del viewport (800 por
+      // defecto) y no se re-dibujan al imprimir — quedaban angostos y con las
+      // cifras pegadas al borde (QA Valdivia 28-ago).
+      await page.setViewport({ width: 1069, height: 800, deviceScaleFactor: 2 });
+    }
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
     if (isMonthlyPdf) {
       // Esperar a que Chart.js pinte los canvas antes de imprimir.
