@@ -5065,3 +5065,6 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 .bottle-preview th { color: #6b7c8f; font-size: 11px; letter-spacing: 0.04em; padding: 4px 8px; text-align: left; text-transform: uppercase; }
 .bottle-preview td { border-top: 1px solid #ecf0e6; font-size: 13px; padding: 5px 8px; }
 .bottle-preview td.is-converted { color: #4a7a1e; font-weight: 700; }
+
+/* Productos en nivel de stock (sin compra ni exceso) en Compras */
+.compras-en-nivel { color: #4a7a1e; font-weight: 700; }

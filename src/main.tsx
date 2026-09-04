@@ -98,7 +98,7 @@ type BarMix = { nombre: string; componentes: Array<{ producto: string; botellasP
 type SuggestionItem = {
   provider: string; name: string; size: string; unitCost: number; onHand: number;
   onHandCost: number; par: number; suggested: number; orderCost: number;
-  inventoryDays: number; excessCost: number; alerta?: string;
+  inventoryDays: number; excessCost: number; alerta?: string; enNivel?: boolean;
 };
 type ThemeMode = "light" | "dark";
 
@@ -3126,16 +3126,6 @@ function App() {
                     ✦ {aiModels.chat || aiModels.reports}
                   </span>
                 ) : null}
-                {selectedReport?.monthly ? (
-                  <>
-                    <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
-                      <Printer size={17} /> Exportar PDF
-                    </a>
-                    <button className="button-link" type="button" onClick={() => shareWebReport(selectedReport.id)}>
-                      <ExternalLink size={17} /> Enlace dinámico
-                    </button>
-                  </>
-                ) : null}
                 <button className="primary-button" disabled={!selectedReport || workStatus === "loading" || auditLocked} onClick={generateSummary}>
                   {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
                   {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
@@ -4613,7 +4603,7 @@ function App() {
                     {visibleItems.map((item, index) => (
                       <tr key={`${item.provider}-${item.name}-${index}`}>
                         <td>{index > 0 && visibleItems[index - 1].provider === item.provider ? "" : item.provider}</td>
-                        <td><strong>{item.name}</strong>{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
+                        <td><strong>{item.name}</strong>{item.enNivel ? <small className="compras-en-nivel"> ✓ En nivel</small> : null}{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
                         <td>{item.size}</td>
                         <td className="num">{item.onHand ? item.onHand.toFixed(2) : "0"}</td>
                         <td className="num">{item.par ? Math.round(item.par) : "-"}</td>

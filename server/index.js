@@ -10047,7 +10047,10 @@ async function computeSuggestionItems({ client, period, mixStock }) {
         alerta: pickRecordValue(record, ["alertaCosto"], ""),
       };
     })
-    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0));
+    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0 || (isKitchenTable && item.onHand > 0)));
+  // "En nivel": ni compra ni exceso — visible con su PAR y dias de
+  // inventario para que la sugerida 0 sea explicable, no un misterio.
+  for (const item of items) item.enNivel = !(item.suggested > 0 || item.excessCost > 0);
   // Proveedor vacio: la tabla de Sculpture solo lo trae en la primera fila
   // del grupo; se hereda hacia abajo para que ninguna celda quede en blanco
   // (pedido de Pedro, reunion 28-ago: camaron/corvina/pulpo son de Bondai).
@@ -10267,6 +10270,27 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
           moneyCell(row.getCell(5));
           moneyCell(row.getCell(7));
           row.getCell(7).font = { bold: true, color: { argb: RED_X } };
+        }
+      }
+      const inLevel = items.filter((item) => item.enNivel);
+      if (inLevel.length && exportScope === "todos") {
+        sheet.addRow([]);
+        const levelTitle = sheet.addRow(["EN NIVEL DE STOCK (sin compra sugerida: existencia entre el PAR y el umbral de exceso)"]);
+        sheet.mergeCells(levelTitle.number, 1, levelTitle.number, 10);
+        levelTitle.getCell(1).style = { font: { bold: true, size: 11, color: { argb: "FF4A7A1E" } } };
+        const levelHeader = sheet.addRow(["Proveedor", "Producto", "Tamaño", "Inventario", "PAR", "Días de inventario"]);
+        levelHeader.eachCell((cell) => {
+          cell.style = {
+            font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } },
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF7FA65A" } },
+            alignment: { vertical: "middle", horizontal: "center" },
+          };
+        });
+        for (const item of inLevel) {
+          sheet.addRow([
+            item.provider, item.name, item.size, Number((item.onHand || 0).toFixed(2)),
+            Math.round(item.par || 0), Number((item.inventoryDays || 0).toFixed(1)),
+          ]);
         }
       }
       const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
