@@ -9802,6 +9802,32 @@ app.post("/api/module1/reports/:reportId/summary", requireAuth, async (request, 
   response.json(buildReportPayload(store, report));
 });
 
+// Estado del ultimo envio segun Resend (delivered/bounced/etc): para saber
+// si un correo llego sin salir del CMS (QA 08-sep: @sculpturehospitality.com
+// no recibe). Gmail no expone estado via API.
+app.get("/api/module1/reports/:reportId/email-status", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) { response.status(404).json({ error: "No se encontró el reporte." }); return; }
+  const log = report.emailLog || null;
+  if (!log) { response.json({ enviado: false, mensaje: "Este reporte aún no se envía." }); return; }
+  const base = { enviado: true, via: log.via || "?", fecha: log.sentAt, destinatarios: log.recipients || [], cc: log.cc || [] };
+  if (log.via === "resend" && log.resendId && process.env.RESEND_API_KEY) {
+    try {
+      const status = await fetch("https://api.resend.com/emails/" + encodeURIComponent(log.resendId), { headers: { authorization: "Bearer " + process.env.RESEND_API_KEY } });
+      const info = await status.json();
+      base.resend = { estado: info.last_event || "?", creado: info.created_at || "" };
+    } catch (statusError) {
+      base.resend = { estado: "no consultable: " + statusError.message };
+    }
+  } else if (log.via === "gmail") {
+    base.nota = "Enviado por Gmail: el estado de entrega se ve en la casilla de Enviados de Gmail.";
+  } else if (!log.resendId) {
+    base.nota = "Envío anterior a esta versión: sin id de Resend guardado.";
+  }
+  response.json(base);
+});
+
 app.get("/api/module1/reports/:reportId/export", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);
@@ -10810,7 +10836,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     // Los destinatarios editados quedan SOLO en el emailLog de este reporte:
     // la lista maestra del cliente (modulo Clientes) no se toca, para que un
     // envio de prueba no la borre (pedido de Tamara, 08-sep).
-    report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject };
+    report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject, via: "gmail" };
     report.updatedAt = new Date().toISOString();
     markAuditTaskSent(store, report, request.session?.name || request.session?.username);
     await writeStore(store);
@@ -10849,7 +10875,7 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   report.status = "Enviado";
   // Igual que en el envio por Gmail: los destinatarios de este envio viven en
   // el emailLog del reporte; la lista maestra del cliente queda intacta.
-  report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject };
+  report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject, via: "resend", resendId: payload?.id || "" };
   report.updatedAt = new Date().toISOString();
   markAuditTaskSent(store, report, request.session?.name || request.session?.username);
   await writeStore(store);
