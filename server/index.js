@@ -3771,7 +3771,11 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         }
         if (type === "varianceSummary") {
           report.familySummaryTotals = extractSummaryFamilyTotals(data);
-          if (/food/i.test(area)) summaryFamilyGroups = extractSummaryFamilyGroups(data);
+          // La jerarquia oficial se extrae en TODAS las areas; barra la usa
+          // solo para el variance por familia (el aprendizaje de mapas y las
+          // compras por familia siguen siendo de cocina).
+          summaryFamilyGroups = extractSummaryFamilyGroups(data) || null;
+          if (summaryFamilyGroups) summaryFamilyGroups.isFood = /food/i.test(area);
         }
         // Solo el variance DETAILED define categorias, familias y productos:
         // el summary tiene otra estructura de filas y duplicaba o vaciaba montos.
@@ -3907,7 +3911,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // Cocinas: la jerarquia hoja -> familia del variance summary manda,
         // para que sugerencia y variance grafiquen las MISMAS familias
         // (Carnes, Lacteos...) y no una mezcla de hojas (Vacuno, Quesos...).
-        for (const [leaf, family] of Object.entries(summaryFamilyGroups?.leafToFamily || {})) {
+        for (const [leaf, family] of Object.entries((summaryFamilyGroups?.isFood && summaryFamilyGroups.leafToFamily) || {})) {
           learnedFamilies[leaf] = family;
         }
         if (client) client.categoryFamilies = learnedFamilies;
@@ -3985,7 +3989,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   // total, y el grafico deja de mostrar hojas como si fueran familias.
   if ((summaryFamilyGroups?.families || []).length >= 2) {
     report.familyVariances = summaryFamilyGroups.families.map((group) => ({ family: group.family, amount: Math.round(group.amount) }));
-    if (summaryFamilyGroups.families.some((group) => group.purchased)) {
+    if (summaryFamilyGroups.isFood && summaryFamilyGroups.families.some((group) => group.purchased)) {
       report.familyPurchases = summaryFamilyGroups.families.map((group) => ({ family: group.family, purchased: Math.round(group.purchased) }));
     }
   }
@@ -5164,9 +5168,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     mergedPdfFamilies.get(key).suggested += item.suggested || 0;
   }
   const familyPurchaseRows = [...mergedPdfFamilies.values()]
-    .filter((item) => item.purchased || item.suggested)
+    // Todas las familias del cliente, aunque la semana traiga $0 en compra y
+    // sugerida: desaparecerlas parecia un grafico incompleto (doc 08-sep).
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
-    .slice(0, 9);
+    .slice(0, 14);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
     ? payload.summary.savingsTotal
     : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
@@ -5492,11 +5497,15 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   // ---- Pagina 2: Compra realizada vs sugerida por familia ----
   function familyPurchaseSvg() {
-    const W = 340; const H = 500;
-    const L = 92; const R = 318; const T = 24; const B = 452;
-    const plotW = R - L; const plotH = B - T;
     const nonZeroRows = familyPurchaseRows.filter((r) => r.purchased || r.suggested);
     const rows = nonZeroRows.length ? nonZeroRows : familyPurchaseRows.slice(0, 6);
+    // Alto segun cantidad de familias: con el alto fijo, cocinas con 10+
+    // familias apretaban o perdian filas (doc 08-sep).
+    const W = 340; const T = 24;
+    const B = T + Math.max(rows.length, 6) * 47.5;
+    const H = B + 48;
+    const L = 92; const R = 318;
+    const plotW = R - L; const plotH = B - T;
     const rawMaxFam = Math.max(...rows.map((r) => Math.max(r.purchased, r.suggested)), 0);
     const stepF = niceStep(Math.max(rawMaxFam, 1) * 1.25);
     const maxV = niceCeil(Math.max(rawMaxFam, 1) * 1.25, stepF);
@@ -6141,9 +6150,9 @@ function dynamicReportData(store, report) {
     mergedFamilies.get(key).suggested += item.suggested || 0;
   }
   const familyPurchases = [...mergedFamilies.values()]
-    .filter((item) => item.purchased || item.suggested)
+    // Todas las familias, aunque la semana sea $0/$0 (doc 08-sep).
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
-    .slice(0, 9);
+    .slice(0, 14);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
     ? payload.summary.savingsTotal
     : familyVariances.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0);
