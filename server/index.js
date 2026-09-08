@@ -6360,54 +6360,6 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .comment-card-month .mc-list { color: var(--text-light); font-size: 13.5px; line-height: 1.7; margin: 0 0 10px; padding-left: 20px; }
     .comment-card-month .mc-list li { margin: 0 0 6px; }
     @media (min-width: 900px) { .comment-card-month { column-count: 2; column-gap: 36px; } .comment-card-month p, .comment-card-month li { break-inside: avoid; } }
-    ${printMode ? `
-    /* Variante impresion (08-sep): A4 VERTICAL, flujo continuo y compacto.
-       Las tablas fluyen entre hojas repitiendo su encabezado; solo los
-       graficos, KPIs y comentarios saltan como bloque entero. */
-    @page { size: A4 portrait; margin: 6mm; }
-    body { background: #fff; }
-    .topbar { display: none; }
-    .main { max-width: 740px; padding: 6px 0 14px; }
-    .printbar { display: flex; justify-content: flex-end; margin: 12px auto 4px; max-width: 740px; }
-    .printbar button { background: var(--navy); border: 0; border-radius: 100px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
-    .table-scroll { max-height: none; overflow: visible; }
-    thead th { position: static; }
-    thead { display: table-header-group; }
-    .hero-meta h1 { font-size: 24px; }
-    .kpis { gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
-    .kpi-card { padding: 10px 14px; }
-    .kpi-value { font-size: 20px; }
-    .card { padding: 12px 12px; }
-    .card-header { margin-bottom: 8px; }
-    /* Cabeceras sin tracking de mayusculas: en 740px cada pixel cuenta */
-    thead th { font-size: 9px; letter-spacing: 0; line-height: 1.25; padding: 7px 6px; }
-    tbody td { font-size: 11px; padding: 7px 6px; }
-    .section { margin-bottom: 12px; }
-    .section-title { break-after: avoid; }
-    .card { break-inside: auto; }
-    .card:has(canvas), .kpis, .comment-card, .side-kpis { break-inside: avoid; }
-    canvas, .chart-wrap { break-inside: avoid; }
-    tbody tr { break-inside: avoid; }
-    /* En vertical, los pares de tarjetas se apilan a todo el ancho */
-    .grid-2 { grid-template-columns: minmax(0, 1fr); }
-    .grid-var { grid-template-columns: minmax(0, 1fr) 180px; }
-    /* Tabla mensual de 12 columnas en 740px: compacta (cantidades ya van
-       sin decimales) */
-    #monthlySection thead th { font-size: 8px; padding: 6px 3px; }
-    #monthlySection tbody td { font-size: 9.5px; padding: 7px 3px; }
-    #monthlySection tbody td:first-child { font-size: 9px; line-height: 1.2; }
-    #seSection thead th { font-size: 9px; padding: 6px 6px; }
-    #seSection tbody td { font-size: 10.5px; padding: 6px 6px; }
-    #costDiffCard thead th { font-size: 9.5px; padding: 7px 8px; }
-    #costDiffCard tbody td { font-size: 11px; padding: 6px 8px; }
-    .chart-wrap { height: 235px; }
-    .chart-wrap.tall { height: 265px; }
-    @media print {
-      .printbar, .footer { display: none; }
-      body { padding: 0; }
-      .card { border: 1px solid var(--line); box-shadow: none; }
-    }
-    ` : ""}
     @media (max-width: 900px) {
       .grid-2, .grid-var { grid-template-columns: minmax(0, 1fr); }
       .side-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -6416,6 +6368,64 @@ function renderDynamicReportHtml(store, report, options = {}) {
       .main { padding: 20px 14px; }
       .chart-wrap, .chart-wrap.tall { height: 260px; }
     }
+    ${printMode ? `
+    /* Variante impresion (08-sep): A4 VERTICAL, flujo continuo y compacto.
+       Las tablas fluyen entre hojas repitiendo su encabezado; solo los
+       graficos, KPIs y comentarios saltan como bloque entero. */
+    @page { size: A4 portrait; margin: 6mm; }
+    body { background: #fff; }
+    .topbar { display: none; }
+    .main { max-width: 740px; padding: 4px 0 10px; }
+    .printbar { display: flex; justify-content: flex-end; margin: 12px auto 4px; max-width: 740px; }
+    .printbar button { background: var(--navy); border: 0; border-radius: 100px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
+    .table-scroll { max-height: none; overflow: visible; }
+    thead th { position: static; }
+    thead { display: table-header-group; }
+    .hero-meta h1 { font-size: 24px; }
+    /* KPIs en UNA fila (4 en mensual, 5 en semanal): la reja 2x2 gastaba
+       70px de alto en la primera hoja. */
+    .kpis { gap: 8px; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); margin-bottom: 12px; }
+    .kpi-card { padding: 9px 11px; }
+    .kpi-label { font-size: 8.5px; }
+    .kpi-value { font-size: 16.5px; }
+    .kpi-chip { font-size: 9px; }
+    .hero-meta { margin-bottom: 10px; }
+    .card { padding: 12px 12px; }
+    .card-header { margin-bottom: 8px; }
+    /* Cabeceras sin tracking de mayusculas: en 740px cada pixel cuenta */
+    thead th { font-size: 9px; letter-spacing: 0; line-height: 1.25; padding: 7px 6px; }
+    tbody td { font-size: 11px; padding: 7px 6px; }
+    .section { margin-bottom: 12px; }
+    .section-title { break-after: avoid; }
+    /* Ninguna tarjeta mide mas de media hoja: mantenerlas enteras evita
+       filas huerfanas (una sola fila del Top 10 caia sola en la hoja 3) y
+       con las alturas compactas las hojas igual quedan llenas. */
+    .card, .kpis, .comment-card, .side-kpis { break-inside: avoid; }
+    canvas, .chart-wrap { break-inside: avoid; }
+    tbody tr { break-inside: avoid; }
+    /* Los pares grandes se apilan; el variance mantiene sus KPIs al lado
+       para que el lienzo no quede medio vacio. */
+    .grid-2 { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .grid-var { gap: 10px; grid-template-columns: minmax(0, 1fr) 158px; }
+    .side-kpis { display: flex !important; flex-direction: column; gap: 8px; }
+    /* Tabla mensual de 12 columnas en 740px: compacta (cantidades ya van
+       sin decimales) */
+    #monthlySection thead th { font-size: 8px; padding: 6px 3px; }
+    #monthlySection tbody td { font-size: 9.5px; padding: 7px 3px; }
+    #monthlySection tbody td:first-child { font-size: 9px; line-height: 1.2; }
+    #seSection thead th { font-size: 9px; padding: 5px 6px; }
+    #seSection tbody td { font-size: 10.5px; padding: 4px 6px; }
+    #costDiffCard thead th { font-size: 9.5px; padding: 7px 8px; }
+    #costDiffCard tbody td { font-size: 10.5px; padding: 4px 8px; }
+    .chart-wrap { height: 195px; }
+    .chart-wrap.tall { height: 205px; }
+    .section { margin-bottom: 10px; }
+    @media print {
+      .printbar, .footer { display: none; }
+      body { padding: 0; }
+      .card { border: 1px solid var(--line); box-shadow: none; }
+    }
+    ` : ""}
   </style>
 </head>
 <body>
@@ -6682,6 +6692,15 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     var pctMax = pcts.length ? Math.ceil((Math.max.apply(null, pcts) + 3) / 5) * 5 : 40;
     var realSeries = h.map(function (p) { return p.costPercent || null; });
     var idealSeries = h.map(function (p) { return p.idealCostPercent || null; });
+    // Franja baja del eje de %: ahi la pildora choca con la cifra de la
+    // barra, asi que esa cifra se sube al tope de su barra.
+    var lowBand = pctMin + (pctMax - pctMin) * 0.3;
+    var barLabelAtTop = function (ctx) {
+      var i = ctx.dataIndex;
+      var a = realSeries[i], b2 = idealSeries[i];
+      var lo = Math.min(a == null ? 999 : a, b2 == null ? 999 : b2);
+      return lo <= lowBand ? "end" : "start";
+    };
     charts.cost = new Chart(document.getElementById("costChart"), {
       data: {
         labels: labels,
@@ -6691,7 +6710,8 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
           { type: "line", label: "% Costo ideal", data: idealSeries, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
             datalabels: { display: true, align: alignAgainst(idealSeries, realSeries, false), offset: pillOffset(idealSeries, realSeries), clip: false, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: PILL_FONT }, formatter: fmtPct, padding: PILL_PAD } },
           { type: "bar", label: "Ingresos", data: h.map(function (p) { return p.revenue || 0; }), backgroundColor: TEAL, yAxisID: "y1", maxBarThickness: 60,
-            datalabels: { display: true, anchor: "start", align: "end", color: "#fff", font: { weight: 800, size: 12 }, formatter: fmtK } }
+            datalabels: { display: true, anchor: barLabelAtTop, align: function (ctx) { return barLabelAtTop(ctx) === "end" ? "start" : "end"; },
+              color: "#fff", font: { weight: 800, size: ${printMode ? 10.5 : 12} }, formatter: fmtK } }
         ]
       },
       options: {
@@ -6715,11 +6735,11 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   function renderFamChart(data) {
     destroyChart("fam");
     var rows = data.familyVariances.slice().sort(function (a, b) { return b.amount - a.amount; });
-    var famMaxAbs = Math.ceil(Math.max.apply(null, rows.map(function (r) { return Math.abs(r.amount || 0); }).concat([1])) * 1.15);
+    var famMaxAbs = Math.ceil(Math.max.apply(null, rows.map(function (r) { return Math.abs(r.amount || 0); }).concat([1])) * 1.06);
     // Altura segun cantidad de familias: con 8-9 (cocina) las etiquetas se
     // encimaban en el alto fijo (QA 22-ago).
     var famWrap = document.getElementById("famChart").parentElement;
-    if (famWrap) famWrap.style.height = Math.max(260, rows.length * 34 + 60) + "px";
+    if (famWrap) famWrap.style.height = Math.max(${printMode ? 180 : 260}, rows.length * ${printMode ? 27 : 34} + ${printMode ? 44 : 60}) + "px";
     charts.fam = new Chart(document.getElementById("famChart"), {
       type: "bar",
       data: {
@@ -6789,7 +6809,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     destroyChart("famBuy");
     var rows = data.familyPurchases;
     var famBuyWrap = document.getElementById("famBuyChart").parentElement;
-    if (famBuyWrap) famBuyWrap.style.height = Math.max(260, rows.length * 44 + 70) + "px";
+    if (famBuyWrap) famBuyWrap.style.height = Math.max(${printMode ? 190 : 260}, rows.length * ${printMode ? 33 : 44} + ${printMode ? 54 : 70}) + "px";
     charts.famBuy = new Chart(document.getElementById("famBuyChart"), {
       type: "bar",
       data: {
