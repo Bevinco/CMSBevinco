@@ -3487,7 +3487,8 @@ function App() {
               const ml = Number(digits);
               if (!ml) return item.onhand;
               const bottles = Math.round((ml / size) * 10) / 10;
-              return `${bottles === Math.round(bottles) ? Math.round(bottles) : bottles.toFixed(1)} botellas · ${item.onhand}`;
+              const bottleText = bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1);
+              return `${bottleText} ${Number(bottleText) === 1 ? "BOTELLA" : "BOTELLAS"}`;
             };
             return (
               <section className="panel bottle-sizes-panel">

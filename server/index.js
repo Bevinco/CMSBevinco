@@ -5295,9 +5295,11 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const unit = raw / power;
       return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * power;
     };
-    const step = niceOf(Math.max((maxVal - minVal) * 1.2, 1) / 4);
-    const hi = Math.max(step, Math.ceil((maxVal * 1.15) / step) * step);
-    const lo = Math.min(0, Math.floor((minVal * 1.15) / step) * step);
+    // Eje simetrico: el cero al centro (Pedro, 08-sep), igual que en la web.
+    const maxAbs = Math.max(Math.abs(maxVal), Math.abs(minVal), 1);
+    const step = niceOf((maxAbs * 2.3) / 4);
+    const hi = Math.max(step, Math.ceil((maxAbs * 1.15) / step) * step);
+    const lo = -hi;
     const xAt = (v) => L + ((v - lo) / (hi - lo)) * plotW;
     const gridTicks = [];
     for (let v = lo; v <= hi + step / 2; v += step) gridTicks.push(v);
@@ -5582,9 +5584,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const costDiffPeriods = history.filter((item) => item.revenue && item.costPercent);
   const diffCell = (item) => {
     const hasIdeal = (item.idealCostPercent || 0) > 0;
-    const diffPp = hasIdeal ? (item.costPercent || 0) - (item.idealCostPercent || 0) : 0;
+    // Convencion Bevinco (Pedro, 08-sep): ideal - real => ahorro positivo.
+    const diffPp = hasIdeal ? (item.idealCostPercent || 0) - (item.costPercent || 0) : 0;
     const diffAmount = hasIdeal ? Math.round(((item.revenue || 0) * diffPp) / 100) : 0;
-    return { hasIdeal, diffPp, diffAmount, over: hasIdeal && diffAmount > 0 };
+    return { hasIdeal, diffPp, diffAmount, over: hasIdeal && diffAmount < 0 };
   };
   const costDiffRows = costDiffPeriods
     .map((item, index) => {
@@ -5612,7 +5615,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     const realPct = totalRevenue ? (totalUsed / totalRevenue) * 100 : 0;
     const totalDiffAmount = withIdeal.reduce((sum, item) => sum + diffCell(item).diffAmount, 0);
     const totalPp = idealRevenue ? (totalDiffAmount / idealRevenue) * 100 : 0;
-    const overTotal = idealRevenue > 0 && totalDiffAmount > 0;
+    const overTotal = idealRevenue > 0 && totalDiffAmount < 0;
     costDiffTotalRow = `<tr class="total">
         <td class="tname">Total</td>
         <td class="tmoney"><span>$</span><span>${fmtMoney(totalRevenue)}</span></td>
@@ -6675,6 +6678,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   function renderFamChart(data) {
     destroyChart("fam");
     var rows = data.familyVariances.slice().sort(function (a, b) { return b.amount - a.amount; });
+    var famMaxAbs = Math.ceil(Math.max.apply(null, rows.map(function (r) { return Math.abs(r.amount || 0); }).concat([1])) * 1.15);
     // Altura segun cantidad de familias: con 8-9 (cocina) las etiquetas se
     // encimaban en el alto fijo (QA 22-ago).
     var famWrap = document.getElementById("famChart").parentElement;
@@ -6701,7 +6705,8 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
         layout: { padding: { left: 6, right: 52 } },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return fmtMoney(ctx.parsed.x); } } } },
-        scales: { x: { ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
+        // Eje simetrico: el cero queda al CENTRO del grafico (Pedro, 08-sep).
+        scales: { x: { min: -famMaxAbs, max: famMaxAbs, ticks: { callback: fmtK }, grid: { color: "#efece1" } }, y: { ticks: { autoSkip: false }, grid: { display: false } } }
       }
     });
     var s = data.summary;
@@ -6859,13 +6864,15 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   }
 
   function qtyMes(value, inMl) {
-    return new Intl.NumberFormat("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(inMl ? (value || 0) / 700 : (value || 0));
+    // Sin decimales y con separador de miles (QA Pedro 08-sep).
+    return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(inMl ? (value || 0) / 700 : (value || 0));
   }
   function renderCostDiff(data) {
     var rows = data.history || [];
     var t = { rev: 0, used: 0, dif: 0 };
     var body = rows.filter(function (p) { return p.revenue || p.usedCost; }).map(function (p) {
-      var difPp = Math.round(((p.costPercent || 0) - (p.idealCostPercent || 0)) * 10) / 10;
+      // Convencion Bevinco (Pedro, 08-sep): ideal - real => ahorro positivo.
+      var difPp = Math.round(((p.idealCostPercent || 0) - (p.costPercent || 0)) * 10) / 10;
       var difCash = Math.round((p.revenue || 0) * difPp / 100);
       t.rev += p.revenue || 0; t.used += p.usedCost || 0; t.dif += difCash;
       return "<tr><td><b>" + esc(ddmm(p.endsAt) || p.label) + "</b></td>" +
@@ -6873,14 +6880,14 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         '<td class="num">' + fmtMoney(p.usedCost) + "</td>" +
         '<td class="num">' + fmtPct(p.costPercent) + "</td>" +
         '<td class="num">' + fmtPct(p.idealCostPercent) + "</td>" +
-        '<td class="num"><span class="' + (difPp > 0.05 ? "neg" : "pos") + '">' + (difPp >= 0 ? "+" : "") + difPp.toFixed(1) + " pp</span></td>" +
-        '<td class="num"><span class="' + (difCash > 0 ? "neg" : "pos") + '">' + fmtMoney(difCash) + "</span></td></tr>";
+        '<td class="num"><span class="' + (difPp < -0.05 ? "neg" : "pos") + '">' + (difPp >= 0 ? "+" : "") + difPp.toFixed(1) + " pp</span></td>" +
+        '<td class="num"><span class="' + (difCash < 0 ? "neg" : "pos") + '">' + fmtMoney(difCash) + "</span></td></tr>";
     }).join("");
     var pctReal = t.rev ? (t.used / t.rev) * 100 : 0;
     var totPp = t.rev ? Math.round((t.dif / t.rev) * 1000) / 10 : 0;
     document.getElementById("costDiffRows").innerHTML = body +
       (rows.length
-        ? '<tr><td><b>Total</b></td><td class="num"><b>' + fmtMoney(t.rev) + '</b></td><td class="num"><b>' + fmtMoney(t.used) + '</b></td><td class="num"><b>' + fmtPct(pctReal) + '</b></td><td class="num"><b>' + fmtPct(pctReal - totPp) + '</b></td><td class="num"><span class="' + (totPp > 0.05 ? "neg" : "pos") + '"><b>' + (totPp >= 0 ? "+" : "") + totPp.toFixed(1) + ' pp</b></span></td><td class="num"><span class="' + (t.dif > 0 ? "neg" : "pos") + '"><b>' + fmtMoney(t.dif) + "</b></span></td></tr>"
+        ? '<tr><td><b>Total</b></td><td class="num"><b>' + fmtMoney(t.rev) + '</b></td><td class="num"><b>' + fmtMoney(t.used) + '</b></td><td class="num"><b>' + fmtPct(pctReal) + '</b></td><td class="num"><b>' + fmtPct(pctReal + totPp) + '</b></td><td class="num"><span class="' + (totPp < -0.05 ? "neg" : "pos") + '"><b>' + (totPp >= 0 ? "+" : "") + totPp.toFixed(1) + ' pp</b></span></td><td class="num"><span class="' + (t.dif < 0 ? "neg" : "pos") + '"><b>' + fmtMoney(t.dif) + "</b></span></td></tr>"
         : "");
   }
   function renderMonthlyTable(data) {
@@ -6941,7 +6948,10 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         var ml = Number(digits);
         if (ml > 0) {
           var bottles = Math.round((ml / size) * 10) / 10;
-          onhand = (bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1)) + " botellas · " + onhand;
+          var bottleText = bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1);
+          // Solo botellas cuando el litraje esta definido; el ml original
+          // queda en el title por si quieren verificar (Pedro, 08-sep).
+          onhand = bottleText + (Number(bottleText) === 1 ? " BOTELLA" : " BOTELLAS");
         }
       }
       return "<tr><td><b>" + esc(row.name) + "</b></td>" +
