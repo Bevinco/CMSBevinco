@@ -283,11 +283,10 @@ async function renderReportPdf(store, report, attempt = 0, forceDynamic = false)
   const page = await browser.newPage();
   try {
     if (isMonthlyPdf) {
-      // El viewport DEBE medir lo mismo que el ancho util de la A4 horizontal:
-      // los canvas de Chart.js se dibujan al ancho del viewport (800 por
-      // defecto) y no se re-dibujan al imprimir — quedaban angostos y con las
-      // cifras pegadas al borde (QA Valdivia 28-ago).
-      await page.setViewport({ width: 1069, height: 800, deviceScaleFactor: 2 });
+      // El viewport DEBE medir lo mismo que el ancho util del papel: los
+      // canvas de Chart.js se dibujan al ancho del viewport y no se
+      // re-dibujan al imprimir (QA Valdivia 28-ago). A4 vertical ≈ 748px.
+      await page.setViewport({ width: 748, height: 1000, deviceScaleFactor: 2 });
     }
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
     if (isMonthlyPdf) {
@@ -296,7 +295,7 @@ async function renderReportPdf(store, report, attempt = 0, forceDynamic = false)
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
     const pdf = await page.pdf(isMonthlyPdf
-      ? { format: "A4", landscape: true, printBackground: true, margin: { top: "7mm", bottom: "7mm", left: "6mm", right: "6mm" } }
+      ? { format: "A4", printBackground: true, margin: { top: "6mm", bottom: "6mm", left: "6mm", right: "6mm" } }
       : {
           format: "A4",
           printBackground: true,
@@ -6362,33 +6361,40 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .comment-card-month .mc-list li { margin: 0 0 6px; }
     @media (min-width: 900px) { .comment-card-month { column-count: 2; column-gap: 36px; } .comment-card-month p, .comment-card-month li { break-inside: avoid; } }
     ${printMode ? `
-    /* Variante impresion: identica a la pagina, acotada al ancho util de
-       una A4 horizontal, sin barra superior ni scrolls internos. */
-    @page { size: A4 landscape; margin: 7mm; }
+    /* Variante impresion (08-sep): A4 VERTICAL, flujo continuo y compacto.
+       Las tablas fluyen entre hojas repitiendo su encabezado; solo los
+       graficos, KPIs y comentarios saltan como bloque entero. */
+    @page { size: A4 portrait; margin: 6mm; }
     body { background: #fff; }
     .topbar { display: none; }
-    .main { max-width: 1050px; padding: 8px 0 24px; }
-    .printbar { display: flex; justify-content: flex-end; margin: 12px auto 4px; max-width: 1050px; }
+    .main { max-width: 740px; padding: 6px 0 14px; }
+    .printbar { display: flex; justify-content: flex-end; margin: 12px auto 4px; max-width: 740px; }
     .printbar button { background: var(--navy); border: 0; border-radius: 100px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 22px; }
     .table-scroll { max-height: none; overflow: visible; }
     thead th { position: static; }
-    /* La tabla mensual (12 columnas) debe caber en el ancho util de la A4
-       horizontal (~1069px): celdas compactas solo en la vista de impresion. */
-    #monthlySection thead th { font-size: 9px; padding: 7px 6px; }
-    #monthlySection tbody td { font-size: 11px; padding: 7px 6px; }
-    #seSection thead th { font-size: 9.5px; padding: 7px 8px; }
-    #seSection tbody td { font-size: 11.5px; padding: 7px 8px; }
-    /* Graficos algo mas bajos al imprimir: la tabla de diferencia alcanza a
-       compartir hoja con el grafico de costo y las paginas no quedan con
-       medio folio en blanco. */
-    .chart-wrap { height: 260px; }
-    .chart-wrap.tall { height: 290px; }
-    .kpis, .comment-card { break-inside: avoid; }
-    .card { break-inside: avoid; }
-    tbody tr { break-inside: avoid; }
-    thead { break-after: avoid; }
+    thead { display: table-header-group; }
+    .hero-meta h1 { font-size: 24px; }
+    .kpi-card { padding: 10px 14px; }
+    .kpi-value { font-size: 20px; }
+    .section { margin-bottom: 12px; }
     .section-title { break-after: avoid; }
-    .section { margin-bottom: 18px; }
+    .card { break-inside: auto; }
+    .card:has(canvas), .kpis, .comment-card, .side-kpis { break-inside: avoid; }
+    canvas, .chart-wrap { break-inside: avoid; }
+    tbody tr { break-inside: avoid; }
+    /* En vertical, los pares de tarjetas se apilan a todo el ancho */
+    .grid-2 { grid-template-columns: minmax(0, 1fr); }
+    .grid-var { grid-template-columns: minmax(0, 1fr) 180px; }
+    /* Tabla mensual de 12 columnas en 740px: compacta (cantidades ya van
+       sin decimales) */
+    #monthlySection thead th { font-size: 8px; padding: 6px 3px; }
+    #monthlySection tbody td { font-size: 9.5px; padding: 6px 4px; }
+    #seSection thead th { font-size: 9px; padding: 6px 6px; }
+    #seSection tbody td { font-size: 10.5px; padding: 6px 6px; }
+    #costDiffCard thead th { font-size: 9.5px; padding: 7px 8px; }
+    #costDiffCard tbody td { font-size: 11px; padding: 6px 8px; }
+    .chart-wrap { height: 235px; }
+    .chart-wrap.tall { height: 265px; }
     @media print {
       .printbar, .footer { display: none; }
       body { padding: 0; }
