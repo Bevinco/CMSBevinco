@@ -10752,10 +10752,10 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   const rawRecipients = Array.isArray(request.body?.recipients) && request.body.recipients.length
     ? request.body.recipients
     : client?.recipients || [];
-  const recipients = [...new Set(rawRecipients.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^s@]+@[^s@]+.[^s@]+$/.test(email)))];
+  const recipients = [...new Set(rawRecipients.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
   // CC: contactos en copia (equipo interno). Se excluye lo que ya va en Para.
   const rawCc = Array.isArray(request.body?.cc) ? request.body.cc : (client?.ccRecipients || []);
-  const cc = [...new Set(rawCc.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^s@]+@[^s@]+.[^s@]+$/.test(email)))]
+  const cc = [...new Set(rawCc.map((email) => String(email).trim().toLowerCase()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))]
     .filter((email) => !recipients.includes(email));
 
   if (!recipients.length && process.env.RESEND_API_KEY) {
