@@ -10788,12 +10788,11 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
     }
 
     report.status = "Enviado";
+    // Los destinatarios editados quedan SOLO en el emailLog de este reporte:
+    // la lista maestra del cliente (modulo Clientes) no se toca, para que un
+    // envio de prueba no la borre (pedido de Tamara, 08-sep).
     report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject };
     report.updatedAt = new Date().toISOString();
-    if (client) {
-      client.recipients = recipients;
-      client.ccRecipients = cc;
-    }
     markAuditTaskSent(store, report, request.session?.name || request.session?.username);
     await writeStore(store);
     response.json({ sent: true, via: "gmail", report: buildReportPayload(store, report) });
@@ -10829,9 +10828,10 @@ app.post("/api/module1/reports/:reportId/email", requireAuth, async (request, re
   }
 
   report.status = "Enviado";
-  report.emailLog = { sentAt: new Date().toISOString(), recipients, subject };
+  // Igual que en el envio por Gmail: los destinatarios de este envio viven en
+  // el emailLog del reporte; la lista maestra del cliente queda intacta.
+  report.emailLog = { sentAt: new Date().toISOString(), recipients, cc, subject };
   report.updatedAt = new Date().toISOString();
-  if (client) client.recipients = recipients;
   markAuditTaskSent(store, report, request.session?.name || request.session?.username);
   await writeStore(store);
   response.json({ sent: true, payload, report: buildReportPayload(store, report) });

@@ -3276,7 +3276,7 @@ function App() {
                       onBlur={() => emailRecipientInput.trim() && addEmailRecipient()}
                     />
                   </div>
-                  <small className="email-hint">Quedan guardados para los próximos envíos de este cliente.</small>
+                  <small className="email-hint">Los cambios aplican solo a este envío: la lista maestra del cliente se mantiene (edítala en Clientes).</small>
                 </label>
                 <label>
                   CC (en copia)
