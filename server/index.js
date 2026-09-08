@@ -1605,6 +1605,24 @@ function currentCategoryFromTotal(name, fallback) {
 // 6 familias que usa el reporte Bevinco. "Otros" solo aparece si tiene monto.
 const REPORT_FAMILIES = ["Destilados", "Vinos", "Espumantes", "Cervezas y Sidra", "Barriles", "Sin Alcohol"];
 
+// Clave para reconocer la MISMA familia escrita distinto. Sculpture nombra
+// sus grupos en singular ("Vino", "Espumante", "Barril") y el CMS los tuvo
+// en plural; si dos semanas del mismo mes se sincronizaron en momentos
+// distintos, el acumulado partia la familia en dos filas (QA Azotea 08-sep:
+// "Vinos" y "Vino" separados). Sin tildes, sin plural y sin espacios:
+// Vinos/Vino -> vino | Espumantes/Espumante -> espumant |
+// Barriles/Barril -> barril | Cervezas y Sidra/Cerveza y Sidra -> cervezaysidra
+function familyMergeKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.replace(/s$/, "").replace(/e$/, ""))
+    .join("");
+}
+
 function familyForCategory(name) {
   const text = String(name || "").toLowerCase();
   if (/schop|barril/.test(text)) return "Barriles";
@@ -4173,15 +4191,29 @@ function accumulateReportPayloads(payloads = []) {
     suggestedCost += summary.suggestedCost || 0;
 
     for (const family of payload.familyVariances || []) {
-      familyMap.set(family.family, (familyMap.get(family.family) || 0) + (family.amount || 0));
+      const famKey = familyMergeKey(family.family);
+      const famAcc = familyMap.get(famKey) || { label: family.family, amount: 0 };
+      // El nombre del periodo MAS RECIENTE manda (el orden es cronologico):
+      // asi el mes queda con la nomenclatura vigente de Sculpture.
+      famAcc.label = family.family;
+      famAcc.amount += family.amount || 0;
+      familyMap.set(famKey, famAcc);
       if ((family.amount || 0) > 0) savingsTotal += family.amount;
       else shortagesTotal += family.amount || 0;
     }
     for (const family of payload.familyPurchases || []) {
-      familyPurchaseMap.set(family.family, (familyPurchaseMap.get(family.family) || 0) + (family.purchased || 0));
+      const buyKey = familyMergeKey(family.family);
+      const buyAcc = familyPurchaseMap.get(buyKey) || { label: family.family, purchased: 0 };
+      buyAcc.label = family.family;
+      buyAcc.purchased += family.purchased || 0;
+      familyPurchaseMap.set(buyKey, buyAcc);
     }
     for (const family of payload.familySuggested || []) {
-      familySuggestedMap.set(family.family, (familySuggestedMap.get(family.family) || 0) + (family.suggested || 0));
+      const sugKey = familyMergeKey(family.family);
+      const sugAcc = familySuggestedMap.get(sugKey) || { label: family.family, suggested: 0 };
+      sugAcc.label = family.family;
+      sugAcc.suggested += family.suggested || 0;
+      familySuggestedMap.set(sugKey, sugAcc);
     }
 
     monthlyHistory.push({
@@ -4303,11 +4335,11 @@ function accumulateReportPayloads(payloads = []) {
     categoryVariances,
     topProducts,
     topUsageProducts,
-    familyVariances: [...familyMap.entries()]
-      .map(([family, amount]) => ({ family, amount: Math.round(amount) }))
+    familyVariances: [...familyMap.values()]
+      .map(({ label, amount }) => ({ family: label, amount: Math.round(amount) }))
       .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
-    familyPurchases: [...familyPurchaseMap.entries()].map(([family, purchased]) => ({ family, purchased: Math.round(purchased) })),
-    familySuggested: [...familySuggestedMap.entries()].map(([family, suggested]) => ({ family, suggested: Math.round(suggested) })),
+    familyPurchases: [...familyPurchaseMap.values()].map(({ label, purchased }) => ({ family: label, purchased: Math.round(purchased) })),
+    familySuggested: [...familySuggestedMap.values()].map(({ label, suggested }) => ({ family: label, suggested: Math.round(suggested) })),
     monthlyHistory,
     // Las existencias/stock son una foto: se toman del ultimo periodo, no se suman.
     stockEfficiency: last.stockEfficiency || null,
@@ -5153,7 +5185,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const suggestedSource = (priorWeekly?.familySuggested?.length
     ? priorWeekly.familySuggested
     : (priorPick.any ? [] : payload.familySuggested)) || [];
-  const familyKeyOfPdf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const familyKeyOfPdf = familyMergeKey;
   const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
   const mergedPdfFamilies = new Map();
   for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
@@ -6135,7 +6167,7 @@ function dynamicReportData(store, report) {
   // Fusion por clave NORMALIZADA (sin tildes ni plural): "Pescados" del
   // Intelipar y "Pescado" del variance son la misma familia y antes salian
   // como dos barras, una siempre en 0 (QA 22-ago).
-  const familyKeyOf = (name) => String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/s\b/g, "").replace(/[^a-z0-9]/g, "");
+  const familyKeyOf = familyMergeKey;
   const isAdminGroup = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
   const mergedFamilies = new Map();
   for (const item of (payload.familyPurchases || []).filter((entry) => !isAdminGroup(entry.family))) {
@@ -6716,6 +6748,9 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        // Aire arriba: la pildora del punto mas alto se dibuja FUERA del area
+        // del grafico y el canvas la recortaba (QA Azotea: "36.9%" cortado).
+        layout: { padding: { top: 22, right: 6 } },
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
@@ -9108,17 +9143,21 @@ function accumulateFamilySummaryTotals(payloads) {
   for (const payload of payloads) {
     for (const row of payload.familySummaryTotals || []) {
       if (!row?.n) continue;
-      if (!byFamily.has(row.familia)) {
-        byFamily.set(row.familia, {
+      const rowKey = familyMergeKey(row.familia);
+      if (!byFamily.has(rowKey)) {
+        byFamily.set(rowKey, {
           familia: row.familia,
           unidad: row.unidad || "",
           prev: row.n.prev,
           existencia: row.n.existencia,
           sums: { compras: 0, usado: 0, vendido: 0, dif: 0, difCosto: 0, usadoCosto: 0, vendidoCosto: 0, ingresos: 0 },
         });
-        order.push(row.familia);
+        order.push(rowKey);
       }
-      const acc = byFamily.get(row.familia);
+      const acc = byFamily.get(rowKey);
+      // Nomenclatura del periodo mas reciente y unidad no vacia
+      acc.familia = row.familia;
+      if (row.unidad) acc.unidad = row.unidad;
       for (const key of Object.keys(acc.sums)) acc.sums[key] += Number(row.n[key]) || 0;
       acc.existencia = Number(row.n.existencia) || acc.existencia;
     }
