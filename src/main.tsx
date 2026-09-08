@@ -3114,6 +3114,13 @@ function App() {
   // Reportes mensuales — el mensual ya no redirige a semanales.
   const reportWorkspace = (
     <>
+          {selectedReport && !(selectedReport.summary?.revenue > 0) ? (
+            <p className="period-open-note">
+              Sculpture no reporta ventas para este período, así que los gráficos y tablas quedan vacíos a propósito
+              (no se publican cifras a medio cerrar). Si la semana aún está abierta, vuelve a generar el reporte
+              cuando esté cerrada en Sculpture con su conteo final.
+            </p>
+          ) : null}
           <section className="panel workspace-panel" id="workspace">
             <div className="panel-header">
               <div>
