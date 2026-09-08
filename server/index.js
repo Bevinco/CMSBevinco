@@ -6374,8 +6374,14 @@ function renderDynamicReportHtml(store, report, options = {}) {
     thead th { position: static; }
     thead { display: table-header-group; }
     .hero-meta h1 { font-size: 24px; }
+    .kpis { gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
     .kpi-card { padding: 10px 14px; }
     .kpi-value { font-size: 20px; }
+    .card { padding: 12px 12px; }
+    .card-header { margin-bottom: 8px; }
+    /* Cabeceras sin tracking de mayusculas: en 740px cada pixel cuenta */
+    thead th { font-size: 9px; letter-spacing: 0; line-height: 1.25; padding: 7px 6px; }
+    tbody td { font-size: 11px; padding: 7px 6px; }
     .section { margin-bottom: 12px; }
     .section-title { break-after: avoid; }
     .card { break-inside: auto; }
@@ -6388,7 +6394,8 @@ function renderDynamicReportHtml(store, report, options = {}) {
     /* Tabla mensual de 12 columnas en 740px: compacta (cantidades ya van
        sin decimales) */
     #monthlySection thead th { font-size: 8px; padding: 6px 3px; }
-    #monthlySection tbody td { font-size: 9.5px; padding: 6px 4px; }
+    #monthlySection tbody td { font-size: 9.5px; padding: 7px 3px; }
+    #monthlySection tbody td:first-child { font-size: 9px; line-height: 1.2; }
     #seSection thead th { font-size: 9px; padding: 6px 6px; }
     #seSection tbody td { font-size: 10.5px; padding: 6px 6px; }
     #costDiffCard thead th { font-size: 9.5px; padding: 7px 8px; }
@@ -6565,6 +6572,19 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   Chart.defaults.font.family = '"Inter", "Segoe UI", Arial, sans-serif';
   Chart.defaults.color = "#8b95a5";
   Chart.defaults.plugins.datalabels.display = false;
+  var PILL_FONT = ${printMode ? 9.5 : 11};
+  var PILL_PAD = ${printMode ? "{ top: 2, bottom: 1, left: 5, right: 5 }" : "{ top: 3, bottom: 2, left: 6, right: 6 }"};
+  // Separacion de las pildoras real/ideal segun cuan cerca esten las curvas
+  // en ese punto: pegadas => mas lejos del punto para no montarse.
+  function pillOffset(own, other) {
+    return function (ctx) {
+      var i = ctx.dataIndex;
+      var mine = own[i], theirs = other ? other[i] : null;
+      if (mine == null || theirs == null) return 8;
+      var gap = Math.abs(mine - theirs);
+      return gap < 1.5 ? 14 : gap < 3 ? 11 : 8;
+    };
+  }
 
   function fmtMoney(value) {
     return "$" + new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(value || 0));
@@ -6656,7 +6676,9 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     var labels = h.map(function (p) { return ddmm(p.endsAt) || p.label; });
     var pcts = [];
     h.forEach(function (p) { if (p.costPercent) pcts.push(p.costPercent); if (p.idealCostPercent) pcts.push(p.idealCostPercent); });
-    var pctMin = pcts.length ? Math.max(0, Math.floor((Math.min.apply(null, pcts) - 3) / 5) * 5) : 0;
+    // 5 pp de aire bajo el minimo: las pildoras que van DEBAJO del punto no
+    // llegan a la franja de las cifras de ingresos al pie de las barras.
+    var pctMin = pcts.length ? Math.max(0, Math.floor((Math.min.apply(null, pcts) - 5) / 5) * 5) : 0;
     var pctMax = pcts.length ? Math.ceil((Math.max.apply(null, pcts) + 3) / 5) * 5 : 40;
     var realSeries = h.map(function (p) { return p.costPercent || null; });
     var idealSeries = h.map(function (p) { return p.idealCostPercent || null; });
@@ -6665,9 +6687,9 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         labels: labels,
         datasets: [
           { type: "line", label: "% Costo real", data: realSeries, borderColor: NAVY, backgroundColor: NAVY, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
-            datalabels: { display: true, align: alignAgainst(realSeries, idealSeries, true), offset: 8, clip: false, backgroundColor: NAVY, borderRadius: 4, color: "#fff", font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+            datalabels: { display: true, align: alignAgainst(realSeries, idealSeries, true), offset: pillOffset(realSeries, idealSeries), clip: false, backgroundColor: NAVY, borderRadius: 4, color: "#fff", font: { weight: 800, size: PILL_FONT }, formatter: fmtPct, padding: PILL_PAD } },
           { type: "line", label: "% Costo ideal", data: idealSeries, borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2.4, pointRadius: 4, yAxisID: "y",
-            datalabels: { display: true, align: alignAgainst(idealSeries, realSeries, false), offset: 8, clip: false, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: 11 }, formatter: fmtPct, padding: { top: 3, bottom: 2, left: 6, right: 6 } } },
+            datalabels: { display: true, align: alignAgainst(idealSeries, realSeries, false), offset: pillOffset(idealSeries, realSeries), clip: false, backgroundColor: GREEN, borderRadius: 4, color: NAVY, font: { weight: 800, size: PILL_FONT }, formatter: fmtPct, padding: PILL_PAD } },
           { type: "bar", label: "Ingresos", data: h.map(function (p) { return p.revenue || 0; }), backgroundColor: TEAL, yAxisID: "y1", maxBarThickness: 60,
             datalabels: { display: true, anchor: "start", align: "end", color: "#fff", font: { weight: 800, size: 12 }, formatter: fmtK } }
         ]
