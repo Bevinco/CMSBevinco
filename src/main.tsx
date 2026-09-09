@@ -100,6 +100,7 @@ type SuggestionItem = {
   onHandCost: number; par: number; suggested: number; orderCost: number;
   inventoryDays: number; excessCost: number; alerta?: string; enNivel?: boolean;
 };
+type PurchaseParams = { suggestionDays: number; extraDays: number; coverage: number };
 type ThemeMode = "light" | "dark";
 
 type Client = {
@@ -1070,6 +1071,11 @@ function App() {
   const [comprasPeriods, setComprasPeriods] = useState<Array<{ pid: string; label: string }>>([]);
   const [comprasPeriodPid, setComprasPeriodPid] = useState("");
   const [comprasRecipientsDraft, setComprasRecipientsDraft] = useState("");
+  // Cobertura de la sugerencia de compra, editable por local (QA 09-sep):
+  // el reporte manual del equipo cubre mas dias que el CMS y por eso las
+  // cifras de "compra sugerida" no coincidian.
+  const [parDraft, setParDraft] = useState<PurchaseParams>({ suggestionDays: 7, extraDays: 1, coverage: 0.25 });
+  const [savingPar, setSavingPar] = useState(false);
   const [comprasMixes, setComprasMixes] = useState<BarMix[]>([]);
   const [comprasMixStock, setComprasMixStock] = useState<Record<string, string>>({});
   const [comprasMixSaving, setComprasMixSaving] = useState(false);
@@ -2024,11 +2030,12 @@ function App() {
       if (comprasPeriodPid) query.set("period", comprasPeriodPid);
       const mixParam = comprasMixStockParam();
       if (mixParam) query.set("mixStock", decodeURIComponent(mixParam));
-      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; items: SuggestionItem[] }>(
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; purchaseParams?: PurchaseParams; items: SuggestionItem[] }>(
         await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${query.toString() ? `?${query.toString()}` : ""}`),
       );
       setComprasData(payload);
       setComprasRecipientsDraft((payload.purchaseRecipients || []).join(", "));
+      if (payload.purchaseParams) setParDraft(payload.purchaseParams);
       setError(`Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
       setWorkStatus("ready");
     } catch (comprasError) {
@@ -4610,6 +4617,58 @@ function App() {
                   {savingDistribution ? <span className="btn-spinner btn-spinner-dark" /> : <Mail size={16} />}
                   Guardar lista
                 </button>
+              </div>
+              <div className="compras-coverage">
+                <div>
+                  <p className="eyebrow">Cobertura de la sugerencia</p>
+                  <small>
+                    Cubre <b>{Math.round((parDraft.suggestionDays + parDraft.extraDays) * (1 + parDraft.coverage) * 100) / 100} días</b> de consumo:
+                    {" "}(días base + días extra) × (1 + holgura). Es lo que define cuánto se sugiere comprar de cada producto.
+                  </small>
+                </div>
+                <div className="compras-coverage-fields">
+                  <label>
+                    Días base
+                    <input type="number" min={1} max={60} value={parDraft.suggestionDays}
+                      onChange={(event) => setParDraft((c) => ({ ...c, suggestionDays: Number(event.target.value) || 0 }))} />
+                  </label>
+                  <label>
+                    Días extra
+                    <input type="number" min={0} max={30} value={parDraft.extraDays}
+                      onChange={(event) => setParDraft((c) => ({ ...c, extraDays: Number(event.target.value) || 0 }))} />
+                  </label>
+                  <label>
+                    Holgura %
+                    <input type="number" min={0} max={200} step={5} value={Math.round(parDraft.coverage * 100)}
+                      onChange={(event) => setParDraft((c) => ({ ...c, coverage: (Number(event.target.value) || 0) / 100 }))} />
+                  </label>
+                  <button
+                    className="secondary-button"
+                    disabled={savingPar}
+                    type="button"
+                    onClick={async () => {
+                      if (!comprasData) return;
+                      setSavingPar(true);
+                      try {
+                        await readJson(await fetch(`/api/module1/clients/${comprasData.client.id}/purchase-params`, {
+                          method: "PATCH",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify(parDraft),
+                        }));
+                        setError("Cobertura guardada: volviendo a calcular la sugerencia...");
+                        await loadComprasSuggestion(comprasData.client.id);
+                      } catch (parError) {
+                        setError(parError instanceof Error ? parError.message : "No se pudo guardar la cobertura.");
+                        setWorkStatus("error");
+                      } finally {
+                        setSavingPar(false);
+                      }
+                    }}
+                  >
+                    {savingPar ? <span className="btn-spinner btn-spinner-dark" /> : <CheckCircle2 size={16} />}
+                    Guardar y recalcular
+                  </button>
+                </div>
               </div>
               <div className="compras-table-wrap">
                 <table className="compras-table">

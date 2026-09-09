@@ -7540,6 +7540,33 @@ app.get("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request,
 // Litraje REAL por botella (Pedro, 28-ago): el equipo completa la
 // equivalencia a medida que aparecen productos en ml en el Top 10 sin
 // movimiento (ej: Magnum 1.75l => 1750). { "producto en minusculas": ml }.
+// Cobertura de la sugerencia de compra por cliente (QA 09-sep): el reporte
+// manual del equipo cubre ~11,25 dias (7 + 2 dias extra x 1,25) y el CMS
+// venia con 10 dias (7 + 1 x 1,25). Ahora es configurable por local en vez
+// de estar fijo en el codigo.
+app.patch("/api/module1/clients/:clientId/purchase-params", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) { response.status(404).json({ error: "No se encontró el restaurante." }); return; }
+  const body = request.body || {};
+  const limpio = {};
+  const rango = (valor, min, max) => {
+    const numero = Number(valor);
+    return Number.isFinite(numero) && numero >= min && numero <= max ? numero : null;
+  };
+  const dias = rango(body.suggestionDays, 1, 60);
+  const extra = rango(body.extraDays, 0, 30);
+  const holgura = rango(body.coverage, 0, 2);
+  if (dias !== null) limpio.suggestionDays = dias;
+  if (extra !== null) limpio.extraDays = extra;
+  if (holgura !== null) limpio.coverage = holgura;
+  if (!Object.keys(limpio).length) { response.status(400).json({ error: "Indica días base, días extra o holgura válidos." }); return; }
+  client.purchaseParams = { ...KITCHEN_PURCHASE_DEFAULTS, ...(client.purchaseParams || {}), ...limpio };
+  await writeStore(store);
+  const p = client.purchaseParams;
+  response.json({ purchaseParams: p, coberturaEfectivaDias: Math.round((p.suggestionDays + p.extraDays) * (1 + p.coverage) * 100) / 100 });
+});
+
 app.patch("/api/module1/clients/:clientId/bottle-sizes", requireAuth, async (request, response) => {
   const store = await readStore();
   const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
@@ -10215,7 +10242,8 @@ async function computeSuggestionItems({ client, period, mixStock }) {
     else if (carryProvider) item.provider = carryProvider;
   }
   items.sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
-  return { items };
+  const paramsVigentes = { ...KITCHEN_PURCHASE_DEFAULTS, ...(client?.purchaseParams || {}) };
+  return { items, purchaseParams: paramsVigentes };
 }
 
 // Modulo Sugerencias de Compra: la sugerencia VIGENTE de un local (ultima
@@ -10522,6 +10550,9 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       period: { id: period.id, label: period.label },
       purchaseRecipients: client.purchaseRecipients || [],
       barMixes: client.barMixes || [],
+      // Parametros de cobertura vigentes: el modulo los muestra y permite
+      // ajustarlos por local (QA 09-sep).
+      purchaseParams: { ...KITCHEN_PURCHASE_DEFAULTS, ...(client.purchaseParams || {}) },
       items,
     });
   } catch (error) {
