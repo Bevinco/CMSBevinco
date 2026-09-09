@@ -3133,6 +3133,19 @@ function App() {
                     ✦ {aiModels.chat || aiModels.reports}
                   </span>
                 ) : null}
+                {selectedReport?.monthly && !monthlyReport ? (
+                  <>
+                    {/* El panel de arriba solo existe recien generado el mes:
+                        al abrir un mensual guardado quedaban sin PDF ni enlace
+                        (QA 09-sep, "al escribir los comentarios desaparecen"). */}
+                    <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/pdf`} target="_blank" rel="noreferrer">
+                      <Printer size={17} /> Descargar PDF
+                    </a>
+                    <button className="button-link" type="button" onClick={() => shareWebReport(selectedReport.id)}>
+                      <ExternalLink size={17} /> Enlace dinámico
+                    </button>
+                  </>
+                ) : null}
                 <button className="primary-button" disabled={!selectedReport || workStatus === "loading" || auditLocked} onClick={generateSummary}>
                   {workStatus === "loading" ? <span className="btn-spinner" /> : <Bot size={17} />}
                   {workStatus === "loading" ? "Redactando..." : "Redactar con IA"}
@@ -3495,7 +3508,7 @@ function App() {
               if (!ml) return item.onhand;
               const bottles = Math.round((ml / size) * 10) / 10;
               const bottleText = bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1);
-              return `${bottleText} ${Number(bottleText) === 1 ? "BOTELLA" : "BOTELLAS"}`;
+              return `${bottleText} BOTTLE`;
             };
             return (
               <section className="panel bottle-sizes-panel">

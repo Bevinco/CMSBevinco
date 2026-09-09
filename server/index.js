@@ -4366,6 +4366,19 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
   };
   // Estado de la auditoria (modulo Pendientes) de este periodo: el front lo
   // muestra en el cuadro Estado y bloquea comentarios/envio segun el caso.
+  if (Array.isArray(report.familyMonthlyTable) && report.familyMonthlyTable.length) {
+    const nombresReales = new Map();
+    for (const item of report.familyVariances || []) nombresReales.set(familyMergeKey(item.family), item.family);
+    for (const item of report.familySummaryTotals || []) {
+      if (item?.familia && /[A-Z\s]/.test(String(item.familia))) nombresReales.set(familyMergeKey(item.familia), item.familia);
+    }
+    payload.familyMonthlyTable = report.familyMonthlyTable.map((row) => {
+      const texto = String(row.familia || "");
+      if (/[A-Z]/.test(texto) || /\s/.test(texto)) return row;
+      const real = nombresReales.get(familyMergeKey(texto));
+      return { ...row, familia: real || (texto.charAt(0).toUpperCase() + texto.slice(1)) };
+    });
+  }
   const auditTask = auditTaskForReport(store, report);
   payload.auditTask = auditTask
     ? { id: auditTask.id, name: auditTask.name, status: auditTask.status, dueDate: auditTask.dueDate || "", ...(auditTask.readonly ? { readonly: true } : {}) }
@@ -5626,8 +5639,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     const hasIdeal = (item.idealCostPercent || 0) > 0;
     // Convencion Bevinco (Pedro, 08-sep): ideal - real => ahorro positivo.
     const diffPp = hasIdeal ? (item.idealCostPercent || 0) - (item.costPercent || 0) : 0;
-    const diffAmount = hasIdeal ? Math.round(((item.revenue || 0) * diffPp) / 100) : 0;
-    return { hasIdeal, diffPp, diffAmount, over: hasIdeal && diffAmount < 0 };
+    // Monto = variance al costo del periodo (el mismo del KPI y del resumen
+    // por categoria), no un derivado de los % redondeados (QA 09-sep).
+    const diffAmount = Math.round(item.varianceAmount || 0);
+    return { hasIdeal, diffPp, diffAmount, over: diffAmount < 0 };
   };
   const costDiffRows = costDiffPeriods
     .map((item, index) => {
@@ -5653,9 +5668,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       ? withIdeal.reduce((sum, item) => sum + (item.revenue || 0) * (item.idealCostPercent || 0), 0) / idealRevenue
       : 0;
     const realPct = totalRevenue ? (totalUsed / totalRevenue) * 100 : 0;
-    const totalDiffAmount = withIdeal.reduce((sum, item) => sum + diffCell(item).diffAmount, 0);
-    const totalPp = idealRevenue ? (totalDiffAmount / idealRevenue) * 100 : 0;
-    const overTotal = idealRevenue > 0 && totalDiffAmount < 0;
+    const totalDiffAmount = costDiffPeriods.reduce((sum, item) => sum + Math.round(item.varianceAmount || 0), 0);
+    const totalPp = idealPct - realPct;
+    const overTotal = totalDiffAmount < 0;
     costDiffTotalRow = `<tr class="total">
         <td class="tname">Total</td>
         <td class="tmoney"><span>$</span><span>${fmtMoney(totalRevenue)}</span></td>
@@ -5670,7 +5685,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       <thead>
         <tr><th colspan="7" class="bv-table-title">Diferencia de costo: real vs ideal</th></tr>
         <tr>
-          <th>Periodo</th><th>Ingresos</th><th>Costo usado ($)</th><th>% Costo Real</th><th>% Costo Ideal</th><th>Dif. (pp)</th><th>Dif. de costo ($)</th>
+          <th>Periodo</th><th>Ingresos</th><th>Costo usado ($)</th><th>% Costo Real</th><th>% Costo Ideal</th><th>Dif. (pp)</th><th>Ahorro / Faltante ($)</th>
         </tr>
       </thead>
       <tbody>${costDiffRows}${costDiffTotalRow}</tbody>
@@ -6496,7 +6511,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
       <div class="card-header"><div class="card-title">Diferencia de costo: real vs ideal <span class="tag">Semana a semana</span></div></div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Costo usado ($)</th><th class="num">% Costo Real</th><th class="num">% Costo Ideal</th><th class="num">Dif. (pp)</th><th class="num">Dif. de costo ($)</th></tr></thead>
+          <thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Costo usado ($)</th><th class="num">% Costo Real</th><th class="num">% Costo Ideal</th><th class="num">Dif. (pp)</th><th class="num">Ahorro / Faltante ($)</th></tr></thead>
           <tbody id="costDiffRows"></tbody>
         </table>
       </div>
@@ -6961,12 +6976,17 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
   }
   function renderCostDiff(data) {
     var rows = data.history || [];
-    var t = { rev: 0, used: 0, dif: 0 };
+    var t = { rev: 0, used: 0, idealCost: 0, dif: 0 };
     var body = rows.filter(function (p) { return p.revenue || p.usedCost; }).map(function (p) {
       // Convencion Bevinco (Pedro, 08-sep): ideal - real => ahorro positivo.
       var difPp = Math.round(((p.idealCostPercent || 0) - (p.costPercent || 0)) * 10) / 10;
-      var difCash = Math.round((p.revenue || 0) * difPp / 100);
+      // El monto es el variance al costo del periodo TAL CUAL lo reporta
+      // Sculpture: asi esta columna suma igual al KPI "Diferencia al costo"
+      // y al GRAND TOTAL del resumen por categoria (QA 09-sep). Antes se
+      // derivaba de los % (redondeados a 1 decimal) y no calzaba.
+      var difCash = Math.round(p.varianceAmount || 0);
       t.rev += p.revenue || 0; t.used += p.usedCost || 0; t.dif += difCash;
+      t.idealCost += (p.revenue || 0) * (p.idealCostPercent || 0) / 100;
       return "<tr><td><b>" + esc(ddmm(p.endsAt) || p.label) + "</b></td>" +
         '<td class="num">' + fmtMoney(p.revenue) + "</td>" +
         '<td class="num">' + fmtMoney(p.usedCost) + "</td>" +
@@ -6976,10 +6996,11 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         '<td class="num"><span class="' + (difCash < 0 ? "neg" : "pos") + '">' + fmtMoney(difCash) + "</span></td></tr>";
     }).join("");
     var pctReal = t.rev ? (t.used / t.rev) * 100 : 0;
-    var totPp = t.rev ? Math.round((t.dif / t.rev) * 1000) / 10 : 0;
+    var pctIdeal = t.rev ? (t.idealCost / t.rev) * 100 : 0;
+    var totPp = Math.round((pctIdeal - pctReal) * 10) / 10;
     document.getElementById("costDiffRows").innerHTML = body +
       (rows.length
-        ? '<tr><td><b>Total</b></td><td class="num"><b>' + fmtMoney(t.rev) + '</b></td><td class="num"><b>' + fmtMoney(t.used) + '</b></td><td class="num"><b>' + fmtPct(pctReal) + '</b></td><td class="num"><b>' + fmtPct(pctReal + totPp) + '</b></td><td class="num"><span class="' + (totPp < -0.05 ? "neg" : "pos") + '"><b>' + (totPp >= 0 ? "+" : "") + totPp.toFixed(1) + ' pp</b></span></td><td class="num"><span class="' + (t.dif < 0 ? "neg" : "pos") + '"><b>' + fmtMoney(t.dif) + "</b></span></td></tr>"
+        ? '<tr><td><b>Total</b></td><td class="num"><b>' + fmtMoney(t.rev) + '</b></td><td class="num"><b>' + fmtMoney(t.used) + '</b></td><td class="num"><b>' + fmtPct(pctReal) + '</b></td><td class="num"><b>' + fmtPct(pctIdeal) + '</b></td><td class="num"><span class="' + (totPp < -0.05 ? "neg" : "pos") + '"><b>' + (totPp >= 0 ? "+" : "") + totPp.toFixed(1) + ' pp</b></span></td><td class="num"><span class="' + (t.dif < 0 ? "neg" : "pos") + '"><b>' + fmtMoney(t.dif) + "</b></span></td></tr>"
         : "");
   }
   function renderMonthlyTable(data) {
@@ -7043,7 +7064,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
           var bottleText = bottles === Math.round(bottles) ? String(Math.round(bottles)) : bottles.toFixed(1);
           // Solo botellas cuando el litraje esta definido; el ml original
           // queda en el title por si quieren verificar (Pedro, 08-sep).
-          onhand = bottleText + (Number(bottleText) === 1 ? " BOTELLA" : " BOTELLAS");
+          onhand = bottleText + " BOTTLE";
         }
       }
       return "<tr><td><b>" + esc(row.name) + "</b></td>" +
@@ -9162,11 +9183,13 @@ function accumulateFamilySummaryTotals(payloads) {
       acc.existencia = Number(row.n.existencia) || acc.existencia;
     }
   }
-  return order.map((name) => {
-    const acc = byFamily.get(name);
+  return order.map((key) => {
+    const acc = byFamily.get(key);
     const sums = acc.sums;
     return {
-      familia: name,
+      // acc.familia y NO la clave de normalizacion: mostraba
+      // "espumant"/"porunidad"/"sinalcohol" (QA 09-sep).
+      familia: acc.familia,
       unidad: acc.unidad,
       prev: acc.prev,
       existencia: acc.existencia,
@@ -10719,6 +10742,9 @@ async function buildVarianceCsvAttachment(store, report) {
     const firstText = String(values[0] || "").trim();
     const isGrand = /grand\s*total/i.test(firstText);
     const isTotal = !isGrand && /^total\s+/i.test(firstText);
+    // Encabezado de categoria: nombre terminado en ":" con el resto vacio.
+    const isCatHeader = !isGrand && !isTotal && /:\s*$/.test(firstText) &&
+      values.slice(1).every((v) => String(v ?? "").trim() === "");
     const row = sheet.addRow(values.map((value, columnIndex) => {
       if (isHeader) return value;
       const kind = columnKind[columnIndex] || "qty";
@@ -10741,11 +10767,32 @@ async function buildVarianceCsvAttachment(store, report) {
       if (kind === "qty") { cell.numFmt = "#,##0.0;[Red]-#,##0.0"; cell.alignment = { horizontal: "right" }; }
       if (isGrand) { cell.font = { bold: true, size: 10.5, color: { argb: "FF1E3A0F" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC9DFA5" } }; }
       else if (isTotal) { cell.font = { bold: true, color: { argb: "FF001E43" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1EDE0" } }; }
+      else if (isCatHeader) { cell.font = { bold: true, size: 10.5, color: { argb: "FF33475C" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEDF3F1" } }; }
+      // Grilla tenue: sin lineas, 19 columnas se leen como un bloque.
+      cell.border = {
+        top: { style: "hair", color: { argb: "FFD9D9D9" } },
+        left: { style: "hair", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "hair", color: { argb: "FFD9D9D9" } },
+        right: { style: "hair", color: { argb: "FFD9D9D9" } },
+      };
     });
     if (isHeader) row.height = 20;
   });
-  sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.columns.forEach((column, index) => { column.width = index === 0 ? 34 : 13; });
+  // Lectura (QA 09-sep): ancho segun el contenido real, producto y cabecera
+  // congelados (19 columnas se recorren sin perder de vista el articulo) y
+  // filtro en la cabecera.
+  const widths = [];
+  for (const values of tableRows) {
+    values.forEach((value, index) => { widths[index] = Math.max(widths[index] || 0, String(value ?? "").length); });
+  }
+  sheet.columns.forEach((column, index) => {
+    const kind = columnKind[index] || "qty";
+    column.width = Math.min(Math.max((widths[index] || 8) + 2, kind === "text" ? 16 : 11), kind === "text" ? 44 : 18);
+  });
+  sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+  if (tableRows.length > 1) {
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: (tableRows[0] || []).length } };
+  }
   const xlsxBuffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
   return {
@@ -10790,6 +10837,24 @@ async function varianceDetailForChat(store, report) {
 // Vista previa del correo (reunion 14-ago): el cuerpo guardado dentro del
 // mismo shell HTML con el que sale el email real. El PDF y el variance van
 // como adjuntos al enviar, aca solo se anuncian.
+// Descarga del variance detallado en Excel, el MISMO archivo que viaja
+// adjunto en el correo: permite revisar el formato sin tener que enviar.
+app.get("/api/module1/reports/:reportId/variance-xlsx", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const report = findReport(store, request.params.reportId);
+  if (!report) { response.status(404).send("No se encontró el reporte."); return; }
+  try {
+    const attachment = await buildVarianceCsvAttachment(store, report);
+    if (!attachment) { response.status(404).send("Sculpture no devolvió el variance para este periodo."); return; }
+    response.setHeader("content-type", attachment.contentType);
+    response.setHeader("content-disposition", `attachment; filename="${attachment.filename}"`);
+    response.send(attachment.buffer);
+  } catch (error) {
+    console.error("[variance-xlsx]", error.message);
+    response.status(502).send("No se pudo generar el Excel del variance.");
+  }
+});
+
 app.get("/api/module1/reports/:reportId/email-preview", requireAuth, async (request, response) => {
   const store = await readStore();
   const report = findReport(store, request.params.reportId);
