@@ -1933,7 +1933,19 @@ function App() {
     }
   }
 
+  // Comentarios escritos y todavía sin guardar (acuerdo reunión 11-sep):
+  // se avisa antes de descargar el PDF o abrir el enlace, porque el archivo
+  // sale con lo último guardado, no con lo que está en pantalla.
+  const commentsUnsaved = Boolean(selectedReport) && commentsDraft !== (selectedReport?.comments || "");
+  function confirmarSinGuardar(accion: string) {
+    if (!commentsUnsaved) return true;
+    return window.confirm(
+      `Tienes comentarios escritos sin guardar.\n\nSi ${accion} ahora, saldrá la última versión guardada y no lo que ves en pantalla.\n\n¿Continuar de todos modos?`,
+    );
+  }
+
   async function shareWebReport(reportId: string) {
+    if (!confirmarSinGuardar("abres el enlace")) return;
     try {
       const payload = await readJson<{ url: string }>(
         await fetch(`/api/module1/reports/${reportId}/share`, { method: "POST" }),
@@ -2472,6 +2484,22 @@ function App() {
       );
       setMonthlyReport(payload.report);
       setReports(payload.reports);
+      // Aviso si se reemplazó un mes ya generado (acuerdo reunión 11-sep):
+      // dice cuándo se había hecho y con cuántas semanas estaba armado.
+      const previo = (payload as { reemplazoDe?: { generadoEl?: string; semanasPrevias?: string[]; enviado?: boolean } }).reemplazoDe;
+      if (previo) {
+        const fecha = previo.generadoEl ? new Date(previo.generadoEl).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "antes";
+        const semanas = (previo.semanasPrevias || []).length;
+        const ahora = (payload.report.includedPeriods || []).length;
+        setError(
+          "Se reemplazó el reporte mensual que ya existía (generado el " + fecha +
+          (semanas ? " con " + semanas + " semana(s)" : "") +
+          (previo.enviado ? ", YA ENVIADO al cliente" : "") +
+          "). Ahora quedó con " + ahora + " semana(s). Ábrelo abajo para revisarlo.",
+        );
+        setWorkStatus("ready");
+        return;
+      }
       setError(`Reporte mensual listo: ${(payload.report.includedPeriods || []).length} semana(s) acumuladas.`);
       setWorkStatus("ready");
     } catch (monthlyError) {
@@ -2963,7 +2991,13 @@ function App() {
       if (!query) return true;
       const haystack = `${report.client?.name || report.clientId} ${report.period?.label || report.periodId}`.toLowerCase();
       return haystack.includes(query);
-    });
+    })
+      // Los MAS RECIENTES primero (acuerdo reunión 11-sep): antes la primera
+      // página mostraba los reportes más antiguos.
+      .sort((left, right) => {
+        const fecha = (report: Report) => String(report.period?.endsAt || report.updatedAt || "");
+        return fecha(right).localeCompare(fecha(left));
+      });
   }, [visibleReports, reportSearch, reportStatusFilter]);
   const REPORTS_PER_PAGE = 6;
   const reportPageCount = Math.max(1, Math.ceil(reportRows.length / REPORTS_PER_PAGE));
@@ -3145,7 +3179,8 @@ function App() {
                     {/* El panel de arriba solo existe recien generado el mes:
                         al abrir un mensual guardado quedaban sin PDF ni enlace
                         (QA 09-sep, "al escribir los comentarios desaparecen"). */}
-                    <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/pdf`} target="_blank" rel="noreferrer">
+                    <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/pdf`} target="_blank" rel="noreferrer"
+                      onClick={(event) => { if (!confirmarSinGuardar("descargas el PDF")) event.preventDefault(); }}>
                       <Printer size={17} /> Descargar PDF
                     </a>
                     <button className="button-link" type="button" onClick={() => shareWebReport(selectedReport.id)}>
@@ -4244,7 +4279,8 @@ function App() {
                   {workStatus === "loading" ? "Generando..." : "Generar reporte"}
                 </button>
                 {selectedReport ? (
-                  <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer">
+                  <a className="button-link" href={`/api/module1/reports/${selectedReport.id}/export`} target="_blank" rel="noreferrer"
+                    onClick={(event) => { if (!confirmarSinGuardar("exportas el PDF")) event.preventDefault(); }}>
                     <Printer size={17} /> Exportar PDF
                   </a>
                 ) : null}

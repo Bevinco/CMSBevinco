@@ -4366,6 +4366,15 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
   };
   // Estado de la auditoria (modulo Pendientes) de este periodo: el front lo
   // muestra en el cuadro Estado y bloquea comentarios/envio segun el caso.
+  // El rango real del mes sale de las semanas incluidas, no del periodo
+  // guardado (que en los mensuales viejos estaba compartido entre clientes
+  // y podia traer las fechas de otro local).
+  if (report.monthly && (report.includedPeriods || []).length && payload.period) {
+    const incluidos = [...report.includedPeriods].sort((a, b) => String(a.startsAt || "").localeCompare(String(b.startsAt || "")));
+    const desde = incluidos[0]?.startsAt;
+    const hasta = incluidos[incluidos.length - 1]?.endsAt;
+    if (desde && hasta) payload.period = { ...payload.period, startsAt: desde, endsAt: hasta };
+  }
   if (Array.isArray(report.familyMonthlyTable) && report.familyMonthlyTable.length) {
     const nombresReales = new Map();
     for (const item of report.familyVariances || []) nombresReales.set(familyMergeKey(item.family), item.family);
@@ -6402,6 +6411,9 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .comments-grid { align-items: stretch; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .comment-card h3 { color: #5c8f1e; font-size: 13.5px; font-weight: 800; margin: 0 0 9px; }
     .comment-card p { color: var(--text-light); font-size: 13px; line-height: 1.65; margin: 0 0 8px; }
+    /* Impresion: los comentarios salian bastante mas grandes que las tablas
+       (pedido de Pedro, reunion 11-sep). */
+    @media print { .comment-card p, .comment-card li, .comment-card-month p, .comment-card-month .mc-list { font-size: 11.5px; line-height: 1.5; } }
     .comment-card p b { color: var(--text); }
     .table-scroll { max-height: 430px; overflow: auto; }
     table { border-collapse: separate; border-spacing: 0; width: 100%; }
@@ -9438,7 +9450,9 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
   const monthLabel = `${MONTH_NAMES_ES[Number(monthNumber) - 1]} ${yearText}`;
 
   const syntheticPeriod = ensurePeriod(store, {
-    id: `mensual-${monthKey}`,
+    // Un periodo POR CLIENTE: compartirlo hacia que el ultimo en generar
+    // pisara el rango de fechas del anterior (QA reunion 11-sep).
+    id: `mensual-${client.id}-${monthKey}`,
     label: `Mes de ${monthLabel}`,
     startsAt: accumulated.period.startsAt,
     endsAt: accumulated.period.endsAt,
@@ -9447,6 +9461,15 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
 
   const reportId = `mensual-${client.id}-${monthKey}`;
   let report = store.reports.find((candidate) => candidate.id === reportId);
+  // Aviso (no bloqueo): el modulo avisa que se esta reemplazando un mes ya
+  // generado y con que semanas estaba armado (acuerdo reunion 11-sep).
+  const reemplaza = report
+    ? {
+        generadoEl: report.updatedAt || "",
+        semanasPrevias: (report.includedPeriods || []).map((item) => item.label).filter(Boolean),
+        enviado: report.status === "Enviado",
+      }
+    : null;
   if (!report) {
     report = { id: reportId, clientId: client.id, comments: "", emailDraft: "", chat: [] };
     store.reports.push(report);
@@ -9454,7 +9477,7 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
 
   Object.assign(report, {
     clientId: client.id,
-    periodId: syntheticPeriod?.id || `mensual-${monthKey}`,
+    periodId: syntheticPeriod?.id || `mensual-${client.id}-${monthKey}`,
     status: report.status || "Borrador",
     monthly: true,
     backfill: false,
@@ -9481,6 +9504,9 @@ app.post("/api/module1/monthly/generate", requireAuth, async (request, response)
   response.json({
     report: buildReportPayload(store, report),
     weeksIncluded: accumulated.includedPeriods,
+    // Si habia un mensual previo de este cliente y mes, el front lo avisa
+    // con el detalle de con que semanas estaba armado (reunion 11-sep).
+    reemplazoDe: reemplaza,
     reports: buildReportPayloads(store),
   });
 });
