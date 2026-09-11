@@ -4526,7 +4526,8 @@ function App() {
                 ))}
               </div>
               <div className="action-row wrap-actions">
-                <a className="button-link" href={`/api/module1/reports/${monthlyReport.id}/export`} target="_blank" rel="noreferrer">
+                <a className="button-link" href={`/api/module1/reports/${monthlyReport.id}/export`} target="_blank" rel="noreferrer"
+                  onClick={(event) => { if (!confirmarSinGuardar("exportas el PDF")) event.preventDefault(); }}>
                   <Printer size={17} /> Exportar PDF
                 </a>
                 <button className="button-link" type="button" onClick={() => shareWebReport(monthlyReport.id)}>
@@ -5318,12 +5319,16 @@ function App() {
                       setSelectedReport(report);
                       setCommentsDraft(report.comments || "");
                       setEmailDraft(report.emailDraft || "");
-                      setActiveView("module1");
+                      // Un mensual abierto desde el Historial caia en la vista
+                      // SEMANAL (que ademas limpia la seleccion mensual) y se
+                      // veia un workspace vacio (QA 11-sep).
+                      setActiveView(report.monthly ? "monthly" : "module1");
                     }}
                   >
                     Abrir
                   </button>
-                  <a className="button-link" href={`/api/module1/reports/${report.id}/export`} target="_blank" rel="noreferrer">
+                  <a className="button-link" href={`/api/module1/reports/${report.id}/export`} target="_blank" rel="noreferrer"
+                    onClick={(event) => { if (report.id === selectedReport?.id && !confirmarSinGuardar("exportas el PDF")) event.preventDefault(); }}>
                     <Printer size={15} /> PDF
                   </a>
                 </div>

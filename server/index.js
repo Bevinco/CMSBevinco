@@ -1910,7 +1910,11 @@ function commentsForReport(clientName, report) {
   const direction = report.summary.varianceAmount < 0 ? "faltantes" : "sobrantes";
   const biggestCategory = report.categoryVariances[0]?.category || "las categorías principales";
 
-  return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. Revisar los productos con mayor variación y validar la sugerencia de compra antes del envío al cliente, especialmente proveedores marcados como por validar.`;
+  // El mensual no lleva sugerencia de compra (acuerdo 11-sep).
+  const cierre = report.monthly
+    ? "Revisar los productos con mayor variación y validar si las diferencias corresponden a merma, registro de venta o ajuste operativo antes del envío al cliente."
+    : "Revisar los productos con mayor variación y validar la sugerencia de compra antes del envío al cliente, especialmente proveedores marcados como por validar.";
+  return `${clientName} presenta un costo de ${report.summary.costPercent}% para el periodo, con una diferencia acumulada de ${moneyPlain(report.summary.varianceAmount)} asociada principalmente a ${biggestCategory}. ${cierre}`;
 }
 
 // Limpia restos de comillas u otros artefactos de celdas CSV/HTML.
@@ -1959,6 +1963,14 @@ function generateReportSummary(store, report) {
     ? `Validar proveedor o dato de compra en: ${missingProviders.map((item) => item.item).join(", ")}.`
     : "No se detectan proveedores marcados para validacion prioritaria.";
 
+  // El mensual no lleva sugerencia de compra (acuerdo 11-sep): sin esto la
+  // plantilla automatica la reintroducia por el texto de los comentarios.
+  const bloqueCompra = report.monthly
+    ? []
+    : [`Sugerencia de compra Intelipar: ${purchaseText}. ${providerText}`, ""];
+  const cierre = report.monthly
+    ? "Recomendacion: revisar los productos con mayor variacion y validar si las diferencias corresponden a merma, registro de venta, compra no actualizada o ajuste operativo."
+    : "Recomendacion: revisar los productos con mayor variacion, confirmar proveedores sugeridos y validar si las diferencias corresponden a merma, registro de venta, compra no actualizada o ajuste operativo.";
   return [
     `Resumen ejecutivo ${clientName} - ${periodLabel}`,
     "",
@@ -1968,9 +1980,8 @@ function generateReportSummary(store, report) {
     "",
     `Productos a revisar: ${productText}.`,
     "",
-    `Sugerencia de compra Intelipar: ${purchaseText}. ${providerText}`,
-    "",
-    "Recomendacion: revisar los productos con mayor variacion, confirmar proveedores sugeridos y validar si las diferencias corresponden a merma, registro de venta, compra no actualizada o ajuste operativo.",
+    ...bloqueCompra,
+    cierre,
   ].join("\n");
 }
 
