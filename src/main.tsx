@@ -3626,6 +3626,12 @@ function App() {
             );
           })() : null}
 
+          {/* Histórico, Variance por familia/productos y la sugerencia de
+              compra (Intelipar) son lectura SEMANAL: en el mensual la vista
+              del módulo se queda con el reporte, el chat y el envío
+              (acuerdo con Tamara, 11-sep). */}
+          {!selectedReport?.monthly ? (
+          <>
           <section className="panel">
             <div className="panel-header">
               <div>
@@ -3728,6 +3734,8 @@ function App() {
               ))}
             </div>
           </section>
+          </>
+          ) : null}
 
 
     </>
