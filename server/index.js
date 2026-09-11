@@ -10661,183 +10661,241 @@ async function buildVarianceCsvAttachment(store, report) {
 
   const escapeCsv = (value) => {
     const text = String(value ?? "");
-    return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    return /[";\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
   };
 
-  const lines = [];
-  const tableRows = [];
-  let headersWritten = false;
-  // Agregado del MES por producto (solo para el texto del chat en
-  // mensuales): una fila por producto con las semanas sumadas.
-  const agg = report.monthly
-    ? { headers: null, kinds: null, prevIdx: new Set(), existIdx: new Set(), cats: new Map(), order: [], currentCat: "" }
-    : null;
-  const aggBucket = (name) => {
+  // Las cantidades de Sculpture vienen CON unidad ("4178 ml", "20.9 kg") y
+  // parseNumber las devolvia en 0, asi que el Excel salia con las columnas
+  // de cantidad vacias mientras los totales sin unidad si tenian valor
+  // (QA Pedro 11-sep). Aca se extrae el numero y se descarta la unidad;
+  // devuelve NaN cuando de verdad no hay numero, para no inventar ceros.
+  const cellNumber = (raw) => {
+    let text = String(raw ?? "").trim();
+    if (!text) return NaN;
+    const negativo = /^[-−(]/.test(text);
+    text = text.replace(/[$%\s]/g, "").replace(/[^\d.,]/g, "");
+    if (text.includes(",") && text.includes(".")) text = text.replace(/,/g, "");
+    else if (text.includes(",")) text = text.replace(",", ".");
+    if (!/\d/.test(text)) return NaN;
+    const numero = Number(text);
+    if (!Number.isFinite(numero)) return NaN;
+    return negativo ? -numero : numero;
+  };
+
+  const kindOf = (header, index) => {
+    const name = String(header ?? "").toLowerCase();
+    if (index === 0 || /nombre|art[ií]culo|^semana$/.test(name)) return "text";
+    if (/\(costo\)|^ingresos$/.test(name)) return "money";
+    if (/%|porcentaje|costo de alimentos/.test(name)) return "percent";
+    return "qty";
+  };
+
+  // ---- Agregador de un mes: suma los flujos de cada semana, toma la
+  // existencia previa de la PRIMERA y la existencia de la ULTIMA, y
+  // recalcula los porcentajes sobre los totales.
+  const nuevoAgg = () => ({ headers: null, kinds: null, prevIdx: new Set(), existIdx: new Set(), cats: new Map(), order: [], currentCat: "" });
+  const bucketDe = (agg, name) => {
     if (!agg.cats.has(name)) { agg.cats.set(name, { order: [], rows: new Map() }); agg.order.push(name); }
     return agg.cats.get(name);
   };
-  for (const period of targetPeriods) {
-    const pid = configuredIdentifier(period.sculpturePid, period.pid);
-    if (!pid) continue;
-    let data;
-    try {
-      data = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
-    } catch (error) {
-      console.error(`[variance-csv] ${period.id}: ${error.message}`);
-      continue; // semana sin datos: el CSV sale con las que respondieron
+  const alimentar = (agg, headers, rows) => {
+    if (!agg.headers) {
+      agg.headers = headers || [];
+      agg.kinds = agg.headers.map((header, index) => kindOf(header, index));
+      agg.headers.forEach((header, index) => {
+        const name = String(header).toLowerCase();
+        if (/previa/.test(name)) agg.prevIdx.add(index);
+        else if (/existencia/.test(name) && !/costo/.test(name)) agg.existIdx.add(index);
+      });
     }
-    if (!data.rows?.length) continue;
-    if (!headersWritten) {
-      const headerValues = [...(report.monthly ? ["Semana"] : []), ...(data.headers || [])];
-      lines.push(headerValues.map(escapeCsv).join(";"));
-      tableRows.push(headerValues);
-      headersWritten = true;
-    }
-    for (const row of data.rows) {
-      const rowValues = [...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])];
-      lines.push(rowValues.map(escapeCsv).join(";"));
-      tableRows.push(rowValues);
-      if (!agg) continue;
-      if (!agg.headers) {
-        agg.headers = data.headers || [];
-        agg.kinds = agg.headers.map((header, index) => {
-          const name = String(header).toLowerCase();
-          if (index === 0 || /nombre|art/.test(name)) return "text";
-          if (/\(costo\)|^ingresos$/.test(name)) return "money";
-          if (/%|porcentaje|costo de alimentos/.test(name)) return "percent";
-          return "qty";
-        });
-        agg.headers.forEach((header, index) => {
-          const name = String(header).toLowerCase();
-          if (/previa/.test(name)) agg.prevIdx.add(index);
-          else if (/existencia/.test(name)) agg.existIdx.add(index);
-        });
-      }
+    agg.currentCat = "";
+    for (const row of rows) {
       const values = row.values || [];
       const rowName = String(values[0] || "").trim();
       if (!rowName) continue;
-      const restEmpty = values.slice(1).every((value) => String(value ?? "").trim() === "");
-      if (restEmpty && !/^total\s/i.test(rowName)) { agg.currentCat = rowName; aggBucket(rowName); continue; }
-      const bucket = aggBucket(agg.currentCat);
+      const restoVacio = values.slice(1).every((value) => String(value ?? "").trim() === "");
+      if (restoVacio && !/^total\s/i.test(rowName)) { agg.currentCat = rowName; bucketDe(agg, rowName); continue; }
+      const bucket = bucketDe(agg, agg.currentCat);
       let acc = bucket.rows.get(rowName);
       if (!acc) { acc = { name: rowName, first: {}, last: {}, sums: {} }; bucket.rows.set(rowName, acc); bucket.order.push(rowName); }
       values.forEach((value, index) => {
         if (index === 0) return;
         const kind = agg.kinds[index] || "qty";
         if (kind === "percent") return;
-        if (agg.prevIdx.has(index)) { if (acc.first[index] === undefined && String(value ?? "").trim() !== "") acc.first[index] = value; return; }
-        if (agg.existIdx.has(index)) { if (String(value ?? "").trim() !== "") acc.last[index] = value; return; }
-        const numeric = parseNumber(String(value ?? ""));
-        if (Number.isFinite(numeric)) acc.sums[index] = (acc.sums[index] || 0) + numeric;
+        const numero = cellNumber(value);
+        if (!Number.isFinite(numero)) return;
+        if (agg.prevIdx.has(index)) { if (acc.first[index] === undefined) acc.first[index] = numero; return; }
+        if (agg.existIdx.has(index)) { acc.last[index] = numero; return; }
+        acc.sums[index] = (acc.sums[index] || 0) + numero;
       });
+    }
+  };
+  const emitir = (agg) => {
+    if (!agg.headers) return [];
+    const idx = (re) => agg.headers.findIndex((h) => re.test(String(h).toLowerCase()));
+    const iDif = idx(/^diferencia$/);
+    const iVendido = idx(/^vendido$/);
+    const iUsado = idx(/^usado$/);
+    const iDesperdicio = idx(/^desperdicio$/);
+    const iUsadoCosto = idx(/usado \(costo\)/);
+    const iVendidoCosto = idx(/vendido \(costo\)/);
+    const iIngresos = idx(/^ingresos$/);
+    const valorDe = (acc, index) => {
+      if (agg.prevIdx.has(index)) return acc.first[index] ?? "";
+      if (agg.existIdx.has(index)) return acc.last[index] ?? "";
+      if ((agg.kinds[index] || "qty") !== "percent") return acc.sums[index] ?? "";
+      // porcentajes: se recalculan sobre los totales del mes
+      const nombre = String(agg.headers[index]).toLowerCase();
+      const ratio = (arriba, abajo) => {
+        const a = acc.sums[arriba];
+        const b = acc.sums[abajo];
+        return a === undefined || !b ? "" : (a / b) * 100;
+      };
+      if (/% *diferencia/.test(nombre)) return ratio(iDif, iVendido);
+      if (/% *desperdicio/.test(nombre)) return ratio(iDesperdicio, iUsado);
+      if (/ideal/.test(nombre)) return ratio(iVendidoCosto, iIngresos);
+      if (/porcentaje de costo|costo de alimentos/.test(nombre)) return ratio(iUsadoCosto, iIngresos);
+      return "";
+    };
+    const filas = [agg.headers];
+    for (const categoria of agg.order) {
+      const bucket = agg.cats.get(categoria);
+      if (categoria) filas.push([categoria, ...agg.headers.slice(1).map(() => "")]);
+      for (const clave of bucket.order) {
+        const acc = bucket.rows.get(clave);
+        filas.push([acc.name, ...agg.headers.slice(1).map((_, offset) => valorDe(acc, offset + 1))]);
+      }
+    }
+    return filas;
+  };
+
+  // ---- Descarga: detalle y resumen de cada periodo
+  const detalleAgg = nuevoAgg();
+  const resumenAgg = nuevoAgg();
+  let detalleHeaders = null;
+  let resumenHeaders = null;
+  let detalleUnico = [];
+  let resumenUnico = [];
+  const lines = [];
+  let headersWritten = false;
+
+  for (const period of targetPeriods) {
+    const pid = configuredIdentifier(period.sculpturePid, period.pid);
+    if (!pid) continue;
+    let detalle = null;
+    try {
+      detalle = await fetchSculptureInternalReport({ type: "varianceDetailed", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
+    } catch (error) {
+      console.error('[variance-xlsx] detalle ' + period.id + ': ' + error.message);
+    }
+    if (detalle?.rows?.length) {
+      detalleHeaders = detalleHeaders || detalle.headers || [];
+      if (!headersWritten) {
+        lines.push([...(report.monthly ? ["Semana"] : []), ...(detalle.headers || [])].map(escapeCsv).join(";"));
+        headersWritten = true;
+      }
+      for (const row of detalle.rows) {
+        lines.push([...(report.monthly ? [period.label || period.id] : []), ...(row.values || [])].map(escapeCsv).join(";"));
+      }
+      if (report.monthly) alimentar(detalleAgg, detalle.headers || [], detalle.rows);
+      else detalleUnico = [detalle.headers || [], ...detalle.rows.map((row) => row.values || [])];
+    }
+    let resumen = null;
+    try {
+      resumen = await fetchSculptureInternalReport({ type: "varianceSummary", cid, pid, area, baseUrl, accountId: client?.sculptureAccountId || "" });
+    } catch (error) {
+      console.error('[variance-xlsx] resumen ' + period.id + ': ' + error.message);
+    }
+    if (resumen?.rows?.length) {
+      resumenHeaders = resumenHeaders || resumen.headers || [];
+      if (report.monthly) alimentar(resumenAgg, resumen.headers || [], resumen.rows);
+      else resumenUnico = [resumen.headers || [], ...resumen.rows.map((row) => row.values || [])];
     }
   }
   if (!lines.length) return null;
 
-  // Texto agregado del mes para el chat
+  // ---- Texto agregado para el chat del mes
   let monthlyChatText = "";
-  if (agg && agg.headers) {
-    const cell = (index, acc) => {
-      if (agg.prevIdx.has(index)) return acc.first[index] ?? "";
-      if (agg.existIdx.has(index)) return acc.last[index] ?? "";
-      if ((agg.kinds[index] || "qty") === "percent") return "";
-      const value = acc.sums[index];
-      if (value === undefined) return "";
-      return (agg.kinds[index] === "money") ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
-    };
-    const aggLines = [
-      `VARIANCE DEL MES AGREGADO POR PRODUCTO — sumas de ${targetPeriods.length} semanas. 'Existencia Previa' = primera semana; 'Existencia' = ultima; columnas % vacias a proposito (a nivel mes se recalculan: dif% = Diferencia/Vendido) — no las inventes.`,
-      agg.headers.map(escapeCsv).join(";"),
-    ];
-    for (const categoryName of agg.order) {
-      const bucket = agg.cats.get(categoryName);
-      if (!bucket.order.length) { if (categoryName) aggLines.push(escapeCsv(categoryName)); continue; }
-      if (categoryName) aggLines.push(escapeCsv(categoryName));
-      for (const key of bucket.order) {
-        const acc = bucket.rows.get(key);
-        aggLines.push([acc.name, ...agg.headers.slice(1).map((_, offset) => cell(offset + 1, acc))].map(escapeCsv).join(";"));
-      }
-    }
-    monthlyChatText = aggLines.join("\n");
+  if (report.monthly && detalleAgg.headers) {
+    const filas = emitir(detalleAgg);
+    const encabezado = 'VARIANCE DEL MES AGREGADO POR PRODUCTO — suma de ' + targetPeriods.length + ' semanas. "Existencia Previa" = primera semana; "Existencia" = ultima; los % estan recalculados sobre los totales del mes.';
+    monthlyChatText = [encabezado, ...filas.map((valores) => valores.map((v) => escapeCsv(typeof v === "number" ? Math.round(v * 100) / 100 : v)).join(";"))].join("\n");
   }
 
   const period = store.periods.find((candidate) => candidate.id === report.periodId);
-  const baseName = `Variance detallado - ${client?.name || report.clientId} - ${period?.label || report.periodId}`
+  const baseName = ('Variance - ' + (client?.name || report.clientId) + ' - ' + (period?.label || report.periodId))
     .replace(/[^\w\s\-áéíóúñÁÉÍÓÚÑ.]/g, "")
     .slice(0, 120);
 
-  // Adjunto en EXCEL (pedido de Pedro, 21-ago): el CSV se conserva como
-  // texto interno porque el chat del agente lo consume en ese formato.
+  // ---- Excel con DOS hojas, como el cierre que exporta Sculpture
+  // (acuerdo de la reunion 11-sep): Resumen por categoria y Detalle por
+  // producto. En los mensuales ambas vienen acumuladas del mes.
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Variance detallado");
-  // Formato estilo export de Sculpture (pedido de Pedro, 28-ago): montos $
-  // sin decimales, porcentajes con 1 decimal y simbolo %, cantidades con 1
-  // decimal, negativos en rojo, totales por categoria destacados y GRAND
-  // TOTAL en verde.
-  const headerNames = (tableRows[0] || []).map((header) => String(header).toLowerCase());
-  const columnKind = headerNames.map((name) => {
-    if (/\(costo\)|^ingresos$/.test(name)) return "money";
-    if (/%|porcentaje|costo de alimentos/.test(name)) return "percent";
-    if (/nombre|semana|art/.test(name)) return "text";
-    return "qty";
-  });
-  tableRows.forEach((values, index) => {
-    const isHeader = index === 0;
-    const firstText = String(values[0] || "").trim();
-    const isGrand = /grand\s*total/i.test(firstText);
-    const isTotal = !isGrand && /^total\s+/i.test(firstText);
-    // Encabezado de categoria: nombre terminado en ":" con el resto vacio.
-    const isCatHeader = !isGrand && !isTotal && /:\s*$/.test(firstText) &&
-      values.slice(1).every((v) => String(v ?? "").trim() === "");
-    const row = sheet.addRow(values.map((value, columnIndex) => {
-      if (isHeader) return value;
-      const kind = columnKind[columnIndex] || "qty";
-      const text = String(value ?? "").trim();
-      if (kind === "text" || text === "") return value;
-      const numeric = parseNumber(text);
-      if (!Number.isFinite(numeric)) return value;
-      if (kind === "money") return Math.round(numeric);
-      if (kind === "percent") return numeric / 100;
-      return numeric;
-    }));
-    row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
-      const kind = columnKind[columnNumber - 1] || "qty";
-      if (isHeader) {
-        cell.style = { font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } }, fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF001E43" } }, alignment: { vertical: "middle", horizontal: columnNumber === 1 ? "left" : "center", wrapText: true } };
-        return;
-      }
-      if (kind === "money") { cell.numFmt = '"$"#,##0;[Red]-"$"#,##0'; cell.alignment = { horizontal: "right" }; }
-      if (kind === "percent") { cell.numFmt = "0.0%;[Red]-0.0%"; cell.alignment = { horizontal: "right" }; }
-      if (kind === "qty") { cell.numFmt = "#,##0.0;[Red]-#,##0.0"; cell.alignment = { horizontal: "right" }; }
-      if (isGrand) { cell.font = { bold: true, size: 10.5, color: { argb: "FF1E3A0F" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC9DFA5" } }; }
-      else if (isTotal) { cell.font = { bold: true, color: { argb: "FF001E43" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1EDE0" } }; }
-      else if (isCatHeader) { cell.font = { bold: true, size: 10.5, color: { argb: "FF33475C" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEDF3F1" } }; }
-      // Grilla tenue: sin lineas, 19 columnas se leen como un bloque.
-      cell.border = {
-        top: { style: "hair", color: { argb: "FFD9D9D9" } },
-        left: { style: "hair", color: { argb: "FFD9D9D9" } },
-        bottom: { style: "hair", color: { argb: "FFD9D9D9" } },
-        right: { style: "hair", color: { argb: "FFD9D9D9" } },
-      };
+
+  const escribirHoja = (nombre, filas) => {
+    if (!filas.length) return;
+    const sheet = workbook.addWorksheet(nombre);
+    const kinds = (filas[0] || []).map((header, index) => kindOf(header, index));
+    filas.forEach((valores, indice) => {
+      const esCabecera = indice === 0;
+      const primera = String(valores[0] ?? "").trim();
+      const esGrand = /grand\s*total/i.test(primera);
+      const esTotal = !esGrand && /^total\s+/i.test(primera);
+      const esCategoria = !esGrand && !esTotal && valores.slice(1).every((v) => String(v ?? "").trim() === "");
+      const row = sheet.addRow(valores.map((valor, columna) => {
+        if (esCabecera) return valor;
+        const kind = kinds[columna] || "qty";
+        if (kind === "text") return valor;
+        if (typeof valor === "number") return kind === "money" ? Math.round(valor) : (kind === "percent" ? valor / 100 : valor);
+        const texto = String(valor ?? "").trim();
+        if (!texto) return "";
+        const numero = cellNumber(texto);
+        if (!Number.isFinite(numero)) return valor;
+        if (kind === "money") return Math.round(numero);
+        if (kind === "percent") return numero / 100;
+        return numero;
+      }));
+      row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+        const kind = kinds[columnNumber - 1] || "qty";
+        if (esCabecera) {
+          cell.style = { font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } }, fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF001E43" } }, alignment: { vertical: "middle", horizontal: columnNumber === 1 ? "left" : "center", wrapText: true } };
+          return;
+        }
+        if (kind === "money") { cell.numFmt = '"$"#,##0;[Red]-"$"#,##0'; cell.alignment = { horizontal: "right" }; }
+        if (kind === "percent") { cell.numFmt = "0.0%;[Red]-0.0%"; cell.alignment = { horizontal: "right" }; }
+        if (kind === "qty") { cell.numFmt = "#,##0.0;[Red]-#,##0.0"; cell.alignment = { horizontal: "right" }; }
+        if (esGrand) { cell.font = { bold: true, size: 10.5, color: { argb: "FF1E3A0F" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC9DFA5" } }; }
+        else if (esTotal) { cell.font = { bold: true, color: { argb: "FF001E43" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1EDE0" } }; }
+        else if (esCategoria) { cell.font = { bold: true, size: 10.5, color: { argb: "FF33475C" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEDF3F1" } }; }
+        cell.border = {
+          top: { style: "hair", color: { argb: "FFD9D9D9" } },
+          left: { style: "hair", color: { argb: "FFD9D9D9" } },
+          bottom: { style: "hair", color: { argb: "FFD9D9D9" } },
+          right: { style: "hair", color: { argb: "FFD9D9D9" } },
+        };
+      });
+      if (esCabecera) row.height = 20;
     });
-    if (isHeader) row.height = 20;
-  });
-  // Lectura (QA 09-sep): ancho segun el contenido real, producto y cabecera
-  // congelados (19 columnas se recorren sin perder de vista el articulo) y
-  // filtro en la cabecera.
-  const widths = [];
-  for (const values of tableRows) {
-    values.forEach((value, index) => { widths[index] = Math.max(widths[index] || 0, String(value ?? "").length); });
-  }
-  sheet.columns.forEach((column, index) => {
-    const kind = columnKind[index] || "qty";
-    column.width = Math.min(Math.max((widths[index] || 8) + 2, kind === "text" ? 16 : 11), kind === "text" ? 44 : 18);
-  });
-  sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
-  if (tableRows.length > 1) {
-    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: (tableRows[0] || []).length } };
-  }
+    const anchos = [];
+    for (const valores of filas) {
+      valores.forEach((valor, index) => {
+        const largo = typeof valor === "number" ? String(Math.round(valor)).length + 4 : String(valor ?? "").length;
+        anchos[index] = Math.max(anchos[index] || 0, largo);
+      });
+    }
+    sheet.columns.forEach((column, index) => {
+      const kind = kinds[index] || "qty";
+      column.width = Math.min(Math.max((anchos[index] || 8) + 2, kind === "text" ? 16 : 11), kind === "text" ? 44 : 18);
+    });
+    sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+    if (filas.length > 1) sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: (filas[0] || []).length } };
+  };
+
+  escribirHoja("Resumen", report.monthly ? emitir(resumenAgg) : resumenUnico);
+  escribirHoja("Detalle", report.monthly ? emitir(detalleAgg) : detalleUnico);
+  if (!workbook.worksheets.length) return null;
+
   const xlsxBuffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
   return {
