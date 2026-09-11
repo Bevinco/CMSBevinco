@@ -5185,13 +5185,20 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   // los reportes guardados del cliente; sin semana previa, cae a la actual.
   const priorPick = (() => {
     const currentEnd = String(payload.period?.endsAt || "");
+    const currentStart = String(payload.period?.startsAt || "");
     if (!currentEnd) return { near: null, any: null };
     const earlier = (store.reports || [])
       .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).length)
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
       .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
-    const near = earlier.find(({ period }) => (Date.parse(`${currentEnd}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000 <= 9);
+    // Contigüidad con el INICIO de este periodo (sirve igual para semanal,
+    // quincenal o mensual); 7 dias de tolerancia para huecos chicos.
+    const referencia = currentStart || currentEnd;
+    const near = earlier.find(({ period }) => {
+      const hueco = (Date.parse(`${referencia}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000;
+      return hueco >= -1 && hueco <= 7;
+    });
     return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
   const priorWeekly = priorPick.near;
@@ -6162,13 +6169,20 @@ function dynamicReportData(store, report) {
   // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
   const priorPick = (() => {
     const currentEnd = String(payload.period?.endsAt || "");
+    const currentStart = String(payload.period?.startsAt || "");
     if (!currentEnd) return { near: null, any: null };
     const earlier = (store.reports || [])
       .filter((candidate) => candidate.clientId === report.clientId && candidate.id !== report.id && !candidate.monthly && (candidate.familySuggested || []).length)
       .map((candidate) => ({ candidate, period: store.periods.find((item) => item.id === candidate.periodId) }))
       .filter(({ period }) => period?.endsAt && String(period.endsAt) < currentEnd && !String(period.id || "").startsWith("mensual-"))
       .sort((left, right) => String(right.period.endsAt).localeCompare(String(left.period.endsAt)));
-    const near = earlier.find(({ period }) => (Date.parse(`${currentEnd}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000 <= 9);
+    // Contigüidad con el INICIO de este periodo (sirve igual para semanal,
+    // quincenal o mensual); 7 dias de tolerancia para huecos chicos.
+    const referencia = currentStart || currentEnd;
+    const near = earlier.find(({ period }) => {
+      const hueco = (Date.parse(`${referencia}T00:00:00Z`) - Date.parse(`${period.endsAt}T00:00:00Z`)) / 86400000;
+      return hueco >= -1 && hueco <= 7;
+    });
     return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
   const priorWeekly = priorPick.near;
