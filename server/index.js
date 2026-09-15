@@ -5398,7 +5398,11 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const label = fmtK(amount);
       const pillW = 16 + label.length * 6.4; const pillH = 16;
       let pillX = amount >= 0 ? x1 + 4 : x1 - 4 - pillW;
-      if (amount < 0 && pillX < L + 2) pillX = x1 + 4;
+      // Barra negativa larga: la etiqueta no cabe a su izquierda sin pisar la
+      // columna de nombres. Antes se metia ENCIMA de la barra (QA Muelle
+      // barra, 15-sep); ahora salta al otro lado del cero, donde esa fila
+      // esta vacia, y nunca queda sobre el color.
+      if (amount < 0 && pillX < L + 2) pillX = x0 + 4;
       pillX = Math.max(2, Math.min(pillX, W - pillW - 2));
       return `<text x="${L - 8}" y="${yc + 4}" text-anchor="end" class="fam">${escapeHtml(item.family)}</text>` +
         `<rect x="${bx}" y="${yc - barH / 2}" width="${bw}" height="${barH}" fill="${color}"/>` +
