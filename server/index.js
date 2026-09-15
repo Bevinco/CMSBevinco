@@ -3962,7 +3962,10 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             const isLeafHeader = /:\s*$/.test(name);
             if (isTotal || isLeafHeader) return;
             const nextName = rowNames.slice(index + 1).find((candidate) => candidate);
-            if (totalNames.has(name.toLowerCase()) && nextName && /:\s*$/.test(nextName)) {
+            const sinDatos = (data.rows[index]?.values || []).slice(1)
+              .every((valor) => String(valor ?? "").trim() === "");
+            const siguienteEsSubcategoria = Boolean(nextName) && /:\s*$/.test(nextName) && !/^total\s+/i.test(nextName);
+            if (sinDatos && totalNames.has(name.toLowerCase()) && siguienteEsSubcategoria) {
               currentTop = name;
               if (!sums.has(currentTop)) { sums.set(currentTop, 0); order.push(currentTop); }
               return;
