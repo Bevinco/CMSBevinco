@@ -5378,8 +5378,23 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     };
     // Eje simetrico: el cero al centro (Pedro, 08-sep), igual que en la web.
     const maxAbs = Math.max(Math.abs(maxVal), Math.abs(minVal), 1);
-    const step = niceOf((maxAbs * 2.3) / 4);
-    const hi = Math.max(step, Math.ceil((maxAbs * 1.15) / step) * step);
+    // Espacio util a cada lado del cero: a la izquierda hasta la columna de
+    // nombres, a la derecha hasta el borde del lienzo.
+    const espacioIzq = plotW / 2;
+    const espacioDer = plotW / 2 + (W - R - 4);
+    const anchoPill = (valor) => 16 + fmtK(valor).length * 6.4 + 8;
+    let minimoHi = maxAbs * 1.06;
+    for (const item of rows) {
+      const valor = item.amount || 0;
+      if (!valor) continue;
+      const espacio = valor < 0 ? espacioIzq : espacioDer;
+      const libre = espacio - anchoPill(valor);
+      // Cuanto tiene que medir el eje para que la barra deje sitio a su
+      // etiqueta fuera: |valor| * espacio / espacioLibre.
+      if (libre > 8) minimoHi = Math.max(minimoHi, (Math.abs(valor) * espacio) / libre);
+    }
+    const step = niceOf((minimoHi * 2) / 6);
+    const hi = Math.max(step, Math.ceil(minimoHi / step) * step);
     const lo = -hi;
     const xAt = (v) => L + ((v - lo) / (hi - lo)) * plotW;
     const gridTicks = [];
@@ -5398,10 +5413,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       const label = fmtK(amount);
       const pillW = 16 + label.length * 6.4; const pillH = 16;
       let pillX = amount >= 0 ? x1 + 4 : x1 - 4 - pillW;
-      // Barra negativa larga: la etiqueta no cabe a su izquierda sin pisar la
-      // columna de nombres. Antes se metia ENCIMA de la barra (QA Muelle
-      // barra, 15-sep); ahora salta al otro lado del cero, donde esa fila
-      // esta vacia, y nunca queda sobre el color.
+      // Red de seguridad: con el eje dimensionado arriba esto no deberia
+      // ocurrir, pero si alguna vez no cabe, la etiqueta va al otro lado del
+      // cero (fila vacia) y nunca encima de la barra.
       if (amount < 0 && pillX < L + 2) pillX = x0 + 4;
       pillX = Math.max(2, Math.min(pillX, W - pillW - 2));
       return `<text x="${L - 8}" y="${yc + 4}" text-anchor="end" class="fam">${escapeHtml(item.family)}</text>` +
