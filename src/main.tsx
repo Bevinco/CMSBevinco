@@ -2875,7 +2875,39 @@ function App() {
     }
   }, [clientPeriods, monthlyMonth]);
 
+  // Al entrar a Reportes mensuales con un local elegido, se muestra su
+  // mensual MAS RECIENTE ya generado (acuerdo reunión 11-sep): antes el
+  // módulo quedaba en blanco y había que buscarlo en el Historial, lo que
+  // se prestaba a confundirlo con meses de prueba anteriores.
   const monthlyInitRef = useRef("");
+  const monthlyAutoRef = useRef("");
+  useEffect(() => {
+    if (activeView !== "monthly") return;
+    const clienteId = selectedClientId || selectedSculptureUnitId || "";
+    if (!clienteId) return;
+    if (monthlyAutoRef.current === clienteId) return;
+    const guardados = reports
+      .filter((item) => item.monthly && item.clientId === clienteId)
+      .sort((left, right) => {
+        const clave = (item: Report) => String(item.period?.endsAt || item.updatedAt || "");
+        return clave(right).localeCompare(clave(left));
+      });
+    if (!guardados.length) return;
+    monthlyAutoRef.current = clienteId;
+    const ultimo = guardados[0];
+    const mes = (String(ultimo.id).match(/(\d{4}-\d{2})$/) || [])[1];
+    if (mes) {
+      setMonthlyMonth(mes);
+      // El efecto de preselección de semanas limpia el reporte al cambiar de
+      // mes: se marca esta combinación como ya inicializada para que respete
+      // lo que acabamos de cargar.
+      monthlyInitRef.current = `${selectedSculptureUnitId}|${selectedClientId}|${mes}`;
+    }
+    setMonthlyReport(ultimo);
+    const semanas = (ultimo.includedPeriods || []).map((item) => item.id).filter(Boolean);
+    if (semanas.length) setMonthlySelectedIds(semanas);
+  }, [activeView, selectedClientId, selectedSculptureUnitId, reports]);
+
   useEffect(() => {
     const key = `${selectedSculptureUnitId}|${selectedClientId}|${monthlyMonth}`;
     if (!monthlyPeriods.length) {
@@ -2889,6 +2921,17 @@ function App() {
     const today = new Date().toISOString().slice(0, 10);
     const ofMonth = monthlyPeriods.filter((period) => monthFromPeriod(period) === monthlyMonth);
     const closed = ofMonth.filter((period) => period.endsAt && period.endsAt < today).map((period) => period.id);
+    // Si el panel ya muestra el mensual de ESTE mes y local, se respeta con
+    // sus propias semanas; solo se limpia cuando corresponde a otro periodo
+    // (si no, el mensual que se carga al entrar se borraba solo).
+    const mismoMes = monthlyReport
+      && String(monthlyReport.id).endsWith(`-${monthlyMonth}`)
+      && monthlyReport.clientId === (selectedClientId || selectedSculptureUnitId);
+    if (mismoMes) {
+      const suyas = (monthlyReport.includedPeriods || []).map((item) => item.id).filter(Boolean);
+      setMonthlySelectedIds(suyas.length ? suyas : (closed.length ? closed : ofMonth.map((period) => period.id)));
+      return;
+    }
     setMonthlySelectedIds(closed.length ? closed : ofMonth.map((period) => period.id));
     setMonthlyReport(null);
   }, [monthlyMonth, monthlyPeriods, selectedSculptureUnitId, selectedClientId]);

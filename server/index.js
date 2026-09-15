@@ -5196,8 +5196,11 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   // ---- Datos ----
   const history = [...(payload.history || [])].sort((a, b) => String(a.endsAt || a.label).localeCompare(String(b.endsAt || b.label)));
+  const esBarraDoc = !/food/i.test(payload.client?.area || "");
+  const grupoAjeno = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+    (esBarraDoc && /^cocina$/i.test(String(name || "").trim()));
   const familyVariances = (payload.familyVariances && payload.familyVariances.length
-    ? payload.familyVariances
+    ? payload.familyVariances.filter((item) => !grupoAjeno(item.family))
     : REPORT_FAMILIES.map((family) => ({ family, amount: 0 })));
   const purchasesMap = new Map((payload.familyPurchases || []).map((item) => [item.family, item.purchased || 0]));
   // La sugerencia comparable con la compra de ESTA semana es la emitida la
@@ -5226,7 +5229,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     ? priorWeekly.familySuggested
     : (priorPick.any ? [] : payload.familySuggested)) || [];
   const familyKeyOfPdf = familyMergeKey;
-  const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
+  const esBarra = !/food/i.test(payload.client?.area || "");
+  const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+    (esBarra && /^cocina$/i.test(String(name || "").trim()));
   const mergedPdfFamilies = new Map();
   for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
     const key = familyKeyOfPdf(family);
@@ -5568,8 +5573,9 @@ function renderTwoPageReportHtml(store, report, options = {}) {
 
   // ---- Pagina 2: Compra realizada vs sugerida por familia ----
   function familyPurchaseSvg() {
-    const nonZeroRows = familyPurchaseRows.filter((r) => r.purchased || r.suggested);
-    const rows = nonZeroRows.length ? nonZeroRows : familyPurchaseRows.slice(0, 6);
+    // TODAS las familias del cliente, tengan o no movimiento esta semana:
+    // omitirlas hacia parecer que el grafico estaba incompleto.
+    const rows = familyPurchaseRows.length ? familyPurchaseRows : [];
     // Alto segun cantidad de familias: con el alto fijo, cocinas con 10+
     // familias apretaban o perdian filas (doc 08-sep).
     const W = 340; const T = 24;
@@ -6184,7 +6190,10 @@ function dynamicReportData(store, report) {
   // Todas las familias guardadas se muestran, aunque esten en $0 (QA: "si
   // Vinos esta en 0 no lo muestra"): en barra son las 6 clasicas y en
   // cocina las del summary de Sculpture (Carnes, Lacteos, Verduras...).
-  const familyVariances = (payload.familyVariances || []).filter((item) => !/no auditado|unknown|sin categor/i.test(String(item.family || "")));
+  const esBarraWeb = !/food/i.test(payload.client?.area || "");
+  const isAdminGroup = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+    (esBarraWeb && /^cocina$/i.test(String(name || "").trim()));
+  const familyVariances = (payload.familyVariances || []).filter((item) => !isAdminGroup(item.family));
   // Compra sugerida comparable con la compra de esta semana: la emitida la
   // semana ANTERIOR (misma regla de desfase del PDF pedida por Pedro).
   const priorPick = (() => {
@@ -6217,7 +6226,6 @@ function dynamicReportData(store, report) {
   // Intelipar y "Pescado" del variance son la misma familia y antes salian
   // como dos barras, una siempre en 0 (QA 22-ago).
   const familyKeyOf = familyMergeKey;
-  const isAdminGroup = (name) => /no auditado|unknown|sin categor/i.test(String(name || ""));
   const mergedFamilies = new Map();
   for (const item of (payload.familyPurchases || []).filter((entry) => !isAdminGroup(entry.family))) {
     const key = familyKeyOf(item.family);
