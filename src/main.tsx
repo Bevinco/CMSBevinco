@@ -2879,6 +2879,22 @@ function App() {
   // mensual MAS RECIENTE ya generado (acuerdo reunión 11-sep): antes el
   // módulo quedaba en blanco y había que buscarlo en el Historial, lo que
   // se prestaba a confundirlo con meses de prueba anteriores.
+  // Mensuales YA generados de este local que incluyen alguna de las semanas
+  // marcadas: el modulo avisa ANTES de volver a generar (acuerdo 11-sep).
+  const mensualesConEsasSemanas = useMemo(() => {
+    const clienteId = selectedClientId || selectedSculptureUnitId || "";
+    if (!clienteId || !monthlySelectedIds.length) return [];
+    return reports
+      .filter((item) => item.monthly && item.clientId === clienteId)
+      .map((item) => {
+        const suyas = (item.includedPeriods || []).map((semana) => semana.id).filter(Boolean);
+        const repetidas = suyas.filter((id) => monthlySelectedIds.includes(id));
+        return { reporte: item, suyas, repetidas };
+      })
+      .filter((item) => item.repetidas.length)
+      .sort((left, right) => right.repetidas.length - left.repetidas.length);
+  }, [reports, selectedClientId, selectedSculptureUnitId, monthlySelectedIds]);
+
   const monthlyInitRef = useRef("");
   const monthlyAutoRef = useRef("");
   useEffect(() => {
@@ -4517,6 +4533,37 @@ function App() {
                 ) : null}
               </div>
             </div>
+            {mensualesConEsasSemanas.length ? (
+              <div className="monthly-existing-note">
+                <strong>Estas semanas ya están en un reporte generado</strong>
+                {mensualesConEsasSemanas.map(({ reporte, suyas, repetidas }) => (
+                  <p key={reporte.id}>
+                    <b>{reporte.period?.label || reporte.periodId}</b>
+                    {reporte.status === "Enviado" ? <span className="monthly-existing-sent">ya enviado al cliente</span> : null}
+                    <span>
+                      {repetidas.length === suyas.length && repetidas.length === monthlySelectedIds.length
+                        ? "— con exactamente las mismas semanas"
+                        : "— comparte " + repetidas.length + " de las " + monthlySelectedIds.length + " semanas marcadas"}
+                      {reporte.updatedAt ? " · generado el " + new Date(reporte.updatedAt).toLocaleDateString("es-CL") : ""}
+                    </span>
+                    <button
+                      className="button-link"
+                      type="button"
+                      onClick={() => {
+                        setMonthlyReport(reporte);
+                        setSelectedReport(reporte);
+                        setCommentsDraft(reporte.comments || "");
+                        setEmailDraft(reporte.emailDraft || "");
+                        window.setTimeout(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth" }), 80);
+                      }}
+                    >
+                      <ExternalLink size={15} /> Abrir el que ya existe
+                    </button>
+                  </p>
+                ))}
+                <small>Si generas igual, ese reporte se reemplaza con las semanas que tengas marcadas ahora.</small>
+              </div>
+            ) : null}
             <div className="query-actions">
               <button
                 className="primary-button"
@@ -4525,7 +4572,7 @@ function App() {
                 type="button"
               >
                 {monthlyGenerating ? <span className="btn-spinner" /> : <CalendarDays size={17} />}
-                {monthlyGenerating ? "Acumulando..." : "Generar reporte mensual"}
+                {monthlyGenerating ? "Acumulando..." : (mensualesConEsasSemanas.length ? "Regenerar reporte mensual" : "Generar reporte mensual")}
               </button>
             </div>
           </section>
