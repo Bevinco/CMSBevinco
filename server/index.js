@@ -3732,6 +3732,51 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
 // reporte al sincronizar: cuando corregimos formatos o calculos (doble
 // conteo, familias, PAR de cocina...), el historico guardado con versiones
 // anteriores se re-sincroniza SOLO la proxima vez que se genera un reporte.
+// Agrupa la compra sugerida por la familia superior del arbol de Sculpture a
+// partir de una proyeccion minima de las filas del Intelipar (nombre, si la
+// fila viene sin datos y el costo de pedido). Vive aparte de la extraccion
+// para poder correrla tambien AL ABRIR un reporte ya guardado: asi un arreglo
+// de clasificacion llega a los enlaces ya generados sin regenerar la semana
+// (pedido de Tamara 16-sep). Un encabezado de familia es una fila SIN ":" que
+// viene sin datos, tiene su "Total X:" y cuya fila siguiente es una hoja "Y:"
+// real (no un total) — el filtro que evita que un producto se cuele como
+// familia (Salmon dentro de Pescado, 24e2fe0).
+function agrupaFamiliasSugeridas(filas) {
+  if (!Array.isArray(filas) || !filas.length) return null;
+  const nombres = filas.map((fila) => String(fila?.name || "").trim());
+  const totalNames = new Set(
+    nombres.filter((name) => /^total\s+/i.test(name)).map((name) => cleanTotalName(name).toLowerCase()),
+  );
+  const order = [];
+  const sums = new Map();
+  let currentTop = "";
+  nombres.forEach((name, index) => {
+    if (!name || /grand\s+total/i.test(name)) return;
+    if (/^total\s+/i.test(name) || /:\s*$/.test(name)) return;
+    const nextName = nombres.slice(index + 1).find((candidate) => candidate);
+    const siguienteEsSubcategoria = Boolean(nextName) && /:\s*$/.test(nextName) && !/^total\s+/i.test(nextName);
+    if (filas[index]?.empty && totalNames.has(name.toLowerCase()) && siguienteEsSubcategoria) {
+      currentTop = name;
+      if (!sums.has(currentTop)) { sums.set(currentTop, 0); order.push(currentTop); }
+      return;
+    }
+    if (!currentTop) return;
+    const orderCost = Number(filas[index]?.cost) || 0;
+    if (orderCost > 0) sums.set(currentTop, sums.get(currentTop) + orderCost);
+  });
+  if (order.length < 2) return null;
+  return order.map((family) => ({ family, suggested: Math.round(sums.get(family) || 0) }));
+}
+
+// La sugerencia por familia de un reporte: reagrupada con la regla VIGENTE si
+// el reporte guardo sus filas de origen, y si no la que quedo guardada. Es el
+// unico punto por el que deben leerse las familias sugeridas.
+function familiasSugeridas(report) {
+  const reagrupado = agrupaFamiliasSugeridas(report?.familyRows);
+  if (reagrupado?.length) return reagrupado;
+  return report?.familySuggested || [];
+}
+
 const EXTRACTOR_VERSION = 3;
 
 async function syncSculptureSources(store, report, requestBody = {}) {
@@ -3951,35 +3996,21 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // nombre tiene su "Total X:" y cuya fila siguiente es una hoja "Y:".
         let familySuggested = null;
         if (/food/i.test(area)) {
-          const rowNames = data.rows.map((row) => String(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values?.[0] || "")).trim());
-          const totalNames = new Set(rowNames.filter((name) => /^total\s+/i.test(name)).map((name) => cleanTotalName(name).toLowerCase()));
-          const order = [];
-          const sums = new Map();
-          let currentTop = "";
-          rowNames.forEach((name, index) => {
-            if (!name || /grand\s+total/i.test(name)) return;
-            const isTotal = /^total\s+/i.test(name);
-            const isLeafHeader = /:\s*$/.test(name);
-            if (isTotal || isLeafHeader) return;
-            const nextName = rowNames.slice(index + 1).find((candidate) => candidate);
-            const sinDatos = (data.rows[index]?.values || []).slice(1)
-              .every((valor) => String(valor ?? "").trim() === "");
-            const siguienteEsSubcategoria = Boolean(nextName) && /:\s*$/.test(nextName) && !/^total\s+/i.test(nextName);
-            if (sinDatos && totalNames.has(name.toLowerCase()) && siguienteEsSubcategoria) {
-              currentTop = name;
-              if (!sums.has(currentTop)) { sums.set(currentTop, 0); order.push(currentTop); }
-              return;
-            }
-            if (!currentTop) return;
-            const orderCost = parseNumber(
-              pickRecordValue(data.rows[index].record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
-              pickRecordValueFuzzy(data.rows[index].record, /(costo|cost).*(pedido|sugerid|order)|(pedido|order).*(costo|cost)/i),
-            );
-            if (orderCost > 0) sums.set(currentTop, sums.get(currentTop) + orderCost);
-          });
-          if (order.length >= 2) {
-            familySuggested = order.map((family) => ({ family, suggested: Math.round(sums.get(family) || 0) }));
-          }
+          // Proyeccion minima que necesita el agrupador. Se GUARDA en el
+          // reporte (~10 KB) para poder reagrupar mas adelante sin volver a
+          // Sculpture y sin regenerar la semana.
+          const filasFamilia = data.rows
+            .map((row) => ({
+              name: String(pickRecordValue(row.record, ["itemName", "item", "nombreArticulo", "nombreArtículo"], row.values?.[0] || "")).trim(),
+              empty: (row.values || []).slice(1).every((valor) => String(valor ?? "").trim() === ""),
+              cost: parseNumber(
+                pickRecordValue(row.record, ["costoPedido", "orderCost", "costoDePedido"], "") ||
+                pickRecordValueFuzzy(row.record, /(costo|cost).*(pedido|sugerid|order)|(pedido|order).*(costo|cost)/i),
+              ) || 0,
+            }))
+            .filter((fila) => fila.name);
+          report.familyRows = filasFamilia;
+          familySuggested = agrupaFamiliasSugeridas(filasFamilia);
         }
         if (!familySuggested) {
           familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
@@ -4402,6 +4433,11 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
       return { ...row, familia: real || (texto.charAt(0).toUpperCase() + texto.slice(1)) };
     });
   }
+  // Un arreglo de clasificacion debe verse en los enlaces YA generados: la
+  // sugerencia por familia se reagrupa con la regla vigente cada vez que se
+  // abre el reporte, siempre que guarde sus filas de origen.
+  const sugeridasVigentes = familiasSugeridas(report);
+  if (sugeridasVigentes.length) payload.familySuggested = sugeridasVigentes;
   const auditTask = auditTaskForReport(store, report);
   payload.auditTask = auditTask
     ? { id: auditTask.id, name: auditTask.name, status: auditTask.status, dueDate: auditTask.dueDate || "", ...(auditTask.readonly ? { readonly: true } : {}) }
@@ -5228,9 +5264,14 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
   const priorWeekly = priorPick.near;
-  const suggestedSource = (priorWeekly?.familySuggested?.length
-    ? priorWeekly.familySuggested
+  const sugeridasPrevias = familiasSugeridas(priorWeekly);
+  const suggestedSource = (sugeridasPrevias.length
+    ? sugeridasPrevias
     : (priorPick.any ? [] : payload.familySuggested)) || [];
+  // Semana de la que sale la barra "sugerida", para decirlo en el titulo.
+  const semanaSugerencia = sugeridasPrevias.length && priorWeekly
+    ? (store.periods.find((item) => item.id === priorWeekly.periodId)?.label || "")
+    : "";
   const familyKeyOfPdf = familyMergeKey;
   const esBarra = !/food/i.test(payload.client?.area || "");
   const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
@@ -5953,6 +5994,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-period-row b { font-weight: 700; }
     .bv-panel { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 10px; }
     .bv-panel h2 { color: #8c8c8c; font-size: 19px; font-weight: 700; margin: 2px 0 6px; text-align: center; }
+    .bv-panel .bv-sub { color: #9a9a9a; font-size: 11px; font-weight: 600; margin: -4px 0 6px; text-align: center; }
     .bv-svg { display: block; height: auto; width: 100%; }
     .bv-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 218px; margin-bottom: 10px; }
     .bv-kpis { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; position: relative; }
@@ -6172,6 +6214,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       </div>
       <div class="bv-panel">
         <h2>Compra Realizada vs Sugerida por familia</h2>
+        <p class="bv-sub">Comprada: esta semana · Sugerida: la emitida la semana previa${semanaSugerencia ? ` (${semanaSugerencia})` : ""}</p>
         ${familyPurchaseSvg()}
       </div>
     </section>
@@ -6240,8 +6283,9 @@ function dynamicReportData(store, report) {
   // compra de esta semana. Si hay reportes previos pero ninguno cercano
   // (hueco de semanas), no se muestra una sugerencia vieja como comparable;
   // sin ningun previo (primer reporte del cliente) cae a la actual.
-  const suggestedSource = (priorWeekly?.familySuggested?.length
-    ? priorWeekly.familySuggested
+  const sugeridasPrevias = familiasSugeridas(priorWeekly);
+  const suggestedSource = (sugeridasPrevias.length
+    ? sugeridasPrevias
     : (priorPick.any ? [] : payload.familySuggested)) || [];
   // Fusion por clave NORMALIZADA (sin tildes ni plural): "Pescados" del
   // Intelipar y "Pescado" del variance son la misma familia y antes salian
