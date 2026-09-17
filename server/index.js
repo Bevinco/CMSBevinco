@@ -5329,6 +5329,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const semanaSugerencia = sugeridasPrevias.length && priorWeekly
     ? (store.periods.find((item) => item.id === priorWeekly.periodId)?.label || "")
     : "";
+  // Que comprar ESTA semana, por familia: el grafico de al lado compara
+  // contra la semana previa, asi que esta cifra no se veia por familia en
+  // ninguna parte, solo como total (QA Tamara 17-sep).
+  const sugerenciaActualPdf = (payload.familySuggested || [])
+    .filter((item) => (item.suggested || 0) > 0)
+    .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
+    .sort((left, right) => right.suggested - left.suggested);
   const familyKeyOfPdf = familyMergeKey;
   const esBarra = !/food/i.test(payload.client?.area || "");
   const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
@@ -6052,6 +6059,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .bv-panel { border: 1px solid #d9d9d9; border-radius: 3px; margin-bottom: 10px; padding: 8px 10px; }
     .bv-panel h2 { color: #8c8c8c; font-size: 19px; font-weight: 700; margin: 2px 0 6px; text-align: center; }
     .bv-panel .bv-sub { color: #9a9a9a; font-size: 11px; font-weight: 600; margin: -4px 0 6px; text-align: center; }
+    .bv-buynow h2 { text-align: left; }
+    .bv-buynow .bv-pill { border: 1px solid #d9d9d9; border-radius: 999px; display: inline-block; font-size: 10.5px; margin: 0 5px 5px 0; padding: 4px 10px; }
+    .bv-buynow .bv-pill b { color: #333; font-weight: 700; }
+    .bv-buynow .bv-pill i { color: #001E43; font-style: normal; font-weight: 800; margin-left: 5px; }
+    .bv-buynow .bv-pill.is-total { background: #001E43; border-color: #001E43; }
+    .bv-buynow .bv-pill.is-total b, .bv-buynow .bv-pill.is-total i { color: #fff; }
+    .bv-buynow .bv-none { color: #777; font-size: 10.5px; }
     .bv-svg { display: block; height: auto; width: 100%; }
     .bv-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 218px; margin-bottom: 10px; }
     .bv-kpis { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; position: relative; }
@@ -6275,6 +6289,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         ${familyPurchaseSvg()}
       </div>
     </section>
+    <section class="bv-panel bv-buynow">
+      <h2>Qué comprar esta semana, por familia</h2>
+      ${sugerenciaActualPdf.length
+        ? sugerenciaActualPdf.map((item) => `<span class="bv-pill"><b>${escapeHtml(item.family)}</b><i>$${fmt0(item.suggested)}</i></span>`).join("") +
+          `<span class="bv-pill is-total"><b>Total</b><i>$${fmt0(sugerenciaActualPdf.reduce((suma, item) => suma + item.suggested, 0))}</i></span>`
+        : `<p class="bv-none">Esta semana no hay compras sugeridas: todas las familias están sobre su nivel de stock.</p>`}
+    </section>
     <section class="bv-comments">
       ${commentBlock("Eficiencia de stock y compra:", analysis.stockEfficiency)}
     </section>
@@ -6420,6 +6441,14 @@ function dynamicReportData(store, report) {
     history,
     familyVariances,
     familyPurchases,
+    // Lo que hay que comprar AHORA, por familia. No es lo mismo que la
+    // barra verde del grafico de al lado, que es la sugerencia de la semana
+    // ANTERIOR. Se incluyen todas las familias con monto (tambien las
+    // administrativas) para que la suma calce con el KPI de compra sugerida.
+    sugerenciaActual: (payload.familySuggested || [])
+      .filter((item) => (item.suggested || 0) > 0)
+      .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
+      .sort((left, right) => right.suggested - left.suggested),
     topProducts,
     // Paridad PDF <-> web del reporte MENSUAL (QA Tamara 28-ago): la pagina
     // dinamica muestra las mismas secciones que el PDF mensual.
@@ -6539,6 +6568,13 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .card-header { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 12px; }
     .card-title { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
     .tag { background: #f4f1e7; border: 1px solid var(--line-soft); border-radius: 999px; color: var(--text-muted); font-size: 9px; font-weight: 600; letter-spacing: 0.06em; padding: 3px 9px; text-transform: uppercase; white-space: nowrap; }
+    .buy-now { display: flex; flex-wrap: wrap; gap: 8px; }
+    .buy-now .pill { align-items: baseline; background: #f7f5ee; border: 1px solid var(--line); border-radius: 999px; display: flex; gap: 7px; padding: 7px 13px; }
+    .buy-now .pill b { color: var(--text); font-size: 12.5px; font-weight: 700; }
+    .buy-now .pill span { color: var(--navy); font-size: 13px; font-weight: 800; }
+    .buy-now .pill.total { background: var(--navy); border-color: var(--navy); }
+    .buy-now .pill.total b, .buy-now .pill.total span { color: #fff; }
+    .buy-now .empty { color: var(--text-light); font-size: 13px; }
     .chart-wrap { height: 300px; position: relative; }
     .chart-wrap.tall { height: 340px; }
     .grid-2 { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -6707,6 +6743,10 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         <div class="card-header"><div class="card-title">Por familia <span class="tag">Sugerida semana previa vs comprada</span></div></div>
         <div class="chart-wrap"><canvas id="famBuyChart"></canvas></div>
       </div>
+    </div>
+    <div class="card" id="buyNowCard" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">Qué comprar esta semana, por familia <span class="tag" id="buyNowTag">Sugerencia de este período</span></div></div>
+      <div class="buy-now" id="buyNowPills"></div>
     </div>
   </section>
 
@@ -7271,6 +7311,17 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     }).join("");
   }
 
+  function renderSugerenciaActual(data) {
+    var filas = data.sugerenciaActual || [];
+    var total = filas.reduce(function (suma, item) { return suma + (item.suggested || 0); }, 0);
+    document.getElementById('buyNowTag').textContent = data.period.label || 'Sugerencia de este período';
+    document.getElementById('buyNowPills').innerHTML = filas.length
+      ? filas.map(function (item) {
+          return '<div class="pill"><b>' + esc(item.family) + '</b><span>' + fmtMoney(item.suggested) + '</span></div>';
+        }).join('') + '<div class="pill total"><b>Total</b><span>' + fmtMoney(total) + '</span></div>'
+      : '<div class="empty">Esta semana no hay compras sugeridas: todas las familias están sobre su nivel de stock.</div>';
+  }
+
   function renderAll(data) {
     document.getElementById("clientName").textContent = data.client.name;
     document.getElementById("periodTag").textContent = data.period.label || "";
@@ -7301,6 +7352,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
     } else {
       renderBuyChart(data);
       renderFamBuyChart(data);
+      renderSugerenciaActual(data);
       renderProducts(data);
     }
     orderSections(monthly);
