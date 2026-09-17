@@ -1613,15 +1613,27 @@ const REPORT_FAMILIES = ["Destilados", "Vinos", "Espumantes", "Cervezas y Sidra"
 // Vinos/Vino -> vino | Espumantes/Espumante -> espumant |
 // Barriles/Barril -> barril | Cervezas y Sidra/Cerveza y Sidra -> cervezaysidra
 function familyMergeKey(name) {
-  return String(name || "")
+  const limpio = String(name || "")
     .toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // "Embutidos por unidad" / "Mariscos (Unidad)" son la misma familia que
+  // su base: cambia la unidad de medida, no la familia. Se poda solo si
+  // queda una base real ("Por unidad" sola, en barra, se respeta).
+  const base = limpio.replace(/\s+(?:por\s+|x\s+)?unidad(?:es)?$/, "").trim();
+  const texto = base && !/^(?:por|x|de)$/.test(base) ? base : limpio;
+  return texto
     .split(/\s+/)
     .filter(Boolean)
     .map((word) => word.replace(/s$/, "").replace(/e$/, ""))
     .join("");
 }
+
+// Las familias que produce familyForCategory son de BARRA: en una cocina
+// ninguna de estas es una familia real de Sculpture.
+const FAMILIAS_DE_BARRA = new Set(["Barriles", "Espumantes", "Cervezas y Sidra", "Sin Alcohol", "Vinos", "Destilados", "Cocina"]);
 
 function familyForCategory(name) {
   const text = String(name || "").toLowerCase();
@@ -3771,10 +3783,44 @@ function agrupaFamiliasSugeridas(filas) {
 // La sugerencia por familia de un reporte: reagrupada con la regla VIGENTE si
 // el reporte guardo sus filas de origen, y si no la que quedo guardada. Es el
 // unico punto por el que deben leerse las familias sugeridas.
-function familiasSugeridas(report) {
+function familiasSugeridas(report, client) {
   const reagrupado = agrupaFamiliasSugeridas(report?.familyRows);
   if (reagrupado?.length) return reagrupado;
-  return report?.familySuggested || [];
+  return pliegaHojasSueltas(report?.familySuggested || [], report, client);
+}
+
+// Los reportes guardados antes de que existieran familyRows pueden traer una
+// SUBCATEGORIA como si fuera familia (Churros fuera de Postres). Si el
+// cliente ya aprendio a que familia pertenece Y esa familia es una de las
+// oficiales de ESTE reporte (las del variance summary de Sculpture), se
+// pliega ahi al abrirlo — sin regenerar y sin inventar plata. El sentido
+// inverso nunca aplica: "postres -> Cocina" no toca nada porque "Cocina" no
+// es una familia oficial en una cocina.
+function pliegaHojasSueltas(familias, report, client) {
+  const mapa = client?.categoryFamilies;
+  if (!mapa || !familias.length) return familias;
+  const oficiales = new Map((report?.familyVariances || []).map((item) => [familyMergeKey(item.family), item.family]));
+  if (!oficiales.size) return familias;
+  const salida = [];
+  const indice = new Map();
+  let plegada = false;
+  for (const item of familias) {
+    const nombre = String(item.family || "");
+    let destino = nombre;
+    if (!oficiales.has(familyMergeKey(nombre))) {
+      const aprendida = mapa[nombre.toLowerCase().trim()];
+      const oficial = aprendida ? oficiales.get(familyMergeKey(aprendida)) : "";
+      if (oficial) { destino = oficial; plegada = true; }
+    }
+    const clave = familyMergeKey(destino);
+    if (indice.has(clave)) {
+      salida[indice.get(clave)].suggested += item.suggested || 0;
+    } else {
+      indice.set(clave, salida.length);
+      salida.push({ family: destino, suggested: item.suggested || 0 });
+    }
+  }
+  return plegada ? salida : familias;
 }
 
 const EXTRACTOR_VERSION = 3;
@@ -3977,9 +4023,20 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // barra viene plano, sin totales de familia) clasifique igual. Asi
         // cualquier categoria nueva de Sculpture queda cubierta sola.
         const learnedFamilies = { ...(client?.categoryFamilies || {}) };
+        const esCocina = /food/i.test(area);
         for (const { category } of suggestedTotalsSequence) {
           const family = resolveFamily(category, suggestedParentOf);
-          if (family !== "Otros") learnedFamilies[String(category).toLowerCase().trim()] = family;
+          // En una cocina, familyForCategory solo sabe de barra: mandaria
+          // Postres/Empanadas/Tortas a "Cocina" y la sugerencia quedaria
+          // bajo una familia que no existe en Sculpture.
+          if (family === "Otros" || (esCocina && FAMILIAS_DE_BARRA.has(family))) continue;
+          learnedFamilies[String(category).toLowerCase().trim()] = family;
+        }
+        // Limpia lo que se aprendio mal en sincronizaciones anteriores.
+        if (esCocina) {
+          for (const [hoja, familia] of Object.entries(learnedFamilies)) {
+            if (FAMILIAS_DE_BARRA.has(familia)) delete learnedFamilies[hoja];
+          }
         }
         // Cocinas: la jerarquia hoja -> familia del variance summary manda,
         // para que sugerencia y variance grafiquen las MISMAS familias
@@ -4436,7 +4493,7 @@ function buildReportPayload(store, report, { includeKnowledge = false, context =
   // Un arreglo de clasificacion debe verse en los enlaces YA generados: la
   // sugerencia por familia se reagrupa con la regla vigente cada vez que se
   // abre el reporte, siempre que guarde sus filas de origen.
-  const sugeridasVigentes = familiasSugeridas(report);
+  const sugeridasVigentes = familiasSugeridas(report, client);
   if (sugeridasVigentes.length) payload.familySuggested = sugeridasVigentes;
   const auditTask = auditTaskForReport(store, report);
   payload.auditTask = auditTask
@@ -5264,7 +5321,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     return { near: near?.candidate || null, any: earlier[0]?.candidate || null };
   })();
   const priorWeekly = priorPick.near;
-  const sugeridasPrevias = familiasSugeridas(priorWeekly);
+  const sugeridasPrevias = familiasSugeridas(priorWeekly, payload.client);
   const suggestedSource = (sugeridasPrevias.length
     ? sugeridasPrevias
     : (priorPick.any ? [] : payload.familySuggested)) || [];
@@ -6283,7 +6340,7 @@ function dynamicReportData(store, report) {
   // compra de esta semana. Si hay reportes previos pero ninguno cercano
   // (hueco de semanas), no se muestra una sugerencia vieja como comparable;
   // sin ningun previo (primer reporte del cliente) cae a la actual.
-  const sugeridasPrevias = familiasSugeridas(priorWeekly);
+  const sugeridasPrevias = familiasSugeridas(priorWeekly, payload.client);
   const suggestedSource = (sugeridasPrevias.length
     ? sugeridasPrevias
     : (priorPick.any ? [] : payload.familySuggested)) || [];
