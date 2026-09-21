@@ -570,9 +570,65 @@ function clearSessionCookie() {
   return `${sessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
 }
 
-function requireAuth(request, response, next) {
+// ---- Llaves de API para agentes -------------------------------------------
+// Un agente externo no puede autenticarse con la cookie de sesion del
+// navegador: necesita una llave propia, revocable y de alcance acotado. Se
+// guarda SOLO el hash; el valor en claro se muestra una vez al crearla y no se
+// puede recuperar despues. Por defecto la llave es de SOLO LECTURA: un agente
+// que consulta no tiene por que poder enviar correos ni borrar nada.
+const API_TOKEN_PREFIJO = "bvk_";
+const API_TOKEN_USO_MS = 5 * 60 * 1000;
+
+function hashApiToken(valor) {
+  return crypto.createHash("sha256").update(String(valor || "")).digest("base64url");
+}
+
+// La llave se presenta al resto del sistema como una sesion normal, para no
+// mantener dos caminos de permisos distintos.
+function sesionDeLlave(registro) {
+  return {
+    id: `llave-${registro.id}`,
+    username: registro.name,
+    name: `Agente · ${registro.name}`,
+    email: "",
+    role: registro.scope === "total" ? "Superadmin" : "Agente",
+    permissions: ["dashboard", "module1", "tasks", "reports", "criteria"],
+    apiTokenId: registro.id,
+    expiresAt: Date.now() + API_TOKEN_USO_MS,
+  };
+}
+
+// Sesion a partir del header Authorization, si trae una llave valida.
+// lastUsedAt se escribe como mucho cada 5 minutos: el store pesa megas y no
+// vale la pena serializarlo en cada request del agente.
+async function sesionPorLlaveApi(request, response) {
+  const enviado = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+  if (!enviado.startsWith(API_TOKEN_PREFIJO)) return null;
+  const store = await readStore();
+  const buscado = hashApiToken(enviado);
+  const registro = (store.apiTokens || []).find((item) => !item.revokedAt && timingSafeEqual(item.hashed, buscado));
+  if (!registro) {
+    response.status(401).json({ error: "Llave de API inválida o revocada." });
+    return "rechazada";
+  }
+  if (registro.scope !== "total" && !["GET", "HEAD"].includes(request.method)) {
+    response.status(403).json({ error: "Esta llave es de solo lectura: no puede modificar ni enviar nada." });
+    return "rechazada";
+  }
+  const ahora = Date.now();
+  if (!registro.lastUsedAt || ahora - Date.parse(registro.lastUsedAt) > API_TOKEN_USO_MS) {
+    registro.lastUsedAt = new Date(ahora).toISOString();
+    await writeStore(store);
+  }
+  return sesionDeLlave(registro);
+}
+
+async function requireAuth(request, response, next) {
   const session = readSession(request);
   if (!session) {
+    const porLlave = await sesionPorLlaveApi(request, response);
+    if (porLlave === "rechazada") return;
+    if (porLlave) { request.session = porLlave; next(); return; }
     // Los links que se abren en otra pestaña (PDF, export, CSV) llegan como
     // navegacion del browser: con la sesion vencida se redirige al login en
     // vez de mostrar el JSON crudo de error.
@@ -7479,6 +7535,57 @@ app.post("/api/presence", requireAuth, async (request, response) => {
     await writeStore(store);
   }
   response.json({ presence });
+});
+
+// Las llaves nunca se devuelven en claro: solo su prefijo, para reconocerlas.
+app.get("/api/system/api-tokens", requireAuth, requirePermission("users"), async (_request, response) => {
+  const store = await readStore();
+  response.json({
+    tokens: (store.apiTokens || []).map(({ hashed: _hashed, ...resto }) => resto),
+  });
+});
+
+app.post("/api/system/api-tokens", requireAuth, requirePermission("users"), async (request, response) => {
+  const nombre = String(request.body?.name || "").trim();
+  if (!nombre) {
+    response.status(400).json({ error: "Ponle un nombre a la llave: de quién es o para qué se usa." });
+    return;
+  }
+  const store = await readStore();
+  const scope = request.body?.scope === "total" ? "total" : "lectura";
+  const secreto = API_TOKEN_PREFIJO + crypto.randomBytes(24).toString("base64url");
+  const registro = {
+    id: crypto.randomUUID(),
+    name: nombre,
+    scope,
+    prefijo: `${secreto.slice(0, 12)}…`,
+    hashed: hashApiToken(secreto),
+    createdAt: new Date().toISOString(),
+    createdBy: request.session?.email || request.session?.username || "",
+    lastUsedAt: "",
+    revokedAt: "",
+  };
+  store.apiTokens = [registro, ...(store.apiTokens || [])];
+  await writeStore(store);
+  const { hashed: _hashed, ...publico } = registro;
+  response.json({
+    token: secreto,
+    registro: publico,
+    aviso: "Cópiala ahora: no se vuelve a mostrar. Si se pierde, revócala y crea otra.",
+  });
+});
+
+// Revocar en vez de borrar: queda el rastro de que existio y cuando se uso.
+app.delete("/api/system/api-tokens/:tokenId", requireAuth, requirePermission("users"), async (request, response) => {
+  const store = await readStore();
+  const registro = (store.apiTokens || []).find((item) => item.id === request.params.tokenId);
+  if (!registro) {
+    response.status(404).json({ error: "No existe esa llave." });
+    return;
+  }
+  registro.revokedAt = registro.revokedAt || new Date().toISOString();
+  await writeStore(store);
+  response.json({ ok: true, revokedAt: registro.revokedAt });
 });
 
 app.get("/api/users", requireAuth, requirePermission("users"), async (_request, response) => {
