@@ -1612,6 +1612,17 @@ const REPORT_FAMILIES = ["Destilados", "Vinos", "Espumantes", "Cervezas y Sidra"
 // "Vinos" y "Vino" separados). Sin tildes, sin plural y sin espacios:
 // Vinos/Vino -> vino | Espumantes/Espumante -> espumant |
 // Barriles/Barril -> barril | Cervezas y Sidra/Cerveza y Sidra -> cervezaysidra
+// Grupos que NO son una familia de compra: administrativos o de servicio.
+// Salen de los graficos y del desglose de sugerencia. "Auditoria Mensual" y
+// "aseo" existen como familias en el Sculpture de Cafe Diario, pero no son
+// algo que el local compre (Paulina, 21-sep).
+function grupoNoComprable(name) {
+  const texto = String(name || "").trim();
+  if (/no auditado|unknown|sin categor/i.test(texto)) return true;
+  const sinTildes = texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /^(aseo|auditoria mensual)$/i.test(sinTildes);
+}
+
 function familyMergeKey(name) {
   const limpio = String(name || "")
     .toLowerCase()
@@ -5293,7 +5304,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   // ---- Datos ----
   const history = [...(payload.history || [])].sort((a, b) => String(a.endsAt || a.label).localeCompare(String(b.endsAt || b.label)));
   const esBarraDoc = !/food/i.test(payload.client?.area || "");
-  const grupoAjeno = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+  const grupoAjeno = (name) => grupoNoComprable(name) ||
     (esBarraDoc && /^cocina$/i.test(String(name || "").trim()));
   const familyVariances = (payload.familyVariances && payload.familyVariances.length
     ? payload.familyVariances.filter((item) => !grupoAjeno(item.family))
@@ -5333,12 +5344,12 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   // contra la semana previa, asi que esta cifra no se veia por familia en
   // ninguna parte, solo como total (QA Tamara 17-sep).
   const sugerenciaActualPdf = (payload.familySuggested || [])
-    .filter((item) => (item.suggested || 0) > 0)
+    .filter((item) => (item.suggested || 0) > 0 && !isAdminGroupPdf(item.family))
     .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
     .sort((left, right) => right.suggested - left.suggested);
   const familyKeyOfPdf = familyMergeKey;
   const esBarra = !/food/i.test(payload.client?.area || "");
-  const isAdminGroupPdf = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+  const isAdminGroupPdf = (name) => grupoNoComprable(name) ||
     (esBarra && /^cocina$/i.test(String(name || "").trim()));
   const mergedPdfFamilies = new Map();
   for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
@@ -6333,7 +6344,7 @@ function dynamicReportData(store, report) {
   // Vinos esta en 0 no lo muestra"): en barra son las 6 clasicas y en
   // cocina las del summary de Sculpture (Carnes, Lacteos, Verduras...).
   const esBarraWeb = !/food/i.test(payload.client?.area || "");
-  const isAdminGroup = (name) => /no auditado|unknown|sin categor/i.test(String(name || "")) ||
+  const isAdminGroup = (name) => grupoNoComprable(name) ||
     (esBarraWeb && /^cocina$/i.test(String(name || "").trim()));
   const familyVariances = (payload.familyVariances || []).filter((item) => !isAdminGroup(item.family));
   // Compra sugerida comparable con la compra de esta semana: la emitida la
@@ -6446,7 +6457,7 @@ function dynamicReportData(store, report) {
     // ANTERIOR. Se incluyen todas las familias con monto (tambien las
     // administrativas) para que la suma calce con el KPI de compra sugerida.
     sugerenciaActual: (payload.familySuggested || [])
-      .filter((item) => (item.suggested || 0) > 0)
+      .filter((item) => (item.suggested || 0) > 0 && !isAdminGroup(item.family))
       .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
       .sort((left, right) => right.suggested - left.suggested),
     topProducts,
