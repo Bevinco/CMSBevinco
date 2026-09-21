@@ -5396,17 +5396,19 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const semanaSugerencia = sugeridasPrevias.length && priorWeekly
     ? (store.periods.find((item) => item.id === priorWeekly.periodId)?.label || "")
     : "";
-  // Que comprar ESTA semana, por familia: el grafico de al lado compara
-  // contra la semana previa, asi que esta cifra no se veia por familia en
-  // ninguna parte, solo como total (QA Tamara 17-sep).
-  const sugerenciaActualPdf = (payload.familySuggested || [])
-    .filter((item) => (item.suggested || 0) > 0 && !isAdminGroupPdf(item.family))
-    .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
-    .sort((left, right) => right.suggested - left.suggested);
   const familyKeyOfPdf = familyMergeKey;
   const esBarra = !/food/i.test(payload.client?.area || "");
   const isAdminGroupPdf = (name) => grupoNoComprable(name) ||
     (esBarra && /^cocina$/i.test(String(name || "").trim()));
+  // Que comprar ESTA semana, por familia: el grafico de al lado compara
+  // contra la semana previa, asi que esta cifra no se veia por familia en
+  // ninguna parte, solo como total (QA Tamara 17-sep). Va DESPUES de
+  // isAdminGroupPdf: al filtrar por el antes de declararlo, el export del PDF
+  // semanal reventaba con "Cannot access before initialization".
+  const sugerenciaActualPdf = (payload.familySuggested || [])
+    .filter((item) => (item.suggested || 0) > 0 && !isAdminGroupPdf(item.family))
+    .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
+    .sort((left, right) => right.suggested - left.suggested);
   const mergedPdfFamilies = new Map();
   for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
     const key = familyKeyOfPdf(family);
