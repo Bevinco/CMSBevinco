@@ -5,6 +5,7 @@
 // Uso (PowerShell, desde la carpeta del proyecto):
 //   $env:BV_USER="gerencia@bevinco.com"; $env:BV_PASS="<clave>"
 //
+//   node scripts/carga-par-excel.js --locales                              (lista los ids)
 //   node scripts/carga-par-excel.js "<archivo.xlsx>" <clientId>            (simula)
 //   node scripts/carga-par-excel.js "<archivo.xlsx>" <clientId> --aplicar  (carga)
 //
@@ -43,13 +44,39 @@ const api = async (ruta, opciones = {}) => {
   catch { return { status: res.status, texto: texto.slice(0, 250) }; }
 };
 
-(async () => {
-  if (!ARCHIVO || !CLIENTE) {
-    console.error('Uso: node scripts/carga-par-excel.js "<archivo.xlsx>" <clientId> [--aplicar]');
+const entrar = async () => {
+  const login = await api("/api/auth/login", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: USER, password: PASS }),
+  });
+  if (login.status !== 200) {
+    console.error("No pude entrar al CMS:", login.status, JSON.stringify(login.json || login.texto));
     process.exit(1);
   }
+};
+
+(async () => {
   if (!USER || !PASS) {
     console.error("Falta BV_USER o BV_PASS. Mira el encabezado de este archivo.");
+    process.exit(1);
+  }
+
+  // Los ids no se adivinan: algunos locales viven en cuentas de Sculpture
+  // aparte (Valdivia, TT AFM, Cafe Diario) y solo aparecen desde produccion.
+  if (process.argv.includes("--locales") || ARCHIVO === "--locales") {
+    await entrar();
+    const r = await api("/api/module1/bootstrap");
+    const cocinas = (r.json?.clients || []).filter((c) => /food/i.test(c.area || ""));
+    console.log(`${cocinas.length} cocina(s):\n`);
+    for (const c of cocinas.sort((a, b) => String(a.name).localeCompare(String(b.name), "es"))) {
+      console.log(`   ${String(c.id).padEnd(24)} ${c.name}`);
+    }
+    return;
+  }
+
+  if (!ARCHIVO || !CLIENTE) {
+    console.error('Uso: node scripts/carga-par-excel.js "<archivo.xlsx>" <clientId> [--aplicar]');
+    console.error('     node scripts/carga-par-excel.js --locales   (para ver los ids)');
     process.exit(1);
   }
 
@@ -69,14 +96,7 @@ const api = async (ruta, opciones = {}) => {
   }
   console.log(`${ARCHIVO}: ${lista.length} productos con PAR\n`);
 
-  const login = await api("/api/auth/login", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: USER, password: PASS }),
-  });
-  if (login.status !== 200) {
-    console.error("No pude entrar al CMS:", login.status, JSON.stringify(login.json || login.texto));
-    process.exit(1);
-  }
+  await entrar();
 
   const actual = await api(`/api/module1/clients/${CLIENTE}/purchase-suggestion`);
   const items = actual.json?.items || [];
