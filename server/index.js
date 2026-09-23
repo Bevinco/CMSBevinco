@@ -3722,7 +3722,19 @@ const KITCHEN_PURCHASE_DEFAULTS = { suggestionDays: 7, extraDays: 1, coverage: 0
 const UNIT_COST_OUTLIER_FACTOR = 50;
 const UNIT_COST_SAMPLE_MIN = 8;
 
-function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = false } = {}) {
+// Clave con la que se guarda el PAR fijo de un producto: sin tildes, sin
+// mayusculas y sin espacios de mas, para que "Lomo  Vetado" y "lomo vetado"
+// sean el mismo item.
+function clavePar(nombre) {
+  return String(nombre || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = false, parFijo = null } = {}) {
   const { suggestionDays, extraDays, coverage } = { ...KITCHEN_PURCHASE_DEFAULTS, ...params };
   const hasNativeSuggestion = (rows || []).some((row) => {
     const record = row.record || {};
@@ -3783,7 +3795,14 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
     // El epsilon evita que el redondeo hacia arriba infle valores exactos por
     // ruido de punto flotante (ej. 92.0000000001 -> 93 en vez de 92).
     const roundUp = (value) => Math.ceil(value - 1e-9);
-    const par = roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
+    // PAR fijo por producto: algunos equipos no calculan el PAR con la regla,
+    // lo tienen definido a mano para cada item (Bar Valdivia cocina, 23-sep).
+    // Si hay un valor cargado para este producto, manda sobre la formula.
+    const parCargado = parFijo ? Number(parFijo[clavePar(name)]) : NaN;
+    const usaParFijo = Number.isFinite(parCargado) && parCargado >= 0;
+    const par = usaParFijo
+      ? parCargado
+      : roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
     const suggested = Math.max(roundUp(par - onHand), 0);
     // Si el costo unitario es un outlier de la propia tabla, el dato viene mal
     // desde Sculpture: se conservan las CANTIDADES (par, orden, dias), que no
@@ -4015,7 +4034,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // Por AREA, no por columnas (Sculpture agrego Par/Orden a cocina).
         const isKitchenTable = /food/i.test(area);
         if (isKitchenTable) applyEffectiveInventory(data.rows, detailedStockUnits, client);
-        enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable });
+        enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable, parFijo: client?.parFijo });
 
         // Lo que hay que comprar primero: mayor costo de pedido o exceso.
         const suggestionRows = [...data.rows]
@@ -7898,6 +7917,40 @@ app.get("/api/module1/clients/:clientId/bar-mixes", requireAuth, async (request,
 // manual del equipo cubre ~11,25 dias (7 + 2 dias extra x 1,25) y el CMS
 // venia con 10 dias (7 + 1 x 1,25). Ahora es configurable por local en vez
 // de estar fijo en el codigo.
+// PAR fijo por producto: hay equipos que no calculan el PAR con la regla, lo
+// tienen definido a mano item por item (Bar Valdivia cocina). Guardar un valor
+// aqui hace que ese producto ignore la formula; borrarlo lo devuelve a ella.
+// Se manda {item, par} para uno, o {items:{...}} para cargar varios de una.
+app.patch("/api/module1/clients/:clientId/par-fijo", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) { response.status(404).json({ error: "No se encontró el restaurante." }); return; }
+
+  const mapa = { ...(client.parFijo || {}) };
+  const aplicar = (nombre, valor) => {
+    const clave = clavePar(nombre);
+    if (!clave) return;
+    // null / "" / undefined borra el fijo y el producto vuelve a la formula.
+    if (valor === null || valor === "" || valor === undefined) { delete mapa[clave]; return; }
+    const numero = Number(valor);
+    if (!Number.isFinite(numero) || numero < 0 || numero > 1e6) return;
+    mapa[clave] = numero;
+  };
+
+  if (request.body?.items && typeof request.body.items === "object") {
+    for (const [nombre, valor] of Object.entries(request.body.items)) aplicar(nombre, valor);
+  } else if (request.body?.item !== undefined) {
+    aplicar(request.body.item, request.body.par);
+  } else {
+    response.status(400).json({ error: "Indica {item, par} o {items:{...}}." });
+    return;
+  }
+
+  client.parFijo = mapa;
+  await writeStore(store);
+  response.json({ parFijo: mapa, fijados: Object.keys(mapa).length });
+});
+
 app.patch("/api/module1/clients/:clientId/purchase-params", requireAuth, async (request, response) => {
   const store = await readStore();
   const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
@@ -10568,7 +10621,7 @@ async function computeSuggestionItems({ client, period, mixStock }) {
   } else {
     applyBarMixInventory(data.rows, client, mixStock);
   }
-  enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable });
+  enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable, parFijo: client?.parFijo });
 
   const items = data.rows
     .map((row) => {
@@ -10595,6 +10648,9 @@ async function computeSuggestionItems({ client, period, mixStock }) {
         // que se manda al proveedor lista "Champiñon Ostra / PAR 1 / Compra
         // Sugerida 1 / Costo de la compra 0" sin ninguna explicacion.
         alerta: pickRecordValue(record, ["alertaCosto"], ""),
+        // El PAR de este producto esta fijado a mano (no sale de la regla):
+        // la tabla lo marca para que se note cual manda.
+        parFijo: Number.isFinite(Number(client?.parFijo?.[clavePar(name)])),
       };
     })
     .filter((item) => item && (item.suggested > 0 || item.excessCost > 0 || (isKitchenTable && item.onHand > 0)));
@@ -10611,7 +10667,7 @@ async function computeSuggestionItems({ client, period, mixStock }) {
   }
   items.sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
   const paramsVigentes = { ...KITCHEN_PURCHASE_DEFAULTS, ...(client?.purchaseParams || {}) };
-  return { items, purchaseParams: paramsVigentes };
+  return { items, purchaseParams: paramsVigentes, parFijo: client?.parFijo || {} };
 }
 
 // Modulo Sugerencias de Compra: la sugerencia VIGENTE de un local (ultima

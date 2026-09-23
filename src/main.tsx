@@ -99,6 +99,8 @@ type SuggestionItem = {
   provider: string; name: string; size: string; unitCost: number; onHand: number;
   onHandCost: number; par: number; suggested: number; orderCost: number;
   inventoryDays: number; excessCost: number; alerta?: string; enNivel?: boolean;
+  // true = el PAR de este producto esta fijado a mano y no sale de la regla.
+  parFijo?: boolean;
 };
 type PurchaseParams = { suggestionDays: number; extraDays: number; coverage: number };
 type ThemeMode = "light" | "dark";
@@ -1907,6 +1909,27 @@ function App() {
     buy: ((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(", "),
     cc: ((client as { ccRecipients?: string[] }).ccRecipients || []).join(", "),
   };
+  // PAR fijo de UN producto. Con par = null se borra y ese producto vuelve a
+  // calcularse con la regla. Al guardar se recalcula la sugerencia completa,
+  // porque cambia el pedido y el exceso de esa fila.
+  async function saveParFijo(clientId: string, item: string, par: number | null) {
+    if (!clientId || !item) return;
+    try {
+      await readJson(await fetch(`/api/module1/clients/${clientId}/par-fijo`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ item, par }),
+      }));
+      setError(par === null
+        ? `PAR de "${item}" liberado: vuelve a calcularse con la regla.`
+        : `PAR de "${item}" fijado en ${par}. Recalculando la sugerencia...`);
+      await loadComprasSuggestion(clientId);
+    } catch (parError) {
+      setError(parError instanceof Error ? parError.message : "No se pudo guardar el PAR.");
+      setWorkStatus("error");
+    }
+  }
+
   async function saveClientDistribution(clientId: string, patch: { recipients?: string[]; purchaseRecipients?: string[]; ccRecipients?: string[] }) {
     if (!clientId || savingDistribution) return;
     setSavingDistribution(true);
@@ -4821,7 +4844,25 @@ function App() {
                         <td><strong>{item.name}</strong>{item.enNivel ? <small className="compras-en-nivel"> ✓ En nivel</small> : null}{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
                         <td>{item.size}</td>
                         <td className="num">{item.onHand ? item.onHand.toFixed(2) : "0"}</td>
-                        <td className="num">{item.par ? Math.round(item.par) : "-"}</td>
+                        <td className="num">
+                          {/* PAR editable: hay equipos que lo tienen fijo por
+                              producto en vez de calcularlo con la regla. Vacío
+                              = vuelve a la fórmula. */}
+                          <input
+                            className={`par-input${item.parFijo ? " is-fijo" : ""}`}
+                            type="number"
+                            min={0}
+                            title={item.parFijo ? "PAR fijo: ignora la fórmula. Bórralo para volver a calcularlo." : "PAR calculado con la regla. Escribe un número para fijarlo."}
+                            defaultValue={item.par ? Math.round(item.par) : ""}
+                            onBlur={(event) => {
+                              const escrito = event.target.value.trim();
+                              const actual = item.par ? String(Math.round(item.par)) : "";
+                              if (escrito === actual) return;
+                              saveParFijo(comprasData.client.id, item.name, escrito === "" ? null : Number(escrito));
+                            }}
+                            onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+                          />
+                        </td>
                         <td className="num">{item.suggested ? <strong>{Math.round(item.suggested)}</strong> : "0"}</td>
                         <td className="num">{item.orderCost ? money(item.orderCost) : "-"}</td>
                         <td className="num">{item.inventoryDays ? Math.round(item.inventoryDays) : "-"}</td>
