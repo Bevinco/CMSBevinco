@@ -1540,10 +1540,20 @@ function historyForReport(store, report, context = null) {
     );
     const summarySource = existing?.summary || (period.id === report.periodId ? report.summary : null);
 
+    // Dias REALES del periodo: la cobertura se calcula sobre el consumo
+    // diario, y en los locales quincenales (San Lucas, Maitencillo) dar por
+    // hecho que la auditoria es semanal la dejaba a la mitad (Pedro, 23-sep).
+    const inicioMs = period.startsAt ? Date.parse(`${period.startsAt}T00:00:00Z`) : NaN;
+    const finMs = period.endsAt ? Date.parse(`${period.endsAt}T00:00:00Z`) : NaN;
+    const diasDelPeriodo = Number.isFinite(inicioMs) && Number.isFinite(finMs)
+      ? Math.round((finMs - inicioMs) / 86400000) + 1
+      : 0;
+
     return {
       periodId: period.id,
       label: period.label,
       endsAt: period.endsAt || "",
+      days: diasDelPeriodo > 0 ? diasDelPeriodo : 7,
       revenue: summarySource?.revenue || 0,
       costPercent: summarySource?.costPercent || 0,
       idealCostPercent: summarySource?.idealCostPercent || 0,
@@ -5710,7 +5720,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     const rawMaxCov = Math.max(...history.map((p) => Math.max(p.inventoryCost || 0, p.usedCost || 0)), 0);
     const stepC = niceStep(Math.max(rawMaxCov, 1) * 1.15);
     const maxV = niceCeil(Math.max(rawMaxCov, 1) * 1.15, stepC);
-    const coverage = history.map((p) => (p.usedCost ? (p.inventoryCost / (p.usedCost / 7)) : 0));
+    // Consumo DIARIO segun los dias reales del periodo, no siempre 7: en un
+    // local quincenal el consumo de 14 dias dividido por 7 doblaba el consumo
+    // diario y dejaba la cobertura en la mitad (Pedro, 23-sep).
+    const coverage = history.map((p) => (p.usedCost ? (p.inventoryCost / (p.usedCost / (p.days || 7))) : 0));
     const maxDays = niceCeil(Math.max(...coverage, 1) * 1.2, 5);
     const xAt = (i) => L + ((i + 0.5) * plotW) / n;
     const yAt = (v) => B - ((v || 0) / maxV) * plotH;
@@ -6389,6 +6402,8 @@ function dynamicReportData(store, report) {
     .map((item) => ({
       label: item.label || "",
       endsAt: item.endsAt || "",
+      // Dias reales del periodo: la cobertura los necesita (quincenales).
+      days: item.days || 7,
       revenue: item.revenue || 0,
       costPercent: item.costPercent || 0,
       idealCostPercent: item.idealCostPercent || 0,
@@ -7168,7 +7183,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
         datasets: [
           { type: "bar", label: "Inventario al costo", data: h.map(function (p) { return p.inventoryCost || 0; }), backgroundColor: TEAL, maxBarThickness: 44 },
           { type: "bar", label: "Consumo (usado)", data: h.map(function (p) { return p.usedCost || 0; }), backgroundColor: NAVY, maxBarThickness: 44 },
-          { type: "line", label: "Días de cobertura", data: h.map(function (p) { return p.usedCost > 0 ? Math.round((p.inventoryCost / (p.usedCost / 7)) * 10) / 10 : null; }), borderColor: "#d97706", backgroundColor: "#d97706", borderWidth: 2.2, pointRadius: 4, yAxisID: "y1",
+          { type: "line", label: "Días de cobertura", data: h.map(function (p) { return p.usedCost > 0 ? Math.round((p.inventoryCost / (p.usedCost / (p.days || 7))) * 10) / 10 : null; }), borderColor: "#d97706", backgroundColor: "#d97706", borderWidth: 2.2, pointRadius: 4, yAxisID: "y1",
             datalabels: { display: true, align: "top", offset: 8, clip: false, backgroundColor: "#d97706", borderRadius: 4, color: "#fff", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? v + " d" : ""; }, padding: { top: 2, bottom: 2, left: 5, right: 5 } } }
         ]
       },
