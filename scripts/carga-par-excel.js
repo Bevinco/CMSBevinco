@@ -2,8 +2,13 @@
 // El archivo debe tener una fila de encabezado y las columnas:
 //   Nombre Articulo | Proveedor | PAR
 //
-// Uso (PowerShell, desde la carpeta del proyecto):
+// Credenciales (PowerShell, desde la carpeta del proyecto). Preferir la llave
+// de API, que es revocable y no expone la clave de gerencia:
+//   $env:BV_TOKEN="bvk_..."
+// o, si no hay llave:
 //   $env:BV_USER="gerencia@bevinco.com"; $env:BV_PASS="<clave>"
+//
+// Uso:
 //
 //   node scripts/carga-par-excel.js --locales                              (lista los ids)
 //   node scripts/carga-par-excel.js "<archivo.xlsx>" <clientId>            (simula)
@@ -18,6 +23,10 @@ import ExcelJS from "exceljs";
 const BASE = process.env.BV_URL || "https://bevinco.onrender.com";
 const USER = process.env.BV_USER || "";
 const PASS = process.env.BV_PASS || "";
+// Alternativa preferible a la clave de gerencia: una llave de API con alcance
+// total (scripts/llaves-api.js crear "..." --total). Es revocable y no expone
+// la contrasena. Si esta definida, manda sobre BV_USER/BV_PASS.
+const TOKEN = process.env.BV_TOKEN || "";
 const [ARCHIVO, CLIENTE] = process.argv.slice(2);
 const APLICAR = process.argv.includes("--aplicar");
 
@@ -35,7 +44,12 @@ const clave = (nombre) => repara(nombre).trim().toLowerCase()
 let cookie = "";
 const api = async (ruta, opciones = {}) => {
   const res = await fetch(`${BASE}${ruta}`, {
-    ...opciones, headers: { ...(opciones.headers || {}), ...(cookie ? { cookie } : {}) },
+    ...opciones,
+    headers: {
+      ...(opciones.headers || {}),
+      ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+      ...(cookie ? { cookie } : {}),
+    },
   });
   const set = res.headers.get("set-cookie");
   if (set) cookie = set.split(";")[0];
@@ -45,6 +59,7 @@ const api = async (ruta, opciones = {}) => {
 };
 
 const entrar = async () => {
+  if (TOKEN) return; // la llave viaja en cada request, no hay que iniciar sesion
   const login = await api("/api/auth/login", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ username: USER, password: PASS }),
@@ -56,8 +71,8 @@ const entrar = async () => {
 };
 
 (async () => {
-  if (!USER || !PASS) {
-    console.error("Falta BV_USER o BV_PASS. Mira el encabezado de este archivo.");
+  if (!TOKEN && (!USER || !PASS)) {
+    console.error("Falta BV_TOKEN, o bien BV_USER y BV_PASS. Mira el encabezado de este archivo.");
     process.exit(1);
   }
 
