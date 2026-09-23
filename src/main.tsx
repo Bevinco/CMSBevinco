@@ -1078,12 +1078,17 @@ function App() {
   // cifras de "compra sugerida" no coincidian.
   const [parDraft, setParDraft] = useState<PurchaseParams>({ suggestionDays: 7, extraDays: 1, coverage: 0.25 });
   const [savingPar, setSavingPar] = useState(false);
+  // PAR por producto que se esta editando y aun no se guarda. Se acumulan
+  // todos los cambios y se mandan juntos: guardar uno por uno recalculaba la
+  // tabla entera en cada celda y no dejaba trabajar (QA Tamara 23-sep).
+  const [parItemDrafts, setParItemDrafts] = useState<Record<string, string>>({});
+  const [savingParItems, setSavingParItems] = useState(false);
   const [comprasMixes, setComprasMixes] = useState<BarMix[]>([]);
   const [comprasMixStock, setComprasMixStock] = useState<Record<string, string>>({});
   const [comprasMixSaving, setComprasMixSaving] = useState(false);
   const [comprasLoading, setComprasLoading] = useState(false);
   const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
-  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
+  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string; area?: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -1909,24 +1914,36 @@ function App() {
     buy: ((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(", "),
     cc: ((client as { ccRecipients?: string[] }).ccRecipients || []).join(", "),
   };
-  // PAR fijo de UN producto. Con par = null se borra y ese producto vuelve a
-  // calcularse con la regla. Al guardar se recalcula la sugerencia completa,
-  // porque cambia el pedido y el exceso de esa fila.
-  async function saveParFijo(clientId: string, item: string, par: number | null) {
-    if (!clientId || !item) return;
+  // Guarda TODOS los PAR editados de una vez y recalcula una sola vez.
+  // Un valor vacio borra el fijo y ese producto vuelve a la formula.
+  async function saveParItemDrafts(clientId: string, items: SuggestionItem[]) {
+    if (!clientId || savingParItems) return;
+    const cambios: Record<string, number | null> = {};
+    for (const [nombre, texto] of Object.entries(parItemDrafts)) {
+      const producto = items.find((item) => item.name === nombre);
+      if (!producto) continue;
+      const actual = producto.par ? String(Math.round(producto.par)) : "";
+      if (texto.trim() === actual) continue;
+      cambios[nombre] = texto.trim() === "" ? null : Number(texto);
+    }
+    const total = Object.keys(cambios).length;
+    if (!total) { setParItemDrafts({}); return; }
+
+    setSavingParItems(true);
     try {
       await readJson(await fetch(`/api/module1/clients/${clientId}/par-fijo`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ item, par }),
+        body: JSON.stringify({ items: cambios }),
       }));
-      setError(par === null
-        ? `PAR de "${item}" liberado: vuelve a calcularse con la regla.`
-        : `PAR de "${item}" fijado en ${par}. Recalculando la sugerencia...`);
+      setParItemDrafts({});
+      setError(`${total} PAR guardado(s). Recalculando la sugerencia...`);
       await loadComprasSuggestion(clientId);
     } catch (parError) {
-      setError(parError instanceof Error ? parError.message : "No se pudo guardar el PAR.");
+      setError(parError instanceof Error ? parError.message : "No se pudieron guardar los PAR.");
       setWorkStatus("error");
+    } finally {
+      setSavingParItems(false);
     }
   }
 
@@ -4828,6 +4845,37 @@ function App() {
                   </button>
                 </div>
               </div>
+              {(() => {
+                // Cuántos PAR quedaron tocados y aún sin guardar.
+                const pendientes = Object.entries(parItemDrafts).filter(([nombre, texto]) => {
+                  const producto = comprasData.items.find((item) => item.name === nombre);
+                  if (!producto) return false;
+                  return texto.trim() !== (producto.par ? String(Math.round(producto.par)) : "");
+                });
+                if (!pendientes.length) return null;
+                return (
+                  <div className="par-pendientes">
+                    <span>
+                      <b>{pendientes.length}</b> PAR editado{pendientes.length > 1 ? "s" : ""} sin guardar.
+                      {" "}La sugerencia se recalcula al guardar.
+                    </span>
+                    <div className="action-row">
+                      <button className="secondary-button" type="button" disabled={savingParItems} onClick={() => setParItemDrafts({})}>
+                        Descartar
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={savingParItems}
+                        onClick={() => saveParItemDrafts(comprasData.client.id, comprasData.items)}
+                      >
+                        {savingParItems ? <span className="btn-spinner" /> : <CheckCircle2 size={16} />}
+                        Guardar {pendientes.length} PAR y recalcular
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="compras-table-wrap">
                 <table className="compras-table">
                   <thead>
@@ -4847,21 +4895,32 @@ function App() {
                         <td className="num">
                           {/* PAR editable: hay equipos que lo tienen fijo por
                               producto en vez de calcularlo con la regla. Vacío
-                              = vuelve a la fórmula. */}
-                          <input
-                            className={`par-input${item.parFijo ? " is-fijo" : ""}`}
-                            type="number"
-                            min={0}
-                            title={item.parFijo ? "PAR fijo: ignora la fórmula. Bórralo para volver a calcularlo." : "PAR calculado con la regla. Escribe un número para fijarlo."}
-                            defaultValue={item.par ? Math.round(item.par) : ""}
-                            onBlur={(event) => {
-                              const escrito = event.target.value.trim();
-                              const actual = item.par ? String(Math.round(item.par)) : "";
-                              if (escrito === actual) return;
-                              saveParFijo(comprasData.client.id, item.name, escrito === "" ? null : Number(escrito));
-                            }}
-                            onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
-                          />
+                              = vuelve a la fórmula. Los cambios se acumulan y
+                              se guardan todos juntos con el botón de arriba. */}
+                          {(() => {
+                            const guardado = item.par ? String(Math.round(item.par)) : "";
+                            const enEdicion = parItemDrafts[item.name] !== undefined;
+                            const sinGuardar = enEdicion && parItemDrafts[item.name].trim() !== guardado;
+                            // En barra el PAR lo entrega Sculpture y manda el
+                            // suyo: fijarlo aquí no haría nada, así que no se
+                            // ofrece para no prometer algo que no ocurre.
+                            if (!/food/i.test(comprasData.client.area || "Food")) {
+                              return <span title="En barra el PAR lo calcula Sculpture; no se puede fijar desde el CMS.">{item.par ? Math.round(item.par) : "-"}</span>;
+                            }
+                            return (
+                              <input
+                                className={`par-input${sinGuardar ? " is-editado" : item.parFijo ? " is-fijo" : ""}`}
+                                type="number"
+                                min={0}
+                                title={item.parFijo ? "PAR fijo: ignora la fórmula. Bórralo para volver a calcularlo." : "PAR calculado con la regla. Escribe un número para fijarlo."}
+                                value={enEdicion ? parItemDrafts[item.name] : guardado}
+                                onChange={(event) => {
+                                  const valor = event.target.value;
+                                  setParItemDrafts((current) => ({ ...current, [item.name]: valor }));
+                                }}
+                              />
+                            );
+                          })()}
                         </td>
                         <td className="num">{item.suggested ? <strong>{Math.round(item.suggested)}</strong> : "0"}</td>
                         <td className="num">{item.orderCost ? money(item.orderCost) : "-"}</td>
