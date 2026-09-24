@@ -1686,7 +1686,12 @@ function grupoNoComprable(name) {
   const texto = String(name || "").trim();
   if (/no auditado|unknown|sin categor/i.test(texto)) return true;
   const sinTildes = texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return /^(aseo|auditoria mensual)$/i.test(sinTildes);
+  // "Otros" no es una familia de Sculpture: es la bolsa donde el CMS deja lo
+  // que no logro clasificar, y en el grafico no dice nada util (Mirko, TT
+  // Italia barra 24-sep). No sirve preguntarle al variance si la audita: hay
+  // reportes viejos que la traen en familyVariances porque se armaron con la
+  // taxonomia del CMS y no con los grupos de Sculpture.
+  return /^(aseo|auditoria mensual|otros)$/i.test(sinTildes);
 }
 
 function familyMergeKey(name) {
