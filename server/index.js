@@ -3879,6 +3879,28 @@ function agrupaFamiliasSugeridas(filas) {
 // La sugerencia por familia de un reporte: reagrupada con la regla VIGENTE si
 // el reporte guardo sus filas de origen, y si no la que quedo guardada. Es el
 // unico punto por el que deben leerse las familias sugeridas.
+// Las familias que el variance summary de Sculpture audita para un cliente,
+// juntando TODAS sus semanas guardadas. Se usa para decidir si una fila del
+// grafico de compra por familia corresponde: el Intelipar arrastra grupos que
+// la auditoria no incluye ("Cafeteria" en El Muelle, con dos leches sin
+// datos). Mirar solo la semana abierta no sirve — una familia real puede no
+// tener variance ese periodo y seguir siendo del local.
+function familiasAuditadasDelCliente(store, report, payload) {
+  const oficiales = new Set();
+  const agrega = (lista) => {
+    for (const item of lista || []) {
+      const nombre = item?.family;
+      if (nombre) oficiales.add(familyMergeKey(nombre));
+    }
+  };
+  agrega(payload?.familyVariances);
+  for (const candidato of store?.reports || []) {
+    if (candidato.clientId !== report?.clientId || candidato.monthly) continue;
+    agrega(candidato.familyVariances);
+  }
+  return oficiales;
+}
+
 function familiasSugeridas(report, client) {
   const reagrupado = agrupaFamiliasSugeridas(report?.familyRows);
   if (reagrupado?.length) return reagrupado;
@@ -5438,6 +5460,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     .filter((item) => (item.suggested || 0) > 0 && !isAdminGroupPdf(item.family))
     .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }))
     .sort((left, right) => right.suggested - left.suggested);
+  // Familias que Sculpture audita para ESTE cliente, mirando TODOS sus
+  // reportes y no solo esta semana: una familia real puede no tener variance
+  // en un periodo puntual (Harina, Postres) y seguir siendo del local.
+  const familiasOficiales = familiasAuditadasDelCliente(store, report, payload);
   const mergedPdfFamilies = new Map();
   for (const [family, purchased] of [...purchasesMap.entries()].filter(([family]) => !isAdminGroupPdf(family))) {
     const key = familyKeyOfPdf(family);
@@ -5452,6 +5478,13 @@ function renderTwoPageReportHtml(store, report, options = {}) {
   const familyPurchaseRows = [...mergedPdfFamilies.values()]
     // Todas las familias del cliente, aunque la semana traiga $0 en compra y
     // sugerida: desaparecerlas parecia un grafico incompleto (doc 08-sep).
+    // Pero SOLO las familias de la auditoria: el Intelipar arrastra grupos que
+    // el variance no audita ("Cafeteria" en El Muelle, con dos leches sin
+    // datos) y salian como una fila vacia que el equipo no reconoce
+    // (Mirko, 24-sep). Si ademas no mueven plata, no aportan nada.
+    .filter((row) => familiasOficiales.size === 0
+      || familiasOficiales.has(familyKeyOfPdf(row.family))
+      || row.purchased > 0 || row.suggested > 0)
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
     .slice(0, 14);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
@@ -6483,8 +6516,16 @@ function dynamicReportData(store, report) {
     if (!mergedFamilies.has(key)) mergedFamilies.set(key, { family: item.family, purchased: 0, suggested: 0 });
     mergedFamilies.get(key).suggested += item.suggested || 0;
   }
+  // Familias que Sculpture audita para este cliente (todas sus semanas).
+  const familiasAuditadas = familiasAuditadasDelCliente(store, report, payload);
   const familyPurchases = [...mergedFamilies.values()]
-    // Todas las familias, aunque la semana sea $0/$0 (doc 08-sep).
+    // Todas las familias, aunque la semana sea $0/$0 (doc 08-sep). Pero solo
+    // las auditadas: el Intelipar arrastra grupos que el variance no incluye
+    // ("Cafeteria" en El Muelle) y aparecian como una fila vacia que el
+    // equipo no reconoce (Mirko, 24-sep). Si mueven plata, se muestran igual.
+    .filter((row) => familiasAuditadas.size === 0
+      || familiasAuditadas.has(familyKeyOf(row.family))
+      || row.purchased > 0 || row.suggested > 0)
     .sort((left, right) => (right.purchased + right.suggested) - (left.purchased + left.suggested))
     .slice(0, 14);
   const savings = Number.isFinite(payload.summary?.savingsTotal)
