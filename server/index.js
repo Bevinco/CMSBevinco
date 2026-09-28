@@ -1777,8 +1777,14 @@ function resolveFamily(category, parentOf) {
   return "Otros";
 }
 
-function aggregateByFamily(entries, parentOf, familyOf) {
-  const map = new Map(REPORT_FAMILIES.map((family) => [family, 0]));
+// `semilla` son las familias que se muestran aunque queden en $0. Por defecto
+// las seis clasicas de barra; cuando el variance summary trajo los grupos
+// REALES del local se pasan esos, y las seis dejan de sembrarse. Si no, el
+// grafico mostraba las dos taxonomias juntas ("Vinos" y "Vino", "Cervezas y
+// Sidra" y "Cervezas y Cocteles") para el mismo local.
+function aggregateByFamily(entries, parentOf, familyOf, semilla = null) {
+  const base = semilla && semilla.length ? semilla : REPORT_FAMILIES;
+  const map = new Map(base.map((family) => [family, 0]));
   const unresolved = new Set();
   for (const { category, value } of entries) {
     const key = String(category || "").toLowerCase().trim();
@@ -1792,7 +1798,7 @@ function aggregateByFamily(entries, parentOf, familyOf) {
     console.warn("[familias] categorias sin familia (quedan en Otros):", [...unresolved].join(", "));
   }
   return [...map.entries()]
-    .filter(([family, value]) => REPORT_FAMILIES.includes(family) || value)
+    .filter(([family, value]) => base.includes(family) || value)
     .map(([family, value]) => ({ family, value: Math.round(value) }));
 }
 
@@ -1837,13 +1843,13 @@ function dropParentTotals(entries) {
   return kept;
 }
 
-function aggregateReportGroups(rawEntries, { dropParents = true, parentOf, familyOf } = {}) {
+function aggregateReportGroups(rawEntries, { dropParents = true, parentOf, familyOf, semilla = null } = {}) {
   // dropParents solo tiene sentido cuando las entradas vienen de filas de
   // TOTALES (donde un total "padre" duplicaria a sus hijos). Con entradas de
   // productos individuales borraba por error cualquier producto cuyo monto
   // coincidiera con la suma de los anteriores, descuadrando las familias.
   const entries = dropParents ? dropParentTotals(rawEntries) : rawEntries;
-  const familyRows = aggregateByFamily(entries, parentOf, familyOf);
+  const familyRows = aggregateByFamily(entries, parentOf, familyOf, semilla);
   const totalAbs = entries.reduce((sum, item) => sum + Math.abs(item.value || 0), 0);
   // Peso BRUTO de lo que cae en "Otros" (no el neto): en cocina las
   // categorias se cancelan entre si (+carnes, -verduras) y con el neto el
@@ -4161,11 +4167,23 @@ async function syncSculptureSources(store, report, requestBody = {}) {
             if (FAMILIAS_DE_BARRA.has(familia)) delete learnedFamilies[hoja];
           }
         }
-        // Cocinas: la jerarquia hoja -> familia del variance summary manda,
-        // para que sugerencia y variance grafiquen las MISMAS familias
-        // (Carnes, Lacteos...) y no una mezcla de hojas (Vacuno, Quesos...).
-        for (const [leaf, family] of Object.entries((summaryFamilyGroups?.isFood && summaryFamilyGroups.leafToFamily) || {})) {
+        // La jerarquia hoja -> familia del variance summary manda, para que
+        // sugerencia y variance grafiquen las MISMAS familias y no una mezcla
+        // de hojas (Vacuno, Quesos...) ni de nombres inventados. Vale tambien
+        // en barra: es lo que junta cerveza y cocteles bajo la familia que
+        // Sculpture tiene ("Cervezas y Cocteles" en Candelaria).
+        const familiasDelSummary = (summaryFamilyGroups?.families || []).map((group) => group.family);
+        for (const [leaf, family] of Object.entries(summaryFamilyGroups?.leafToFamily || {})) {
           learnedFamilies[leaf] = family;
+        }
+        // Y lo aprendido ANTES con la taxonomia del CMS se descarta: si no,
+        // quedaban conviviendo "Vinos" (inventada) y "Vino" (la de Sculpture)
+        // para el mismo local.
+        if (familiasDelSummary.length >= 2) {
+          const validas = new Set(familiasDelSummary.map((nombre) => familyMergeKey(nombre)));
+          for (const [hoja, familia] of Object.entries(learnedFamilies)) {
+            if (!validas.has(familyMergeKey(familia))) delete learnedFamilies[hoja];
+          }
         }
         if (client) client.categoryFamilies = learnedFamilies;
         // COCINA: la sugerencia se agrupa por la MISMA familia superior del
@@ -4193,7 +4211,14 @@ async function syncSculptureSources(store, report, requestBody = {}) {
           familySuggested = agrupaFamiliasSugeridas(filasFamilia);
         }
         if (!familySuggested) {
-          familySuggested = aggregateReportGroups(suggestedEntries, { dropParents: false, parentOf: suggestedParentOf, familyOf: learnedFamilies }).map(({ family, value }) => ({ family, suggested: value }));
+          familySuggested = aggregateReportGroups(suggestedEntries, {
+            dropParents: false,
+            parentOf: suggestedParentOf,
+            familyOf: learnedFamilies,
+            // Las familias del local segun Sculpture: sin esto se sembraban
+            // las seis clasicas y el grafico mostraba las dos taxonomias.
+            semilla: (summaryFamilyGroups?.families || []).map((group) => group.family),
+          }).map(({ family, value }) => ({ family, suggested: value }));
         }
         if (familySuggested.length) {
           report.familySuggested = familySuggested;
@@ -4231,7 +4256,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
   // total, y el grafico deja de mostrar hojas como si fueran familias.
   if ((summaryFamilyGroups?.families || []).length >= 2) {
     report.familyVariances = summaryFamilyGroups.families.map((group) => ({ family: group.family, amount: Math.round(group.amount) }));
-    if (summaryFamilyGroups.isFood && summaryFamilyGroups.families.some((group) => group.purchased)) {
+    if (summaryFamilyGroups.families.some((group) => group.purchased)) {
       report.familyPurchases = summaryFamilyGroups.families.map((group) => ({ family: group.family, purchased: Math.round(group.purchased) }));
     }
   }
