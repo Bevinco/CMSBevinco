@@ -161,6 +161,9 @@ type Report = {
   clientId: string;
   periodId: string;
   status: ReportStatus;
+  // Control de familias que hace el servidor al generar: plata de la
+  // sugerencia bajo familias que Sculpture no audita para ese local.
+  familyCheck?: { revisadoEl?: string; problemas?: Array<{ family: string; suggested: number }>; sinReferencia?: boolean };
   workflowState?: string;
   analysisSource?: string;
   updatedAt: string;
@@ -3259,6 +3262,22 @@ function App() {
               Sculpture no reporta ventas para este período, así que los gráficos y tablas quedan vacíos a propósito
               (no se publican cifras a medio cerrar). Si la semana aún está abierta, vuelve a generar el reporte
               cuando esté cerrada en Sculpture con su conteo final.
+            </p>
+          ) : null}
+          {/* Control de familias: el sistema revisa al generar que la plata de
+              la sugerencia quede bajo familias que Sculpture audita. Si no,
+              se avisa ANTES de enviar — tres veces en septiembre lo detectó
+              el equipo mirando el PDF ya armado. */}
+          {selectedReport?.familyCheck?.problemas?.length ? (
+            <p className="period-open-note family-check-note">
+              <b>Revisar antes de enviar:</b> la sugerencia de compra tiene plata en familias que Sculpture no audita
+              para este local —{" "}
+              {selectedReport.familyCheck.problemas.map((problema, indice) => (
+                <span key={problema.family}>
+                  {indice ? ", " : ""}<b>{problema.family}</b> {money(problema.suggested)}
+                </span>
+              ))}
+              . Suele pasar cuando un producto quedó mal categorizado en Sculpture; avisa al equipo de desarrollo si no es eso.
             </p>
           ) : null}
           <section className="panel workspace-panel" id="workspace">

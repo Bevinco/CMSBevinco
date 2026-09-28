@@ -3890,6 +3890,21 @@ function agrupaFamiliasSugeridas(filas) {
 // La sugerencia por familia de un reporte: reagrupada con la regla VIGENTE si
 // el reporte guardo sus filas de origen, y si no la que quedo guardada. Es el
 // unico punto por el que deben leerse las familias sugeridas.
+// Familias de la sugerencia que traen plata y NO son familias del variance de
+// Sculpture para esa semana. Los grupos que el CMS ya trata como no comprables
+// (No Auditados, UNKNOWN, aseo...) se excluyen: esos se ocultan a proposito.
+// Sin variance no hay contra que comparar y el control no opina.
+function revisaFamiliasDeLaSugerencia(report) {
+  const oficiales = new Set((report.familyVariances || []).map((item) => familyMergeKey(item.family)));
+  const revisadoEl = new Date().toISOString();
+  if (oficiales.size < 2) return { revisadoEl, problemas: [], sinReferencia: true };
+  const problemas = (report.familySuggested || [])
+    .filter((item) => Math.abs(item.suggested || 0) >= 1)
+    .filter((item) => !grupoNoComprable(item.family) && !oficiales.has(familyMergeKey(item.family)))
+    .map((item) => ({ family: item.family, suggested: Math.round(item.suggested || 0) }));
+  return { revisadoEl, problemas };
+}
+
 // Las familias que el variance summary de Sculpture audita para un cliente,
 // juntando TODAS sus semanas guardadas. Se usa para decidir si una fila del
 // grafico de compra por familia corresponde: el Intelipar arrastra grupos que
@@ -4309,6 +4324,17 @@ async function syncSculptureSources(store, report, requestBody = {}) {
     report.categoryVariances = [];
     report.familyVariances = [];
     report.familyPurchases = [];
+  }
+
+  // Control de familias en CADA sincronizacion: que la plata de la sugerencia
+  // quede bajo familias que Sculpture audita. Tres veces en septiembre la
+  // sugerencia de un local cayo bajo un nombre inventado ("Otros", "Cervezas y
+  // Sidra", "Cocina") y lo detecto el equipo mirando el PDF. Ahora lo detecta el
+  // sistema al generar, lo deja en el reporte para el aviso del workspace y lo
+  // escribe en el log. scripts/auditoria-familias.js hace la version completa.
+  report.familyCheck = revisaFamiliasDeLaSugerencia(report);
+  if (report.familyCheck.problemas.length) {
+    console.warn(`[familias] ${client?.name || report.clientId} · ${report.periodId}: ${report.familyCheck.problemas.map((p) => `${p.family} $${p.suggested}`).join(", ")} fuera de las familias de Sculpture`);
   }
 
   report.updatedAt = new Date().toISOString();
