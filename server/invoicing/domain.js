@@ -30,6 +30,39 @@ export function convertNetLine({ quantity, netLineTotal, targetUnitsPerSourceUni
   return { targetQuantity, targetNetUnitPrice, netLineTotal };
 }
 
+// Explicit product-level costing basis, approved by the operator. A dessert can
+// have a known weight and still be costed per piece. Never infer basis from name,
+// EACH/UNIT labels, numeric-only sizes, or from a cooking yield.
+export function normalizePurchaseCost({
+  quantity, netLineTotal, purchaseUnit, costBasis,
+  unitsPerPurchaseUnit, contentPerUnit, measuredTotalKg,
+}) {
+  positive(quantity, "Cantidad comprada");
+  nonnegative(netLineTotal, "Importe neto");
+  if (!["kg", "unit", "L"].includes(costBasis)) throw new Error("Confirma si el producto se costea por kg, unidad o litro.");
+  if (!["kg", "g", "L", "ml", "unit", "case"].includes(purchaseUnit)) throw new Error("Formato de compra sin equivalencia confirmada.");
+  let factor;
+  if (costBasis === "kg" && measuredTotalKg != null) {
+    // For variable-weight packs, actual purchased weight wins over nominal size.
+    factor = positive(measuredTotalKg, "Peso total comprado") / quantity;
+  } else if (costBasis === "kg" && ["kg", "g"].includes(purchaseUnit)) {
+    factor = purchaseUnit === "kg" ? 1 : 0.001;
+  } else if (costBasis === "L" && ["L", "ml"].includes(purchaseUnit)) {
+    factor = purchaseUnit === "L" ? 1 : 0.001;
+  } else if (["unit", "case"].includes(purchaseUnit)) {
+    const count = positive(unitsPerPurchaseUnit, "Unidades por formato de compra");
+    if (costBasis === "unit") factor = count;
+    else {
+      const conversions = costBasis === "kg" ? { kg: 1, g: 0.001 } : { L: 1, ml: 0.001 };
+      const conversion = Object.hasOwn(conversions, contentPerUnit?.unit) ? conversions[contentPerUnit.unit] : undefined;
+      if (conversion === undefined) throw new Error("Falta contenido compatible con la unidad de costeo; no se pueden suponer kilos a partir de litros.");
+      factor = count * positive(contentPerUnit.value, "Contenido por unidad") * conversion;
+    }
+  } else throw new Error("No hay conversión confirmada entre el formato comprado y la unidad de costeo.");
+  const result = convertNetLine({ quantity, netLineTotal, targetUnitsPerSourceUnit: factor });
+  return { costBasis, baseQuantity: result.targetQuantity, netCostPerBaseUnit: result.targetNetUnitPrice, netLineTotal };
+}
+
 // A learned rule applies only to this client, supplier AND original presentation.
 // The caller must resolve supplierId from the supplier registered in SH first.
 export function mappingKey({ clientId, supplierId, sourceProduct, sourcePresentation }) {
@@ -85,6 +118,7 @@ export function validateInvoice(invoice, { moneyTolerance = 1 } = {}) {
   for (const [index, line] of (Array.isArray(invoice.lines) ? invoice.lines : []).entries()) {
     try {
       convertNetLine(line);
+      normalizePurchaseCost(line);
     } catch (error) {
       errors.push(`Línea ${index + 1}: ${error.message}`);
     }
