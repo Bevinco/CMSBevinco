@@ -1,75 +1,86 @@
-import React, { useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { reviewDraft, parseReviewFile } from '../../server/invoicing/review.js';
-import type { Draft, Line } from './types';
+import React,{useEffect,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {reviewDraft} from '../../server/invoicing/review.js';
+import type {Draft,Line,Catalog,InvoiceRecord,CatalogItem} from './types';
 import './review.css';
-const id = () => crypto.randomUUID();
-const blankLine = (): Line => ({id:id(),description:'',kind:'food',quantity:null,netLineTotal:null,purchaseUnit:'',costBasis:'',unitsPerPurchaseUnit:null,contentPerUnit:{value:null,unit:'g'},measuredTotalKg:null,reviewed:false,note:''});
-const blank = (): Draft => ({id:id(),clientId:'28922',supplier:'',supplierRut:'',documentType:'factura',folio:'',date:'',net:null,vat:null,otherTaxes:0,total:null,taxExceptionReviewed:false,lines:[blankLine()]});
-const money = (n:number) => new Intl.NumberFormat('es-CL',{maximumFractionDigits:3}).format(n);
-function NumberField({label,value,onChange}:{label:string,value:number|null,onChange:(v:number|null)=>void}) {
-  return <label>{label}<input type="number" min="0" step="any" value={value??''} onChange={e=>onChange(e.target.value===''?null:e.target.valueAsNumber)}/></label>;
+const id=()=>crypto.randomUUID();
+const blankLine=():Line=>({id:id(),description:'',kind:'food',quantity:null,netLineTotal:null,purchaseUnit:'',costBasis:'',unitsPerPurchaseUnit:null,contentPerUnit:{value:null,unit:'g'},measuredTotalKg:null,reviewed:false,note:'',sourcePresentation:'',productId:'',presentationId:'',targetQuantity:null,mappingReviewed:false});
+const blank=(clientId:string):Draft=>({id:id(),clientId,supplier:'',supplierRut:'',supplierId:'',documentType:'factura',folio:'',date:'',net:null,vat:null,otherTaxes:null,total:null,taxExceptionReviewed:false,lines:[blankLine()]});
+const money=(n:number|null|undefined)=>n==null?'—':new Intl.NumberFormat('es-CL',{maximumFractionDigits:3}).format(n);
+async function api(url:string,options:RequestInit={}){
+ const r=await fetch('/api/invoicing'+url,{...options,headers:{'Content-Type':'application/json',...options.headers}});
+ const data=await r.json().catch(()=>({error:'No se pudo conectar al módulo. Inicia sesión en el CMS.'}));
+ if(!r.ok)throw new Error(data.error||`Error ${r.status}`);return data;
 }
-function App() {
-  const [draft,setDraft]=useState<Draft>(blank);
-  const [file,setFile]=useState<File|null>(null);
-  const [url,setUrl]=useState('');
-  const [saved,setSaved]=useState<Draft[]>([]);
-  const [notice,setNotice]=useState('');
-  const report=reviewDraft(draft,saved);
-  useEffect(()=>{if(!file){setUrl('');return;} const u=URL.createObjectURL(file);setUrl(u);return()=>URL.revokeObjectURL(u);},[file]);
-  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
-  const patch=(change:Partial<Draft>)=>{setDraft(d=>({...d,...change,taxExceptionReviewed: ('net' in change || 'vat' in change) ? false : (change.taxExceptionReviewed ?? d.taxExceptionReviewed)}));setNotice('');};
-  const linePatch=(index:number,change:Partial<Line>)=>patch({lines:draft.lines.map((l,i)=>i===index?{...l,...change,reviewed:change.reviewed??false}:l)});
-  function selectFile(f:File|undefined) {
-    if(!f)return;
-    if(!['application/pdf','image/jpeg','image/png','image/webp'].includes(f.type)||f.size>10*1024*1024){setNotice('Usa un PDF, JPG, PNG o WEBP de hasta 10 MB.');return;}
-    if(file&&!window.confirm('Cambiar el documento inicia una factura vacía. Descarga antes el borrador si quieres conservarlo.'))return;
-    setFile(f);setDraft(blank());setNotice('Documento abierto. Ingresa los datos junto al original; esta prueba aún no realiza lectura automática.');
-  }
-  async function restore(f:File|undefined) {
-    if(!f)return;
-    if(f.size>2*1024*1024){setNotice('El borrador supera 2 MB.');return;}
-    try {
-      const restored=parseReviewFile(await f.text());
-      if(!window.confirm('¿Abrir este borrador? Sustituirá los datos actuales. Abre primero su factura original si necesitas verla al lado.'))return;
-      setDraft(restored);setNotice('Borrador recuperado. Comprueba que el documento visible corresponde al mismo proveedor y folio; el archivo JSON no contiene la factura original.');
-    } catch {setNotice('No se pudo abrir: usa un borrador JSON descargado desde esta prueba.');}
-  }
-  function download() {
-    const blob=new Blob([JSON.stringify({version:1,status:'draft',documentName:file?.name??null,invoice:draft,validation:report.errors},null,2)],{type:'application/json'});
-    const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='revision-factura-borrador.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
-    setSaved(rows=>[...rows.filter(r=>r.id!==draft.id),structuredClone(draft)]);setNotice('Borrador descargado. Conserva también la factura original. No se ha registrado en CMS ni en SH.');
-  }
-  function example() {
-    if((file||draft.supplier||draft.lines[0]?.description)&&!window.confirm('¿Reemplazar el borrador por un ejemplo ficticio? Descarga primero los cambios que quieras conservar.'))return;
-    setFile(null);setDraft({...blank(),clientId:'demo-kitchen',supplier:'Proveedor de ejemplo',supplierRut:'11111111-1',folio:'DEMO-001',date:'2026-01-01',net:20000,vat:3800,total:23800,lines:[{...blankLine(),description:'Producto ficticio — caja de 4 bolsas de 2,5 kg',quantity:2,netLineTotal:20000,purchaseUnit:'case',costBasis:'kg',unitsPerPurchaseUnit:4,contentPerUnit:{value:2.5,unit:'kg'},reviewed:true}]});setNotice('Ejemplo ficticio: 2 cajas × 4 bolsas × 2,5 kg = 20 kg; costo neto $1.000/kg.');
-  }
-  return <main>
-    <header><div><span className="brand">BEVINCO / COCINA</span><h1>Revisión de facturas</h1><p>Original, cantidades y costos netos en un mismo lugar.</p></div><span className="badge">Prueba · borradores</span></header>
-    <aside className="intro">Prueba local: los archivos se abren en tu navegador. Descarga el borrador antes de cerrar; los cambios no se guardan automáticamente. La lectura automática y la asociación al catálogo SH están pendientes.</aside>
-    <div className="toolbar"><label className="upload">Abrir factura<input aria-label="Abrir factura" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={e=>{selectFile(e.target.files?.[0]);e.target.value='';}}/></label><label className="upload">Recuperar borrador<input aria-label="Recuperar borrador" type="file" accept="application/json,.json" onChange={e=>{void restore(e.target.files?.[0]);e.target.value='';}}/></label><button onClick={example}>Probar ejemplo ficticio</button><button onClick={download}>Descargar borrador</button></div>
-    {notice&&<p role="status" className="notice">{notice}</p>}
-    <div className="workspace"><section className="viewer"><h2>Documento original</h2>{file?<><p>{file.name}</p><a href={url} target="_blank" rel="noreferrer">Abrir original en otra pestaña</a>{file.type==='application/pdf'?<iframe title="Factura original" src={url}/>:<img alt="Factura original" src={url}/>}</>:<div className="empty">Abre una factura PDF o una foto para revisarla aquí.<br/>Puedes probar los cálculos con el ejemplo ficticio.</div>}</section>
-    <section className="editor"><h2>Datos de la factura</h2><p>{draft.clientId==='28922'?'Piloto: El Muelle Cocina · 28922':'Ejemplo ficticio · sin cliente real'}</p>
-      <div className="fields"><label>Proveedor<input value={draft.supplier} onChange={e=>patch({supplier:e.target.value})}/></label><label>RUT proveedor<input value={draft.supplierRut} onChange={e=>patch({supplierRut:e.target.value})}/></label><label>Folio<input value={draft.folio} onChange={e=>patch({folio:e.target.value})}/></label><label>Fecha<input type="date" value={draft.date} onChange={e=>patch({date:e.target.value})}/></label></div>
-      <div className="section-title"><h2>Productos y cargos</h2><button onClick={()=>patch({lines:[...draft.lines,blankLine()]})}>Agregar línea</button></div>
-      {draft.lines.map((line,i)=><article className="line" key={line.id}><div className="section-title"><h3>Línea {i+1}</h3><button aria-label={`Quitar línea ${i+1}`} onClick={()=>{if(window.confirm('¿Quitar esta línea del borrador?'))patch({lines:draft.lines.filter((_,n)=>n!==i)});}}>Quitar</button></div>
-        <label>Descripción en factura<input value={line.description} onChange={e=>linePatch(i,{description:e.target.value})}/></label>
-        <label>Tipo<select value={line.kind} onChange={e=>linePatch(i,{kind:e.target.value as Line['kind']})}><option value="food">Alimento</option><option value="delivery">Despacho</option><option value="supply">Insumo no alimentario</option></select></label>
-        <div className="fields"><NumberField label="Cantidad comprada" value={line.quantity} onChange={v=>linePatch(i,{quantity:v})}/><NumberField label="Importe neto de la línea ($)" value={line.netLineTotal} onChange={v=>linePatch(i,{netLineTotal:v})}/></div>
-        {line.kind==='food'&&<><div className="fields"><label>Unidad de compra<select value={line.purchaseUnit} onChange={e=>linePatch(i,{purchaseUnit:e.target.value})}><option value="">Por confirmar</option>{[['kg','Kilos'],['g','Gramos'],['L','Litros'],['ml','Mililitros'],['unit','Unidad / envase'],['case','Caja / pack']].map(([v,t])=><option value={v} key={v}>{t}</option>)}</select></label><label>Costear por<select value={line.costBasis} onChange={e=>linePatch(i,{costBasis:e.target.value})}><option value="">Por confirmar</option><option value="kg">Kilo</option><option value="unit">Unidad</option><option value="L">Litro</option></select></label></div>
-        {['case','unit'].includes(line.purchaseUnit)&&<><NumberField label="Unidades contenidas por caja o envase" value={line.unitsPerPurchaseUnit} onChange={v=>linePatch(i,{unitsPerPurchaseUnit:v})}/>{line.costBasis!=='unit'&&<div className="fields"><NumberField label="Contenido de cada unidad" value={line.contentPerUnit.value} onChange={v=>linePatch(i,{contentPerUnit:{...line.contentPerUnit,value:v}})}/><label>Unidad del contenido<select value={line.contentPerUnit.unit} onChange={e=>linePatch(i,{contentPerUnit:{...line.contentPerUnit,unit:e.target.value}})}>{['g','kg','ml','L'].map(v=><option key={v}>{v}</option>)}</select></label></div>}</>}
-        {line.costBasis==='kg'&&<NumberField label="Peso real total comprado (kg, opcional)" value={line.measuredTotalKg} onChange={v=>linePatch(i,{measuredTotalKg:v})}/>}</>}
-        <label>{line.kind==='food'?'Duda o aclaración pendiente':'Tratamiento del cargo / insumo'}<input value={line.note} onChange={e=>linePatch(i,{note:e.target.value})}/></label>
-        {line.kind==='food'&&<label className="check"><input type="checkbox" checked={line.reviewed} onChange={e=>linePatch(i,{reviewed:e.target.checked})}/>He verificado cantidad, contenido y unidad de costeo.</label>}
-        {report.results[i].cost&&<p className="cost">{line.reviewed?'Cálculo revisado':'Cálculo provisional'}: {money(report.results[i].cost!.baseQuantity)} {line.costBasis==='unit'?'unidades':line.costBasis} · ${money(report.results[i].cost!.netCostPerBaseUnit)} netos/{line.costBasis==='unit'?'unidad':line.costBasis}</p>}
-        {report.results[i].issues.length>0&&<p className="pending">{report.results[i].issues.join(' ')}</p>}
-      </article>)}
-      <h2>Conciliación de importes</h2><p>IVA y otros impuestos se usan solo para comprobar el documento; no se suman al costo del producto.</p><div className="fields">{([['net','Neto documental ($)'],['vat','IVA ($)'],['otherTaxes','Otros impuestos ($)'],['total','Total factura ($)']] as const).map(([key,label])=><NumberField key={key} label={label} value={draft[key]} onChange={v=>patch({[key]:v})}/>)}</div>
-      <label className="check"><input type="checkbox" checked={draft.taxExceptionReviewed} onChange={e=>patch({taxExceptionReviewed:e.target.checked})}/>Revisé el tratamiento de IVA si es distinto del 19%.</label>
-      <div className={report.readyForMapping?'summary ready':'summary'} aria-live="polite"><h2>{report.readyForMapping?'Cálculos listos para revisar equivalencias SH':`${report.errors.length} puntos pendientes`}</h2><p>Suma de líneas: ${money(report.sum)}</p>{report.errors.length>0&&<ul>{report.errors.map((e,i)=><li key={i}>{e}</li>)}</ul>}<p>La comprobación de duplicados abarca solo los borradores descargados en esta sesión. No consulta facturas existentes en SH o CMS.</p><strong>Estado: borrador. No habilita carga ni importación.</strong></div>
-    </section></div>
-  </main>;
+function download(name:string,text:string,type='application/json') {const u=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
+function NumberField({label,value,onChange}:{label:string;value:number|null|undefined;onChange:(v:number|null)=>void}){return <label>{label}<input type="number" min="0" step="any" value={value??''} onChange={e=>onChange(e.target.value===''?null:e.target.valueAsNumber)}/></label>;}
+function CatalogChoice({items,line,onChange}:{items:CatalogItem[];line:Line;onChange:(c:Partial<Line>)=>void}){
+ const [search,setSearch]=useState('');const selected=items.find(x=>x.presentationId===line.presentationId&&x.productId===line.productId);
+ const norm=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const options=items.filter(x=>x===selected||!search||norm(x.name+' '+x.size).includes(norm(search))).slice(0,80);
+ if(selected&&!options.includes(selected))options.unshift(selected);
+ return <><label>Buscar producto en el catálogo<input placeholder="Nombre del producto" value={search} onChange={e=>setSearch(e.target.value)}/></label><label>Producto y presentación SH<select value={selected?selected.productId+'|'+selected.presentationId:''} onChange={e=>{const [productId,presentationId]=e.target.value.split('|');onChange({productId:productId||'',presentationId:presentationId||'',mappingReviewed:false,targetQuantity:null,acknowledgePrice:false});}}><option value="">Seleccionar · {items.length} presentaciones disponibles</option>{options.map(x=><option key={x.productId+'|'+x.presentationId} value={x.productId+'|'+x.presentationId}>{x.name} · {x.unit} ({x.size}){x.validFormat===false?' · formato incompleto':''}</option>)}</select></label>{selected?.validFormat===false&&<p className="pending">Esta presentación tiene contenido incompleto. La exportación quedará bloqueada hasta validarlo.</p>}</>;
+}
+function App(){
+ const [clients,setClients]=useState<{id:string;name:string}[]>([]);const [cid,setCid]=useState('28922');const [catalog,setCatalog]=useState<Catalog>({clientId:cid,items:[],suppliers:[]});
+ const [list,setList]=useState<any[]>([]);const [record,setRecord]=useState<InvoiceRecord|null>(null);const [draft,setDraft]=useState<Draft>(blank(cid));const [dirty,setDirty]=useState(false);
+ const [notice,setNotice]=useState('');const [busy,setBusy]=useState(false);const [report,setReport]=useState<any>(null);const [reviewed,setReviewed]=useState(false);const [auto,setAuto]=useState(false);const [manual,setManual]=useState(false);const [csvFolio,setCsvFolio]=useState('');const [storage,setStorage]=useState('');
+ const calculation=reviewDraft(draft);const base='/'+cid;
+ const refresh=async()=>setList(await api(base+'/invoices'));
+ useEffect(()=>{api('/config').then(c=>{setClients(c.clients);setAuto(c.extractionEnabled);setStorage(c.storage);}).catch(e=>setNotice(e.message));},[]);
+ useEffect(()=>{let active=true;setRecord(null);setDraft(blank(cid));setCatalog({clientId:cid,items:[],suppliers:[]});setList([]);setDirty(false);setReport(null);setReviewed(false);Promise.all([api(base+'/catalog'),api(base+'/invoices')]).then(([c,l])=>{if(active){setCatalog(c);setList(l);}}).catch(e=>{if(active)setNotice(e.message);});return()=>{active=false;};},[cid]);
+ useEffect(()=>{if(!dirty)return;const f=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};window.addEventListener('beforeunload',f);return()=>window.removeEventListener('beforeunload',f);},[dirty]);
+ const run=async(f:()=>Promise<void>)=>{setBusy(true);setNotice('');try{await f();}catch(e){setNotice((e as Error).message);}finally{setBusy(false);}};
+ const loadRecord=(r:InvoiceRecord)=>{setRecord(r);setDraft(r.draft);setDirty(false);setReport(null);setReviewed(false);};
+ const patch=(change:Partial<Draft>)=>{setDraft(d=>({...d,...change,taxExceptionReviewed:('net' in change||'vat' in change)?false:(change.taxExceptionReviewed??d.taxExceptionReviewed),lines:('supplierId' in change||'supplierRut' in change||'folio' in change||'date' in change)?d.lines.map(l=>({...l,mappingReviewed:false,acknowledgePrice:false})):change.lines??d.lines}));setDirty(true);setReport(null);setReviewed(false);};
+ const linePatch=(n:number,c:Partial<Line>)=>patch({lines:draft.lines.map((l,i)=>i===n?{...l,...c,reviewed:c.reviewed??false,mappingReviewed:c.mappingReviewed??false,acknowledgePrice:c.acknowledgePrice??false}:l)});
+ const acknowledge=(n:number,c:Partial<Line>)=>patch({lines:draft.lines.map((l,i)=>i===n?{...l,...c}:l)});
+ const mayLeave=()=>!dirty||window.confirm('Hay cambios sin guardar. ¿Descartarlos para abrir otra factura?');
+ async function open(rid:string){if(!mayLeave())return;await run(async()=>{loadRecord(await api(base+'/invoices/'+rid));});}
+ async function save(){const r=await api(base+'/invoices'+(record?'/'+record.id:''),{method:record?'PUT':'POST',body:JSON.stringify({draft,version:record?.version})});loadRecord(r);await refresh();return r as InvoiceRecord;}
+ async function upload(file:File|undefined){
+  if(!file||!mayLeave())return;
+  await run(async()=>{
+   if(file.size>10*1024*1024)throw new Error('Máximo 10 MB por documento.');
+   const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});
+   const type=file.name.toLowerCase().endsWith('.csv')?'text/csv':file.type;
+   setNotice(manual?'Guardando documento…':'Leyendo el documento. Puede tardar hasta dos minutos…');
+   const r=await api(base+'/documents',{method:'POST',body:JSON.stringify({file:{name:file.name,type,data},manual:manual||!auto,folio:csvFolio})});
+   loadRecord(r);await refresh();setNotice('Original y lectura guardados como borrador. Revisa cifras, formatos y equivalencias antes de confirmar.');
+  });
+ }
+ async function check(){await run(async()=>{const r=dirty||!record?await save():record;setReport(await api(base+'/invoices/'+r.id+'/review',{method:'POST',body:'{}'}));});}
+ const sourceUrl=record?.source?'/api/invoicing'+base+'/invoices/'+record.id+'/source':'';
+ return <main>
+  <header><div><span className="brand">BEVINCO / COCINA</span><h1>Revisión de facturas</h1><p>Lee el original, valida la compra y prepara su importación.</p></div><span className="badge">{storage==='local'?'Entorno de prueba':'Piloto cocina'} · {dirty?'Cambios sin guardar':record?.status==='confirmed'?'Confirmada':'Borrador'}</span></header>
+  <aside className="intro">Las compras se preparan con valores netos, antes de rendimiento y con Taxes en cero. La importación a SH es manual. Los duplicados se comprueban contra los registros guardados; verifica también el período de SH antes de importar. {storage==='local'?'Los documentos de esta prueba se guardan en el servidor local.':'Los borradores se conservan al guardarlos.'}</aside>
+  <div className="toolbar"><label>Cliente<select disabled={busy} value={cid} onChange={e=>{if(mayLeave())setCid(e.target.value);}}>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="upload">Abrir PDF, foto o CSV<input disabled={busy} aria-label="Abrir factura" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,text/csv,.csv" onChange={e=>{void upload(e.target.files?.[0]);e.target.value='';}}/></label><label className="check"><input type="checkbox" checked={manual||!auto} disabled={!auto||busy} onChange={e=>setManual(e.target.checked)}/>Ingreso manual</label><label>Folio para CSV con varias facturas<input value={csvFolio} onChange={e=>setCsvFolio(e.target.value)} placeholder="Solo para CSV"/></label><button disabled={busy} onClick={()=>{if(mayLeave()){setRecord(null);setDraft(blank(cid));setDirty(false);setReport(null);setReviewed(false);}}}>Nueva manual</button></div>
+  {notice&&<p role="status" className="notice">{notice}</p>}
+  <section className="saved"><h2>Facturas guardadas <small>{list.length}</small></h2><div className="invoice-list">{list.length?list.map(r=><button disabled={busy} className={r.id===record?.id?'selected':''} key={r.id} onClick={()=>void open(r.id)}><strong>{r.supplier||'Sin proveedor'} · {r.folio||'Sin folio'}</strong><span>{r.date||'Sin fecha'} · ${money(r.net)} netos · {r.existingInSh?'Ya existe en SH':r.status==='confirmed'?'Confirmada':'Borrador'}</span></button>):<p>Abre un documento para comenzar.</p>}</div></section>
+  {record?.existingInSh&&<p className="notice">Esta factura ya está en SH (registro {record.existingInSh.id}). Puedes revisar y guardar sus datos; la exportación está bloqueada para evitar duplicarla.</p>}
+  <fieldset disabled={busy} className="edit-fieldset"><div className="workspace"><section className="viewer"><h2>Documento original</h2>{record?.source?<><p>{record.source.name}</p><a href={sourceUrl} target="_blank" rel="noreferrer">Abrir original en otra pestaña</a>{record.source.type==='application/pdf'?<iframe title="Factura original" src={sourceUrl}/>:record.source.type.startsWith('image/')?<img alt="Factura original" src={sourceUrl}/>:<p>Original CSV conservado. Ábrelo para ver todas sus filas.</p>}</>:<div className="empty">Abre una factura PDF o una foto para revisarla aquí.</div>}{record?.source&&auto&&<button onClick={()=>{if(window.confirm('Volver a leer reemplaza los datos guardados por una nueva lectura sin confirmar. ¿Continuar?'))void run(async()=>{loadRecord(await api(base+'/invoices/'+record.id+'/extract',{method:'POST',body:JSON.stringify({version:record.version})}));await refresh();setNotice('Nueva lectura guardada. Requiere revisión.');});}}>Volver a leer original</button>}<p className="muted">{record?'Guardado: '+new Date(record.updatedAt).toLocaleString('es-CL'):'Todavía no guardado'}</p>{draft.warnings?.length? <details><summary>Observaciones de la lectura automática</summary><ul>{draft.warnings.map((w,i)=><li key={i}>{w}</li>)}</ul></details>:null}</section>
+  <section className="editor"><h2>Datos de la factura</h2><div className="fields"><label>Proveedor documental<input value={draft.supplier} onChange={e=>patch({supplier:e.target.value})}/></label><label>RUT proveedor<input value={draft.supplierRut} onChange={e=>patch({supplierRut:e.target.value})}/></label><label>Folio<input value={draft.folio} onChange={e=>patch({folio:e.target.value})}/></label><label>Fecha<input type="date" value={draft.date} onChange={e=>patch({date:e.target.value})}/></label></div><label>Proveedor registrado en SH<select value={draft.supplierId??''} onChange={e=>patch({supplierId:e.target.value})}><option value="">Seleccionar proveedor</option>{catalog.suppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
+  <div className="section-title"><h2>Productos y cargos</h2><button onClick={()=>patch({lines:[...draft.lines,blankLine()]})}>Agregar línea</button></div>
+  {draft.lines.map((line,i)=><article className="line" key={line.id}><div className="section-title"><h3>Línea {i+1}</h3><button onClick={()=>{if(window.confirm('¿Quitar esta línea del borrador?'))patch({lines:draft.lines.filter((_,n)=>n!==i)});}}>Quitar</button></div><label>Descripción en factura<input value={line.description} onChange={e=>linePatch(i,{description:e.target.value})}/></label>
+  <label>Tipo<select value={line.kind} onChange={e=>linePatch(i,{kind:e.target.value as Line['kind']})}><option value="food">Alimento</option><option value="delivery">Despacho · encabezado</option><option value="supply">Insumo no alimentario · encabezado</option></select></label>
+  {line.printedLineTotal!=null&&<p className="muted">Lectura original: importe ${money(line.printedLineTotal)} · precio ${money(line.printedUnitPrice)}{line.priceIncludesVat?' con IVA':''}. Comprueba el neto antes de usarlo.</p>}
+  <div className="fields"><NumberField label="Cantidad comprada" value={line.quantity} onChange={v=>linePatch(i,{quantity:v})}/><NumberField label="Importe neto de la línea ($)" value={line.netLineTotal} onChange={v=>linePatch(i,{netLineTotal:v})}/></div>
+  {line.kind==='food'&&<><label>Formato original / contenido recibido<input placeholder="Ej.: caja de 40 panes" value={line.sourcePresentation??''} onChange={e=>linePatch(i,{sourcePresentation:e.target.value})}/></label><div className="fields"><label>Unidad de compra<select value={line.purchaseUnit} onChange={e=>linePatch(i,{purchaseUnit:e.target.value})}><option value="">Por confirmar</option>{[['kg','Kilos'],['g','Gramos'],['L','Litros'],['ml','Mililitros'],['unit','Unidad / envase'],['case','Caja / pack']].map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></label><label>Costear por<select value={line.costBasis} onChange={e=>linePatch(i,{costBasis:e.target.value})}><option value="">Por confirmar</option><option value="kg">Kilo</option><option value="unit">Unidad</option><option value="L">Litro</option></select></label></div>
+  {['unit','case'].includes(line.purchaseUnit)&&<><NumberField label="Unidades contenidas por formato" value={line.unitsPerPurchaseUnit} onChange={v=>linePatch(i,{unitsPerPurchaseUnit:v})}/>{line.costBasis!=='unit'&&<div className="fields"><NumberField label="Contenido de cada unidad" value={line.contentPerUnit.value} onChange={v=>linePatch(i,{contentPerUnit:{...line.contentPerUnit,value:v}})}/><label>Unidad del contenido<select value={line.contentPerUnit.unit} onChange={e=>linePatch(i,{contentPerUnit:{...line.contentPerUnit,unit:e.target.value}})}>{['g','kg','ml','L'].map(v=><option key={v}>{v}</option>)}</select></label></div>}</>}
+  {line.costBasis==='kg'&&<NumberField label="Peso real total (kg, opcional)" value={line.measuredTotalKg} onChange={v=>linePatch(i,{measuredTotalKg:v})}/>}
+  <CatalogChoice items={catalog.items} line={line} onChange={c=>linePatch(i,c)}/><NumberField label="Cantidad en la presentación SH elegida" value={line.targetQuantity} onChange={v=>linePatch(i,{targetQuantity:v})}/>
+  {report?.suggestions?.[i]?.length>0&&<details><summary>Sugerencias del catálogo · requieren revisión</summary>{report.suggestions[i].map((s:any)=><button key={s.presentationId} onClick={()=>linePatch(i,{productId:s.productId,presentationId:s.presentationId,targetQuantity:s.factor&&line.quantity?line.quantity*s.factor:null})}>{s.name} · {s.size}{s.reason==='learned'?' · equivalencia confirmada anteriormente':''}</button>)}</details>}
+  </>}
+  <label>Aclaración / tratamiento del cargo<input value={line.note} onChange={e=>linePatch(i,{note:e.target.value})}/></label><label className="check"><input type="checkbox" checked={line.reviewed} onChange={e=>acknowledge(i,{reviewed:e.target.checked})}/>Verifiqué cantidad, contenido e importe neto.</label>
+  {line.kind==='food'&&<><label className="check"><input type="checkbox" checked={line.mappingReviewed??false} onChange={e=>acknowledge(i,{mappingReviewed:e.target.checked})}/>Confirmo producto, presentación y cantidad SH.</label><label className="check"><input type="checkbox" checked={line.learnMapping??false} onChange={e=>acknowledge(i,{learnMapping:e.target.checked})}/>Recordar esta equivalencia para el mismo proveedor y formato.</label><label className="check"><input type="checkbox" checked={line.provisional??false} onChange={e=>linePatch(i,{provisional:e.target.checked,learnMapping:false})}/>Criterio provisional autorizado (explicar arriba).</label><label className="check"><input type="checkbox" checked={line.acknowledgePrice??false} onChange={e=>acknowledge(i,{acknowledgePrice:e.target.checked})}/>Revisé el alza de precio señalada (explicar arriba).</label></>}
+  {calculation.results[i]?.cost&&<p className="cost">{money(calculation.results[i].cost!.baseQuantity)} {line.costBasis} · ${money(calculation.results[i].cost!.netCostPerBaseUnit)} netos/{line.costBasis}</p>}
+  </article>)}
+  <h2>Conciliación documental</h2><p>Los impuestos se conservan en el documento. En SH siempre se preparan en cero.</p><div className="fields">{([['net','Neto documental ($)'],['vat','IVA documental ($)'],['otherTaxes','Otros impuestos ($)'],['total','Total documental ($)']] as const).map(([key,label])=><NumberField key={key} label={label} value={draft[key]} onChange={v=>patch({[key]:v})}/>)}</div><label className="check"><input type="checkbox" checked={draft.taxExceptionReviewed} onChange={e=>patch({taxExceptionReviewed:e.target.checked})}/>Revisé el tratamiento de IVA si es distinto del 19%.</label>
+  <p>Suma neta de líneas: <strong>${money(calculation.sum)}</strong></p>
+  <div className="toolbar"><button onClick={()=>void run(async()=>{await save();setNotice('Borrador guardado.');})}>Guardar borrador</button><button className="primary" onClick={()=>void check()}>Revisar y buscar equivalencias</button><button onClick={()=>download('factura-borrador.json',JSON.stringify({version:1,status:'draft',invoice:draft},null,2))}>Descargar respaldo</button></div>
+  {report&&<div className={report.canConfirm?'summary ready':'summary'}><h2>{report.canConfirm?'Revisión lista para confirmar':`${report.errors.length} puntos pendientes`}</h2><ul>{report.errors.map((e:string,i:number)=><li key={i}>{e}</li>)}</ul><details><summary>Costos y referencias</summary><ul>{report.warnings.map((w:string,i:number)=><li key={i}>{w}</li>)}</ul></details><p>Delivery: ${money(report.delivery)} · Non-Inventory: ${money(report.nonInventory)} · Taxes: $0 · Total neto: ${money(report.shTotal)}</p><label className="check"><input type="checkbox" checked={reviewed} onChange={e=>setReviewed(e.target.checked)}/>Revisé el original y confirmo estos datos.</label><button disabled={!report.canConfirm||!reviewed||dirty} onClick={()=>void run(async()=>{const r=await api(base+'/invoices/'+record!.id+'/confirm',{method:'POST',body:JSON.stringify({version:record!.version,reviewed:true})});loadRecord(r);await refresh();setNotice('Revisión confirmada y guardada. No se ha enviado nada a SH.');})}>Confirmar revisión</button></div>}
+  {record?.status==='confirmed'&&!dirty&&!record.existingInSh&&<button className="primary" onClick={()=>void run(async()=>{const out=await api(base+'/invoices/'+record.id+'/export');download('productos-'+draft.folio+'.csv',out.csv,'text/csv;charset=utf-8');download('encabezado-'+draft.folio+'.json',JSON.stringify(out.summary,null,2));setNotice('CSV y resumen de cargos preparados. Asigna total_cost a Ext. Price al importar; aplica Delivery/Non-Inventory una sola vez y verifica Taxes=0.');})}>Preparar CSV + cargos del encabezado</button>}
+  </section></div></fieldset>
+ </main>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

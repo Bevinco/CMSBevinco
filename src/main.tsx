@@ -1062,6 +1062,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
   const [currentUser, setCurrentUser] = useState("");
+  const [invoicePilotEnabled, setInvoicePilotEnabled] = useState(false);
   const [currentUserInfo, setCurrentUserInfo] = useState<CmsUser | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => (localStorage.getItem("bevinco-theme") === "dark" ? "dark" : "light"));
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -3005,6 +3006,16 @@ function App() {
   }, [authStatus, presence]);
 
   useEffect(() => {
+    let active = true;
+    setInvoicePilotEnabled(false);
+    if (authStatus === "authenticated" && userCanAccess(currentUserInfo, "module1")) {
+      fetch("/api/invoicing/config").then(r => r.ok ? r.json() : null)
+        .then(data => { if (active) setInvoicePilotEnabled(Array.isArray(data?.clients)); }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [authStatus, currentUserInfo]);
+
+  useEffect(() => {
     if (authStatus === "authenticated") {
       loadModule();
       loadClickupStatus();
@@ -3870,6 +3881,7 @@ function App() {
           </div>
         </div>
         <nav className="nav-list" aria-label="Modulos">
+          {invoicePilotEnabled ? <button onClick={() => { window.location.href = "/revision-facturas.html"; }}><ClipboardList size={18} /> Facturas de cocina</button> : null}
           {userCanAccess(currentUserInfo, "dashboard") ? <button className={activeView === "dashboard" ? "active" : ""} onClick={() => navigateTo("dashboard")}><LayoutDashboard size={18} /> Inicio</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "module1" ? "active" : ""} onClick={() => navigateTo("module1")}><ClipboardList size={18} /> Reportes semanales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}

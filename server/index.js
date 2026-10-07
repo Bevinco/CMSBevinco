@@ -5,6 +5,8 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import * as cheerio from "cheerio";
 import express from "express";
+import { invoiceRouter } from "./invoicing/router.js";
+import { supabaseRepository } from "./invoicing/storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -7585,6 +7587,18 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
 </script>
 </body>
 </html>`;
+}
+
+// Invoice pilot is opt-in until its isolated migration and review are approved.
+if (process.env.INVOICING_ENABLED === "true") {
+  const invoiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !invoiceKey) throw new Error("Facturas requiere almacenamiento Supabase privado.");
+  app.use("/api/invoicing", requireAuth, requirePermission("module1"), invoiceRouter({
+    repository: supabaseRepository(supabaseUrl, invoiceKey),
+    clients: [{ id: "28922", name: "El Muelle Cocina" }],
+    apiKey: openaiApiKey,
+    model: process.env.INVOICE_OPENAI_MODEL || "gpt-5.2",
+  }));
 }
 
 app.get("/api/system/backup-status", requireAuth, (_request, response) => {
