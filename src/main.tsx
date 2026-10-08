@@ -338,6 +338,7 @@ type ClickupMeta = {
 };
 
 type CmsUser = {
+  invoiceValidation?: boolean;
   id: string;
   name: string;
   email: string;
@@ -3879,6 +3880,7 @@ function App() {
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
           {userCanAccess(currentUserInfo, "users") ? <button className={activeView === "users" ? "active" : ""} onClick={() => navigateTo("users")}><Users size={18} /> Usuarios</button> : null}
+          {currentUserInfo?.invoiceValidation ? <button onClick={() => window.location.assign("/revision-facturas/")}><FileText size={18} /> Validación de facturas</button> : null}
         </nav>
         <div className="sidebar-user">
           {userMenuOpen ? (
