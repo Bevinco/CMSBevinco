@@ -7618,6 +7618,9 @@ if (invoicesEnabled) {
   app.use("/api/invoicing", invoiceRouter({
     repository: supabaseRepository(supabaseUrl, invoiceKey),
     clients: [{ id: "28922", name: "El Muelle Cocina" }],
+    periodsForClient: async (cid) => (await readStore()).periods
+      .filter((period) => period.id.startsWith(`sculpture-${cid}-`))
+      .map((period) => ({ id: String(period.sculpturePid || period.pid), startsAt: period.startsAt || '', endsAt: period.endsAt || '' })),
     validationOnly: invoicesValidationOnly,
     apiKey: !invoicesValidationOnly && process.env.INVOICE_EXTRACTION_ENABLED === "true" ? openaiApiKey : "",
     model: process.env.INVOICE_OPENAI_MODEL || "gpt-5.2",
