@@ -6272,7 +6272,10 @@ function renderTwoPageReportHtml(store, report, options = {}) {
     /* align-items:start — cada caja mide solo su contenido: sin esto, la
        columna con pocos comentarios se estiraba a la altura de la larga y
        quedaba un vacio enorme. */
-    .bv-comments-grid { align-items: start; display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+    /* Lo mejor ARRIBA y los desafios ABAJO, a todo el ancho. Lado a lado los
+       desafios (casi siempre mas largos) dejaban la columna de lo mejor con un
+       vacio y el texto partido a la hoja siguiente (QA Danae, 08-oct). */
+    .bv-comments-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); margin-bottom: 10px; }
     .bv-comments-grid .bv-comments { margin-bottom: 0; }
     .bv-monthly-head { border-bottom: 2px solid #e8e2d2; margin-bottom: 12px; padding-bottom: 8px; }
     .bv-monthly-head .bv-brand strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
@@ -6788,7 +6791,8 @@ function renderDynamicReportHtml(store, report, options = {}) {
     .side-kpis .kpi-card { flex: 1; display: flex; flex-direction: column; justify-content: center; }
     /* stretch: las dos tarjetas comparten altura aunque una tenga menos
        comentarios; con "start" la corta quedaba flotando desalineada. */
-    .comments-grid { align-items: stretch; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    /* Apiladas a todo el ancho, igual que el PDF (paridad, QA Danae 08-oct). */
+    .comments-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
     .comment-card h3 { color: #5c8f1e; font-size: 13.5px; font-weight: 800; margin: 0 0 9px; }
     .comment-card p { color: var(--text-light); font-size: 13px; line-height: 1.65; margin: 0 0 8px; }
     /* Impresion: los comentarios salian bastante mas grandes que las tablas
@@ -6854,6 +6858,12 @@ function renderDynamicReportHtml(store, report, options = {}) {
        filas huerfanas (una sola fila del Top 10 caia sola en la hoja 3) y
        con las alturas compactas las hojas igual quedan llenas. */
     .card, .kpis, .comment-card, .side-kpis { break-inside: avoid; }
+    /* Salvo los comentarios: a todo el ancho una tarjeta de desafios larga
+       saltaria entera a la hoja siguiente dejando un hueco. Fluyen, pero cada
+       punto queda entero y el titulo no se separa de su primer punto. */
+    .comment-card { break-inside: auto; }
+    .comment-card li, .comment-card p { break-inside: avoid; }
+    .comment-card h3 { break-after: avoid; }
     canvas, .chart-wrap { break-inside: avoid; }
     tbody tr { break-inside: avoid; }
     /* Los pares grandes se apilan; el variance mantiene sus KPIs al lado
@@ -7371,7 +7381,7 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
       return '<div class="card comment-card"><h3>' + block.title + "</h3>" + richItems(block.items) + "</div>";
     }).join("") || '<div class="card comment-card"><p>Sin comentarios para este período.</p></div>';
     // Eficiencia de stock y compra va en su propia seccion, despues del Top 10
-    // (pedido del equipo, 10-ago): asi Lo mejor y Desafios quedan lado a lado.
+    // (pedido del equipo, 10-ago). Lo mejor y Desafios van apilados (08-oct).
     var stockItems = data.analysis.stockEfficiency || [];
     var stockSection = document.getElementById("stockSection");
     stockSection.hidden = !stockItems.length;
