@@ -5,7 +5,7 @@ import {extractCsv} from './csv.js';
 import {cleanDraft,workflowReview,buildRecord,exportInvoice,suggestions,validateCatalog} from './workflow.js';
 import {conflict} from './storage.js';
 
-export function invoiceRouter({repository,clients,apiKey,model,validationOnly=false,extract=extractDocument}) {
+export function invoiceRouter({repository,clients,apiKey,model,validationOnly=false,periodsForClient=async()=>[],extract=extractDocument}) {
  const router=express.Router();const busy=new Set();
  const extractionEnabled=!validationOnly&&Boolean(apiKey);
  router.use((req,res,next)=>{
@@ -25,6 +25,7 @@ export function invoiceRouter({repository,clients,apiKey,model,validationOnly=fa
  const actor=req=>req.session?.username||req.session?.id||'reviewer';
  const view=r=>({...r,source:r.source?{name:r.source.name,type:r.source.type,hash:r.source.hash}:null});
  const load=async(req)=>{if(!/^[0-9a-f-]{36}$/.test(req.params.id))throw Object.assign(new Error('Factura no encontrada.'),{status:404});const r=await repository.get(req.invoiceCid,req.params.id);if(!r)throw Object.assign(new Error('Factura no encontrada.'),{status:404});return r;};
+ router.get('/:cid/periods',safe(async(req,res)=>res.json(await periodsForClient(req.invoiceCid))));
  router.get('/:cid/catalog',safe(async(req,res)=>res.json(await repository.catalog(req.invoiceCid))));
  router.put('/:cid/catalog',safe(async(req,res)=>{
   if(req.session?.role!=='Superadmin')return res.status(403).json({error:'Solo administración puede actualizar el catálogo.'});
