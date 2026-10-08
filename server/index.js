@@ -7,6 +7,7 @@ import * as cheerio from "cheerio";
 import express from "express";
 import { invoiceRouter } from "./invoicing/router.js";
 import { supabaseRepository } from "./invoicing/storage.js";
+import { invoiceAccess } from "./invoicing/access.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -7589,14 +7590,26 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
 </html>`;
 }
 
-// Invoice pilot is opt-in until its isolated migration and review are approved.
-if (process.env.INVOICING_ENABLED === "true") {
+// Reuses the existing service/database; only the named CMS user can enter.
+const invoicesEnabled = process.env.INVOICING_ENABLED === "true";
+const invoicesValidationOnly = process.env.INVOICING_VALIDATION_ONLY !== "false";
+const invoicePolicy = invoiceAccess({
+  enabled: invoicesEnabled,
+  reviewerId: process.env.INVOICING_REVIEWER_ID || "",
+  readSession,
+  findUser: async (id) => (await readStore()).users?.find((user) => user.id === id),
+});
+app.use("/api/invoicing", invoicePolicy.requireAccess);
+app.get("/revision-facturas.html", invoicePolicy.requireAccess, (_req, res) => res.redirect(302, "/revision-facturas/"));
+app.use("/revision-facturas", invoicePolicy.requireAccess, express.static(path.resolve(__dirname, "../dist-review"), { index: "revision-facturas.html", fallthrough: false }));
+if (invoicesEnabled) {
   const invoiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !invoiceKey) throw new Error("Facturas requiere almacenamiento Supabase privado.");
-  app.use("/api/invoicing", requireAuth, requirePermission("module1"), invoiceRouter({
+  app.use("/api/invoicing", invoiceRouter({
     repository: supabaseRepository(supabaseUrl, invoiceKey),
     clients: [{ id: "28922", name: "El Muelle Cocina" }],
-    apiKey: openaiApiKey,
+    validationOnly: invoicesValidationOnly,
+    apiKey: !invoicesValidationOnly && process.env.INVOICE_EXTRACTION_ENABLED === "true" ? openaiApiKey : "",
     model: process.env.INVOICE_OPENAI_MODEL || "gpt-5.2",
   }));
 }
@@ -7609,7 +7622,7 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
-app.get("/api/auth/me", (request, response) => {
+app.get("/api/auth/me", async (request, response) => {
   const session = readSession(request);
   response.json({
     authenticated: Boolean(session),
@@ -7620,6 +7633,7 @@ app.get("/api/auth/me", (request, response) => {
       email: session.email || "",
       role: session.role || "Superadmin",
       permissions: session.permissions || [],
+      invoiceValidation: await invoicePolicy.allowed(session),
     } : null,
   });
 });

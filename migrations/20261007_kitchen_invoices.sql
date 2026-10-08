@@ -1,4 +1,5 @@
--- Apply through Supabase apply_migration to an isolated branch first.
+-- Validate locally with PGlite, then apply through Supabase apply_migration
+-- to the existing project after production approval. No paid branch required.
 -- No changes to cms_store, reports, or historical purchases.
 create table public.kitchen_invoices (
  id uuid primary key,

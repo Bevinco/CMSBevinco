@@ -5,8 +5,9 @@ import {extractCsv} from './csv.js';
 import {cleanDraft,workflowReview,buildRecord,exportInvoice,suggestions,validateCatalog} from './workflow.js';
 import {conflict} from './storage.js';
 
-export function invoiceRouter({repository,clients,apiKey,model,extract=extractDocument}) {
+export function invoiceRouter({repository,clients,apiKey,model,validationOnly=false,extract=extractDocument}) {
  const router=express.Router();const busy=new Set();
+ const extractionEnabled=!validationOnly&&Boolean(apiKey);
  router.use((req,res,next)=>{
   res.set('Cache-Control','no-store');
   if(!['GET','HEAD'].includes(req.method)){
@@ -15,7 +16,7 @@ export function invoiceRouter({repository,clients,apiKey,model,extract=extractDo
   }
   next();
  });
- router.get('/config',(_req,res)=>res.json({clients,storage:repository.mode,extractionEnabled:Boolean(apiKey),automaticShWrites:false}));
+ router.get('/config',(_req,res)=>res.json({clients,storage:repository.mode,extractionEnabled,validationOnly,exportEnabled:!validationOnly,automaticShWrites:false}));
  router.use('/:cid',(req,res,next)=>{
   if(!clients.some(c=>c.id===req.params.cid))return res.status(403).json({error:'Cliente fuera del piloto de cocina.'});
   req.invoiceCid=req.params.cid;next();
@@ -48,7 +49,7 @@ export function invoiceRouter({repository,clients,apiKey,model,extract=extractDo
    if(existing)return res.status(409).json({error:'Este documento ya está guardado. Abre la factura existente.',id:existing.id});
    let extraction;
    if(source.type==='text/csv')extraction={result:extractCsv(source,folio),model:'csv',usage:null};
-   else if(req.body.manual===true)extraction={result:{lines:[],warnings:[]},model:'manual',usage:null};
+   else if(req.body.manual===true||!extractionEnabled)extraction={result:{lines:[],warnings:[]},model:'manual',usage:null};
    else { try { extraction=await extract(source,{apiKey,model}); } catch(error) { extraction={result:{lines:[],warnings:[error.message]},model:'failed',usage:null}; } }
    source.identity=sourceIdentity;
    const draft=extractedDraft(extraction.result,cid);const record=buildRecord(draft,{source,actor:actor(req)});
@@ -66,6 +67,7 @@ export function invoiceRouter({repository,clients,apiKey,model,extract=extractDo
   const record=buildRecord(draft,{prior,actor:actor(req)});await repository.save(record,prior.version);res.json(view(record));
  }));
  router.post('/:cid/invoices/:id/extract',safe(async(req,res)=>{
+   if(!extractionEnabled)return res.status(403).json({error:'La lectura automática está desactivada en esta prueba.'});
   const prior=await load(req);if(req.body.version!==prior.version)throw conflict();
   if(!prior.source)throw new Error('Esta factura no tiene original guardado.');
   if(busy.has(req.invoiceCid))return res.status(429).json({error:'Ya hay una lectura en curso.'});
@@ -91,6 +93,7 @@ export function invoiceRouter({repository,clients,apiKey,model,extract=extractDo
   const record=buildRecord(prior.draft,{prior,status:'confirmed',actor:actor(req),report});await repository.save(record,prior.version);res.json(view(record));
  }));
  router.get('/:cid/invoices/:id/export',safe(async(req,res)=>{
+  if(validationOnly)return res.status(403).json({error:'Esta sección es solo de validación; la exportación a SH está desactivada.'});
   const record=await load(req);res.json(exportInvoice(record,await repository.catalog(req.invoiceCid),await repository.list(req.invoiceCid)));
  }));
  router.use((error,_req,res,_next)=>res.status(error.status||400).json({error:error.status===500?'No se pudo completar la operación.':error.message}));

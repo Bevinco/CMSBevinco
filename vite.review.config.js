@@ -1,3 +1,3 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-export default defineConfig({plugins:[react()],build:{outDir:'dist-review',rollupOptions:{input:'revision-facturas.html'}}});
+export default defineConfig({base:'./',plugins:[react()],build:{outDir:'dist-review',rollupOptions:{input:'revision-facturas.html'}}});

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit -p tsconfig.json && vite build --configLoader runner",
+    "build": "tsc --noEmit -p tsconfig.json && vite build --configLoader runner && npm run build:invoicing",
     "preview": "vite preview --host 0.0.0.0",
     "start": "node server/index.js",
     "test:invoicing": "node --test tests/invoicing-*.test.js",
