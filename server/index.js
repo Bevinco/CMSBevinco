@@ -8089,6 +8089,32 @@ app.patch("/api/module1/clients/:clientId/par-fijo", requireAuth, async (request
   response.json({ parFijo: mapa, fijados: Object.keys(mapa).length });
 });
 
+// Lista de productos de la auditoria SEMANAL del local. Reemplaza la lista
+// completa: se manda {items: ["Feta", "Queso de Cabra", ...]}; con una lista
+// vacia se desactiva y el modulo vuelve a mostrar lo accionable de siempre.
+app.patch("/api/module1/clients/:clientId/weekly-items", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) { response.status(404).json({ error: "No se encontró el restaurante." }); return; }
+  const entrada = Array.isArray(request.body?.items) ? request.body.items : null;
+  if (!entrada) { response.status(400).json({ error: "Indica {items: [...]} con los nombres de los productos." }); return; }
+  // Sin repetidos (por nombre normalizado) y sin lineas vacias, conservando
+  // el nombre tal como lo escribio el equipo.
+  const vistos = new Set();
+  const lista = [];
+  for (const valor of entrada) {
+    const nombre = String(valor ?? "").trim();
+    const clave = clavePar(nombre);
+    if (!nombre || nombre.length > 200 || vistos.has(clave)) continue;
+    vistos.add(clave);
+    lista.push(nombre);
+  }
+  if (lista.length > 2000) { response.status(400).json({ error: "La lista es demasiado larga." }); return; }
+  client.weeklyItems = lista;
+  await writeStore(store);
+  response.json({ weeklyItems: lista, total: lista.length });
+});
+
 app.patch("/api/module1/clients/:clientId/purchase-params", requireAuth, async (request, response) => {
   const store = await readStore();
   const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
@@ -10714,7 +10740,27 @@ function applyBarMixInventory(rows, client, mixStock = {}) {
   }
 }
 
-async function computeSuggestionItems({ client, period, mixStock }) {
+// Lista de productos de la auditoria SEMANAL de un local. Sculpture no marca
+// que producto se cuenta cada semana y cual una vez al mes: en San Lucas los
+// que no van estan mezclados en las mismas familias, y algunos con consumo
+// real (Mozzarella, Tocino Ahumado). Es una definicion del equipo, asi que se
+// carga por local (client.weeklyItems) desde las sugerencias que ya envian.
+// Los nombres vienen de Excel/PDF y a veces con la codificacion rota
+// ("ChampiÃ±on"): se reparan antes de comparar.
+function listaSemanalDe(client) {
+  const lista = Array.isArray(client?.weeklyItems) ? client.weeklyItems : [];
+  if (!lista.length) return null;
+  const repara = (texto) => {
+    const t = String(texto || "");
+    if (!/[ÃÂ]/.test(t)) return t;
+    try { return Buffer.from(t, "latin1").toString("utf8"); } catch { return t; }
+  };
+  return new Map(lista.map((nombre) => [clavePar(repara(nombre)), repara(nombre).trim()]));
+}
+
+// soloSemanal: el modulo Compras y su descarga muestran SOLO la lista semanal
+// cuando el local la tiene. Los reportes no lo pasan: sus cifras no cambian.
+async function computeSuggestionItems({ client, period, mixStock, soloSemanal = false }) {
   const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
   const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
   if (!cid || !pid) {
@@ -10761,7 +10807,7 @@ async function computeSuggestionItems({ client, period, mixStock }) {
   }
   enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable, parFijo: client?.parFijo });
 
-  const items = data.rows
+  const todosLosItems = data.rows
     .map((row) => {
       const record = row.record || {};
       const name = pickRecordValue(record, ["itemName", "item"], "") ||
@@ -10791,7 +10837,20 @@ async function computeSuggestionItems({ client, period, mixStock }) {
         parFijo: Number.isFinite(Number(client?.parFijo?.[clavePar(name)])),
       };
     })
-    .filter((item) => item && (item.suggested > 0 || item.excessCost > 0 || (isKitchenTable && item.onHand > 0)));
+    .filter(Boolean);
+  // Con lista semanal: TODOS los productos de la lista, tengan o no sugerencia,
+  // porque el cliente necesita ver el stock de cada uno (pedido del equipo,
+  // 21-oct). Sin lista: lo accionable, como siempre.
+  const semanal = soloSemanal ? listaSemanalDe(client) : null;
+  const items = semanal
+    ? todosLosItems.filter((item) => semanal.has(clavePar(item.name)))
+    : todosLosItems.filter((item) => item.suggested > 0 || item.excessCost > 0 || (isKitchenTable && item.onHand > 0));
+  // Productos de la lista que Sculpture no trae esta semana: casi siempre el
+  // nombre cambio en Sculpture. Se informan para que no se pierdan en silencio.
+  const nombresSculpture = new Set(todosLosItems.map((item) => clavePar(item.name)));
+  const listaSemanal = semanal
+    ? { activa: true, total: semanal.size, faltantes: [...semanal.entries()].filter(([k]) => !nombresSculpture.has(k)).map(([, nombre]) => nombre) }
+    : { activa: false, total: 0, faltantes: [] };
   // "En nivel": ni compra ni exceso — visible con su PAR y dias de
   // inventario para que la sugerida 0 sea explicable, no un misterio.
   for (const item of items) item.enNivel = !(item.suggested > 0 || item.excessCost > 0);
@@ -10805,7 +10864,7 @@ async function computeSuggestionItems({ client, period, mixStock }) {
   }
   items.sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
   const paramsVigentes = { ...KITCHEN_PURCHASE_DEFAULTS, ...(client?.purchaseParams || {}) };
-  return { items, purchaseParams: paramsVigentes, parFijo: client?.parFijo || {} };
+  return { items, purchaseParams: paramsVigentes, parFijo: client?.parFijo || {}, listaSemanal };
 }
 
 // Modulo Sugerencias de Compra: la sugerencia VIGENTE de un local (ultima
@@ -10874,22 +10933,24 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
   try {
     let period = null;
     let items = null;
+    let listaSemanal = null;
     let firstResult = null;
     for (const rawPeriod of closedPeriods) {
       const candidate = ensurePeriod(store, rawPeriod);
       if (!candidate) continue;
       let result;
       try {
-        result = await computeSuggestionItems({ client, period: candidate, mixStock });
+        result = await computeSuggestionItems({ client, period: candidate, mixStock, soloSemanal: true });
       } catch (candidateError) {
         if (firstResult) break;
         continue;
       }
-      if (!firstResult) firstResult = { period: candidate, items: result.items };
+      if (!firstResult) firstResult = { period: candidate, items: result.items, listaSemanal: result.listaSemanal };
       const audited = result.items.some((item) => item.onHand > 0);
       if (audited || !result.items.length) {
         period = candidate;
         items = result.items;
+        listaSemanal = result.listaSemanal;
         break;
       }
     }
@@ -10902,6 +10963,7 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       }
       period = firstResult.period;
       items = firstResult.items;
+      listaSemanal = firstResult.listaSemanal;
     }
     const exportFormat = String(request.query.format || "");
     // scope (reunion 28-ago): descargar solo "por comprar", solo "con
@@ -11115,6 +11177,10 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       // Parametros de cobertura vigentes: el modulo los muestra y permite
       // ajustarlos por local (QA 09-sep).
       purchaseParams: { ...KITCHEN_PURCHASE_DEFAULTS, ...(client.purchaseParams || {}) },
+      // Lista de auditoria semanal: si esta activa, los productos que se
+      // muestran y los de la lista que Sculpture no trajo esta semana.
+      listaSemanal: listaSemanal || { activa: false, total: 0, faltantes: [] },
+      weeklyItems: client.weeklyItems || [],
       items,
     });
   } catch (error) {
@@ -11142,7 +11208,8 @@ app.get("/api/module1/reports/:reportId/purchase-suggestion", requireAuth, async
 
   let items;
   try {
-    ({ items } = await computeSuggestionItems({ client, period }));
+    // La descarga del reporte respeta la lista semanal, igual que Compras.
+    ({ items } = await computeSuggestionItems({ client, period, soloSemanal: true }));
   } catch (error) {
     response.status(error.status || 502).json({ error: error.message || "No se pudo calcular la sugerencia." });
     return;

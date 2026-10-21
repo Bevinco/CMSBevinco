@@ -103,6 +103,8 @@ type SuggestionItem = {
   parFijo?: boolean;
 };
 type PurchaseParams = { suggestionDays: number; extraDays: number; coverage: number };
+// Lista de productos de la auditoria semanal del local (la define el equipo).
+type ListaSemanal = { activa: boolean; total: number; faltantes: string[] };
 type ThemeMode = "light" | "dark";
 
 type Client = {
@@ -1092,7 +1094,10 @@ function App() {
   const [comprasMixSaving, setComprasMixSaving] = useState(false);
   const [comprasLoading, setComprasLoading] = useState(false);
   const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
-  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string; area?: string }; period: { id: string; label: string }; items: SuggestionItem[] } | null>(null);
+  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string; area?: string }; period: { id: string; label: string }; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[] } | null>(null);
+  // Editor de la lista de auditoria semanal: null = cerrado, texto = abierto.
+  const [weeklyDraft, setWeeklyDraft] = useState<string | null>(null);
+  const [savingWeekly, setSavingWeekly] = useState(false);
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -2086,13 +2091,15 @@ function App() {
       if (comprasPeriodPid) query.set("period", comprasPeriodPid);
       const mixParam = comprasMixStockParam();
       if (mixParam) query.set("mixStock", decodeURIComponent(mixParam));
-      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; purchaseParams?: PurchaseParams; items: SuggestionItem[] }>(
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; purchaseParams?: PurchaseParams; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[] }>(
         await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${query.toString() ? `?${query.toString()}` : ""}`),
       );
       setComprasData(payload);
       setComprasRecipientsDraft((payload.purchaseRecipients || []).join(", "));
       if (payload.purchaseParams) setParDraft(payload.purchaseParams);
-      setError(`Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
+      setError(payload.listaSemanal?.activa
+        ? `Sugerencia lista: los ${payload.items.length} producto(s) de la auditoría semanal.`
+        : `Sugerencia lista: ${payload.items.length} producto(s) por comprar o con exceso.`);
       setWorkStatus("ready");
     } catch (comprasError) {
       setError(comprasError instanceof Error ? comprasError.message : "No se pudo calcular la sugerencia.");
@@ -4795,6 +4802,72 @@ function App() {
                 <article><span>Capital inmovilizado (exceso)</span><strong className="is-excess">{money(excessTotal)}</strong></article>
                 <article><span>Proveedores involucrados</span><strong>{new Set(toBuy.map((item) => item.provider)).size}</strong></article>
               </div>
+              {/* Lista de auditoría semanal: Sculpture no distingue lo que se
+                  cuenta cada semana de lo que se cuenta al mes, así que la
+                  define el equipo por local (pedido de Danae, 21-oct). Con
+                  lista, la tabla y la descarga muestran TODOS esos productos,
+                  tengan o no sugerencia, y ningún otro. */}
+              <div className="compras-semanal">
+                <div>
+                  <p className="eyebrow">Auditoría semanal</p>
+                  {comprasData.listaSemanal?.activa ? (
+                    <small>
+                      Se muestran <b>solo los {comprasData.listaSemanal.total} productos</b> de la auditoría semanal de este local,
+                      tengan o no compra sugerida. La descarga sale igual.
+                    </small>
+                  ) : (
+                    <small>Sin lista: se muestran los productos con compra sugerida, exceso o stock. Carga la lista para que solo salgan los de la auditoría semanal.</small>
+                  )}
+                  {comprasData.listaSemanal?.faltantes?.length ? (
+                    <small className="compras-semanal-faltan">
+                      {comprasData.listaSemanal.faltantes.length} de la lista no aparecen en Sculpture esta semana (revisa si cambió el nombre):{" "}
+                      <b>{comprasData.listaSemanal.faltantes.join(", ")}</b>
+                    </small>
+                  ) : null}
+                </div>
+                {weeklyDraft === null ? (
+                  <button className="secondary-button" type="button" onClick={() => setWeeklyDraft((comprasData.weeklyItems || []).join("\n"))}>
+                    {comprasData.listaSemanal?.activa ? "Editar lista" : "Cargar lista"}
+                  </button>
+                ) : null}
+              </div>
+              {weeklyDraft !== null ? (
+                <div className="compras-semanal-editor">
+                  <label>
+                    Un producto por línea, escrito como en Sculpture. Puedes pegarlo directo desde la última sugerencia enviada.
+                    <textarea rows={10} value={weeklyDraft} onChange={(event) => setWeeklyDraft(event.target.value)} />
+                  </label>
+                  <div className="action-row">
+                    <small>{weeklyDraft.split(/\r?\n/).filter((linea) => linea.trim()).length} producto(s). Deja la lista vacía para desactivarla.</small>
+                    <button className="secondary-button" type="button" disabled={savingWeekly} onClick={() => setWeeklyDraft(null)}>Cancelar</button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={savingWeekly}
+                      onClick={async () => {
+                        setSavingWeekly(true);
+                        try {
+                          await readJson(await fetch(`/api/module1/clients/${comprasData.client.id}/weekly-items`, {
+                            method: "PATCH",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ items: weeklyDraft.split(/\r?\n/).map((linea) => linea.trim()).filter(Boolean) }),
+                          }));
+                          setWeeklyDraft(null);
+                          await loadComprasSuggestion(comprasData.client.id);
+                        } catch (weeklyError) {
+                          setError(weeklyError instanceof Error ? weeklyError.message : "No se pudo guardar la lista.");
+                          setWorkStatus("error");
+                        } finally {
+                          setSavingWeekly(false);
+                        }
+                      }}
+                    >
+                      {savingWeekly ? <span className="btn-spinner" /> : <CheckCircle2 size={16} />}
+                      Guardar lista
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="compras-distribution">
                 <label>
                   Lista de distribución de esta sugerencia

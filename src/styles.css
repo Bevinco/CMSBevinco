@@ -5106,3 +5106,14 @@ h1, h2, h3 { font-weight: 800; letter-spacing: -0.02em; }
 /* Control de familias: mismo formato que el aviso de periodo abierto, en
    ambar para distinguir "revisar" de "informativo". */
 .family-check-note { background: rgba(201, 143, 10, 0.12); border-color: rgba(201, 143, 10, 0.4); color: #6b4e08; }
+
+/* Lista de auditoria semanal del modulo Compras. */
+.compras-semanal { align-items: center; border: 1px solid var(--line, #e3e0d6); border-radius: 12px; display: flex; gap: 16px; justify-content: space-between; margin: 14px 0 0; padding: 12px 16px; }
+.compras-semanal small { color: var(--muted, #6b7280); display: block; font-size: 13px; line-height: 1.5; }
+.compras-semanal small b { color: var(--text, #14212e); }
+.compras-semanal .compras-semanal-faltan { color: #6b4e08; margin-top: 6px; }
+.compras-semanal-editor { border: 1px solid var(--line, #e3e0d6); border-radius: 12px; margin: 10px 0 0; padding: 12px 16px; }
+.compras-semanal-editor label { display: block; font-size: 13px; }
+.compras-semanal-editor textarea { box-sizing: border-box; font: inherit; margin-top: 8px; padding: 8px 10px; resize: vertical; width: 100%; }
+.compras-semanal-editor .action-row { align-items: center; display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; }
+.compras-semanal-editor .action-row small { color: var(--muted, #6b7280); margin-right: auto; }
