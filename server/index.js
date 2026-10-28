@@ -10816,6 +10816,13 @@ async function computeSuggestionItems({ client, period, mixStock, soloSemanal = 
       // "GRAND TOTAL" viene sin dos puntos y sin "Total X:" y se colaba como
       // producto con exceso, duplicando el capital inmovilizado del modulo.
       if (!name || isTotalRow(name) || /:\s*$/.test(name) || /^grand\s+total$/i.test(String(name).trim())) return null;
+      // Encabezado de familia ("Harina", "Pan", "Postres"): fila SIN ningun
+      // dato. Antes nunca se veia porque solo salian productos con compra,
+      // exceso o stock; con la lista semanal se muestra todo lo que calce por
+      // nombre, y en TT Manio "Harina" salia dos veces: el encabezado vacio y
+      // el producto (QA Danae, 28-oct). Un producto real siempre trae algo.
+      const sinDatos = (row.values || []).slice(1).every((valor) => String(valor ?? "").trim() === "");
+      if (sinDatos) return null;
       return {
         provider: String(pickRecordValue(record, ["proveedor", "provider", "vendor"], "") || pickRecordValueFuzzy(record, /proveedor|vendor/i) || "Por validar").trim(),
         name: String(name).trim(),
