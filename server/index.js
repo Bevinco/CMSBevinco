@@ -5859,8 +5859,15 @@ function renderTwoPageReportHtml(store, report, options = {}) {
         `<text x="${bx}" y="${by}" class="rotlab" transform="rotate(-90 ${bx} ${by})">${text}</text>`;
       return (p.usedCost ? `<rect x="${x - pairBarW}" y="${yu}" width="${pairBarW}" height="${Math.max(2, B - yu)}" fill="${NAVY}"/>` : "") +
         (p.inventoryCost ? `<rect x="${x}" y="${yi}" width="${pairBarW}" height="${Math.max(2, B - yi)}" fill="${GREEN}"/>` : "") +
-        (p.usedCost && B - yu > 40 ? rot(x - pairBarW / 2 + 4, B - 6, fmtK(p.usedCost)) : "") +
-        (p.inventoryCost && B - yi > 40 ? rot(x + pairBarW / 2 + 4, B - 6, fmtK(p.inventoryCost)) : "");
+        // El monto va DENTRO de la barra si cabe; si la barra es baja (consumo
+        // chico frente a un inventario grande, como Tambo barra) va ENCIMA.
+        // Antes se omitia y el consumo de esa semana no se veia (QA 28-oct).
+        (p.usedCost ? (B - yu > 40
+          ? rot(x - pairBarW / 2 + 4, B - 6, fmtK(p.usedCost))
+          : `<text x="${x - pairBarW / 2}" y="${yu - 4}" text-anchor="middle" class="toplab" fill="${NAVY}">${fmtK(p.usedCost)}</text>`) : "") +
+        (p.inventoryCost ? (B - yi > 40
+          ? rot(x + pairBarW / 2 + 4, B - 6, fmtK(p.inventoryCost))
+          : `<text x="${x + pairBarW / 2}" y="${yi - 4}" text-anchor="middle" class="toplab" fill="#5c8f1e">${fmtK(p.inventoryCost)}</text>`) : "");
     }).join("");
     const covered = history.map((p, i) => ({ i, days: coverage[i] })).filter((item) => item.days > 0);
     const linePts = covered.map((item) => `${xAt(item.i)},${yDays(item.days)}`).join(" ");
@@ -5879,7 +5886,7 @@ function renderTwoPageReportHtml(store, report, options = {}) {
       `<text x="${xAt(i)}" y="${B + 13}" text-anchor="middle" class="ax">${history.length > 4 ? (ddmmyyyy(p.endsAt) || "").slice(0, 5) : (ddmmyyyy(p.endsAt) || escapeHtml(p.label))}</text>`).join("");
     const legendY = H - 8;
     return `<svg class="bv-svg" viewBox="0 0 ${W} ${H}">
-      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.rotlab{font:700 11px Calibri,Arial;fill:#fff}.chipteal{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
+      <style>.ax{font:10.5px Calibri,Arial;fill:#808080}.rotlab{font:700 11px Calibri,Arial;fill:#fff}.toplab{font:700 9.5px Calibri,Arial}.chipteal{font:700 11px Calibri,Arial;fill:#fff}.leg{font:11px Calibri,Arial;fill:${GRAY_TXT}}</style>
       ${grid}${rightAxis}${bars}${covEmptyNote}
       ${covered.length > 1 ? `<polyline points="${linePts}" fill="none" stroke="${TEAL}" stroke-width="2.2"/>` : ""}
       ${chips}${xLabels}
@@ -7310,8 +7317,10 @@ ${printMode ? `<div class="printbar"><button onclick="window.print()">Guardar co
       data: {
         labels: labels,
         datasets: [
-          { type: "bar", label: "Inventario al costo", data: h.map(function (p) { return p.inventoryCost || 0; }), backgroundColor: TEAL, maxBarThickness: 44 },
-          { type: "bar", label: "Consumo (usado)", data: h.map(function (p) { return p.usedCost || 0; }), backgroundColor: NAVY, maxBarThickness: 44 },
+          // Montos SIEMPRE visibles encima de cada barra, como en el PDF (QA 28-oct:
+          // el consumo de algunas semanas no se veia).
+          { type: "bar", label: "Inventario al costo", data: h.map(function (p) { return p.inventoryCost || 0; }), backgroundColor: TEAL, maxBarThickness: 44, datalabels: { display: function (ctx) { return (ctx.dataset.data[ctx.dataIndex] || 0) > 0; }, anchor: "end", align: "end", offset: 2, clamp: true, clip: false, color: "#0e7c7b", font: { weight: 800, size: 10.5 }, formatter: function (v) { return fmtK(v); } } },
+          { type: "bar", label: "Consumo (usado)", data: h.map(function (p) { return p.usedCost || 0; }), backgroundColor: NAVY, maxBarThickness: 44, datalabels: { display: function (ctx) { return (ctx.dataset.data[ctx.dataIndex] || 0) > 0; }, anchor: "end", align: "end", offset: 2, clamp: true, clip: false, color: "#001E43", font: { weight: 800, size: 10.5 }, formatter: function (v) { return fmtK(v); } } },
           { type: "line", label: "Días de cobertura", data: h.map(function (p) { return p.usedCost > 0 ? Math.round((p.inventoryCost / (p.usedCost / (p.days || 7))) * 10) / 10 : null; }), borderColor: "#d97706", backgroundColor: "#d97706", borderWidth: 2.2, pointRadius: 4, yAxisID: "y1",
             datalabels: { display: true, align: "top", offset: 8, clip: false, backgroundColor: "#d97706", borderRadius: 4, color: "#fff", font: { weight: 800, size: 10.5 }, formatter: function (v) { return v ? v + " d" : ""; }, padding: { top: 2, bottom: 2, left: 5, right: 5 } } }
         ]
