@@ -10,7 +10,8 @@
     "start": "node server/index.js",
     "test:invoicing": "node --test tests/invoicing-*.test.js",
     "build:invoicing": "vite build --config vite.review.config.js --configLoader runner",
-    "preview:invoicing": "node server/invoicing/preview.js"
+    "preview:invoicing": "node server/invoicing/preview.js",
+    "test:recipes": "node --test tests/recipes-*.test.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

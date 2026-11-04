@@ -53,6 +53,7 @@ import {
   X,
 } from "lucide-react";
 import "./styles.css";
+import { RecipeWorkspace } from "./recipes/RecipeWorkspace";
 
 type ReportStatus = "Borrador" | "Listo para revisar" | "Enviado";
 
@@ -91,7 +92,7 @@ const WORKFLOW_HIDDEN_STATUS = /^cerrad/i;
 const WORKFLOW_WINDOW_DAYS = 30;
 type AuthStatus = "checking" | "authenticated" | "anonymous";
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type ActiveView = "dashboard" | "module1" | "monthly" | "compras" | "clientes" | "tasks" | "reports" | "criteria" | "users";
+type ActiveView = "recipes" | "dashboard" | "module1" | "monthly" | "compras" | "clientes" | "tasks" | "reports" | "criteria" | "users";
 
 type BarMix = { nombre: string; componentes: Array<{ producto: string; botellasPorLitro: number }> };
 
@@ -358,6 +359,7 @@ const userPermissionOptions = [
   { id: "tasks", label: "Pendientes" },
   { id: "reports", label: "Historial" },
   { id: "criteria", label: "Criterios" },
+  { id: "recipes", label: "Recetario (revisión interna)" },
   { id: "users", label: "Usuarios" },
 ];
 
@@ -3237,6 +3239,7 @@ function App() {
     module1: ["Operación semanal", "Reportes semanales"],
     monthly: ["Operación mensual", "Reportes mensuales"],
     compras: ["Operación de compras", "Sugerencias de compra"],
+    recipes: ["Cocina", "Recetario y costos"],
     clientes: ["Directorio", "Clientes y correos"],
     tasks: ["Gestión operativa", "Pendientes del equipo"],
     reports: ["Historial", "Reportes generados"],
@@ -3883,6 +3886,7 @@ function App() {
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "monthly" ? "active" : ""} onClick={() => navigateTo("monthly")}><CalendarDays size={18} /> Reportes mensuales</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "compras" ? "active" : ""} onClick={() => navigateTo("compras")}><ShoppingCart size={18} /> Compras</button> : null}
           {userCanAccess(currentUserInfo, "module1") ? <button className={activeView === "clientes" ? "active" : ""} onClick={() => navigateTo("clientes")}><Building2 size={18} /> Clientes</button> : null}
+          {currentUserInfo && userCanAccess(currentUserInfo, "recipes") ? <button className={activeView === "recipes" ? "active" : ""} onClick={() => navigateTo("recipes")}><BookOpenCheck size={18} /> Recetario</button> : null}
           {userCanAccess(currentUserInfo, "tasks") ? <button className={activeView === "tasks" ? "active" : ""} onClick={() => navigateTo("tasks")}><ListChecks size={18} /> Pendientes</button> : null}
           {userCanAccess(currentUserInfo, "reports") ? <button className={activeView === "reports" ? "active" : ""} onClick={() => navigateTo("reports")}><FileText size={18} /> Historial</button> : null}
           {userCanAccess(currentUserInfo, "criteria") ? <button className={activeView === "criteria" ? "active" : ""} onClick={() => navigateTo("criteria")}><Upload size={18} /> Criterios</button> : null}
@@ -4702,6 +4706,8 @@ function App() {
           {selectedReport?.monthly ? reportWorkspace : null}
           </>
         ) : null}
+
+        {activeView === "recipes" && currentUserInfo && userCanAccess(currentUserInfo, "recipes") ? <RecipeWorkspace clients={clients} /> : null}
 
         {activeView === "compras" ? (
           <>
