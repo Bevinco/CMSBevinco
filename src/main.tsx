@@ -101,6 +101,9 @@ type SuggestionItem = {
   inventoryDays: number; excessCost: number; alerta?: string; enNivel?: boolean;
   // true = el PAR de este producto esta fijado a mano y no sale de la regla.
   parFijo?: boolean;
+  // Origen del PAR: "fijo" (cargado en el CMS), "sculpture" o "cms" (formula
+  // de respaldo cuando Sculpture no lo trae).
+  parFuente?: string;
 };
 type PurchaseParams = { suggestionDays: number; extraDays: number; coverage: number };
 // Lista de productos de la auditoria semanal del local (la define el equipo).
@@ -1093,11 +1096,15 @@ function App() {
   const [comprasMixStock, setComprasMixStock] = useState<Record<string, string>>({});
   const [comprasMixSaving, setComprasMixSaving] = useState(false);
   const [comprasLoading, setComprasLoading] = useState(false);
-  const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos">("comprar");
-  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string; area?: string }; period: { id: string; label: string }; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[] } | null>(null);
+  const [comprasFilter, setComprasFilter] = useState<"comprar" | "exceso" | "todos" | "excluidos">("comprar");
+  const [comprasData, setComprasData] = useState<{ client: { id: string; name: string; area?: string }; period: { id: string; label: string }; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[]; excluidos?: SuggestionItem[]; excludedItems?: string[]; exclusionesSinCalce?: number } | null>(null);
   // Editor de la lista de auditoria semanal: null = cerrado, texto = abierto.
   const [weeklyDraft, setWeeklyDraft] = useState<string | null>(null);
   const [savingWeekly, setSavingWeekly] = useState(false);
+  // Editor de la lista de productos excluidos (null = cerrado) y productos
+  // cuyo boton on/off se esta guardando.
+  const [excludedDraft, setExcludedDraft] = useState<string | null>(null);
+  const [togglingItems, setTogglingItems] = useState<Record<string, boolean>>({});
   const [workStatus, setWorkStatus] = useState<WorkStatus>("idle");
   const [error, setError] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -1923,6 +1930,41 @@ function App() {
     buy: ((client as { purchaseRecipients?: string[] }).purchaseRecipients || []).join(", "),
     cc: ((client as { ccRecipients?: string[] }).ccRecipients || []).join(", "),
   };
+  // Boton on/off de un producto en la sugerencia (pedido del equipo, 10-nov).
+  // Se mueve al instante entre la lista y "Excluidos" — recalcular todo por
+  // cada clic no deja trabajar con listas largas — y se guarda en el fondo.
+  // Si el guardado falla, se recarga la sugerencia para no mostrar algo falso.
+  async function toggleProductoSugerencia(item: SuggestionItem, incluir: boolean) {
+    if (!comprasData || togglingItems[item.name]) return;
+    const clientId = comprasData.client.id;
+    setTogglingItems((current) => ({ ...current, [item.name]: true }));
+    setComprasData((current) => {
+      if (!current) return current;
+      const items = incluir ? [...current.items, item] : current.items.filter((otro) => otro !== item);
+      const excluidos = incluir ? (current.excluidos || []).filter((otro) => otro !== item) : [...(current.excluidos || []), item];
+      const orden = (a: SuggestionItem, b: SuggestionItem) => a.provider.localeCompare(b.provider, "es") || a.name.localeCompare(b.name, "es");
+      return { ...current, items: items.sort(orden), excluidos: excluidos.sort(orden) };
+    });
+    try {
+      const payload = await readJson<{ excludedItems: string[] }>(await fetch(`/api/module1/clients/${clientId}/excluded-items`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ item: item.name, excluded: !incluir }),
+      }));
+      setComprasData((current) => (current ? { ...current, excludedItems: payload.excludedItems } : current));
+      setError(incluir ? `"${item.name}" vuelve a la sugerencia.` : `"${item.name}" quedó fuera de la sugerencia y de las descargas.`);
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : "No se pudo guardar el cambio.");
+      setWorkStatus("error");
+      await loadComprasSuggestion(clientId);
+    } finally {
+      setTogglingItems((current) => {
+        const { [item.name]: _quitado, ...resto } = current;
+        return resto;
+      });
+    }
+  }
+
   // Guarda TODOS los PAR editados de una vez y recalcula una sola vez.
   // Un valor vacio borra el fijo y ese producto vuelve a la formula.
   async function saveParItemDrafts(clientId: string, items: SuggestionItem[]) {
@@ -2091,7 +2133,7 @@ function App() {
       if (comprasPeriodPid) query.set("period", comprasPeriodPid);
       const mixParam = comprasMixStockParam();
       if (mixParam) query.set("mixStock", decodeURIComponent(mixParam));
-      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; purchaseParams?: PurchaseParams; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[] }>(
+      const payload = await readJson<{ client: { id: string; name: string }; period: { id: string; label: string }; purchaseRecipients?: string[]; barMixes?: BarMix[]; purchaseParams?: PurchaseParams; items: SuggestionItem[]; listaSemanal?: ListaSemanal; weeklyItems?: string[]; excluidos?: SuggestionItem[]; excludedItems?: string[]; exclusionesSinCalce?: number }>(
         await fetch(`/api/module1/clients/${clientId}/purchase-suggestion${query.toString() ? `?${query.toString()}` : ""}`),
       );
       setComprasData(payload);
@@ -4712,13 +4754,24 @@ function App() {
                 <h2>¿Qué hay que comprar esta semana?</h2>
               </div>
               <div className="action-row wrap-actions">
-                {comprasData ? (
-                  // El Excel descarga lo que muestra la pestaña activa
-                  // (Por comprar / Con exceso / Todos) — reunión 28-ago.
-                  <a className="button-link" href={`/api/module1/clients/${comprasData.client.id}/purchase-suggestion?format=xlsx&scope=${comprasFilter}${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`} target="_blank" rel="noreferrer">
-                    <FileSpreadsheet size={17} /> Descargar Excel ({comprasFilter === "comprar" ? "por comprar" : comprasFilter === "exceso" ? "con exceso" : "todos"})
-                  </a>
-                ) : null}
+                {comprasData ? (() => {
+                  // Excel y PDF descargan lo que muestra la pestaña activa
+                  // (Por comprar / Con exceso / Todos) — reunión 28-ago; el PDF
+                  // se agregó el 10-nov. Los productos excluidos nunca salen.
+                  const alcance = comprasFilter === "excluidos" ? "todos" : comprasFilter;
+                  const base = `/api/module1/clients/${comprasData.client.id}/purchase-suggestion?scope=${alcance}${comprasPeriodPid ? `&period=${encodeURIComponent(comprasPeriodPid)}` : ""}${comprasMixStockParam() ? `&mixStock=${comprasMixStockParam()}` : ""}`;
+                  const etiqueta = alcance === "comprar" ? "por comprar" : alcance === "exceso" ? "con exceso" : "todos";
+                  return (
+                    <>
+                      <a className="button-link" href={`${base}&format=xlsx`} target="_blank" rel="noreferrer">
+                        <FileSpreadsheet size={17} /> Excel ({etiqueta})
+                      </a>
+                      <a className="button-link" href={`${base}&format=pdf`} target="_blank" rel="noreferrer">
+                        <FileText size={17} /> PDF ({etiqueta})
+                      </a>
+                    </>
+                  );
+                })() : null}
               </div>
             </div>
             <div className="unit-form-grid">
@@ -4781,7 +4834,8 @@ function App() {
           {comprasData ? (() => {
             const toBuy = comprasData.items.filter((item) => item.suggested > 0);
             const withExcess = comprasData.items.filter((item) => item.excessCost > 0);
-            const visibleItems = comprasFilter === "comprar" ? toBuy : comprasFilter === "exceso" ? withExcess : comprasData.items;
+            const excluidosLista = comprasData.excluidos || [];
+            const visibleItems = comprasFilter === "comprar" ? toBuy : comprasFilter === "exceso" ? withExcess : comprasFilter === "excluidos" ? excluidosLista : comprasData.items;
             const orderTotal = toBuy.reduce((sum, item) => sum + (item.orderCost || 0), 0);
             const excessTotal = withExcess.reduce((sum, item) => sum + (item.excessCost || 0), 0);
             return (
@@ -4795,6 +4849,7 @@ function App() {
                   <button className={comprasFilter === "comprar" ? "active" : ""} type="button" onClick={() => setComprasFilter("comprar")}>Por comprar ({toBuy.length})</button>
                   <button className={comprasFilter === "exceso" ? "active" : ""} type="button" onClick={() => setComprasFilter("exceso")}>Con exceso ({withExcess.length})</button>
                   <button className={comprasFilter === "todos" ? "active" : ""} type="button" onClick={() => setComprasFilter("todos")}>Todos ({comprasData.items.length})</button>
+                  <button className={comprasFilter === "excluidos" ? "active" : ""} type="button" onClick={() => setComprasFilter("excluidos")} title="Productos sacados de la sugerencia con el botón on/off">Excluidos ({excluidosLista.length})</button>
                 </div>
               </div>
               <div className="compras-summary">
@@ -4856,6 +4911,66 @@ function App() {
                           await loadComprasSuggestion(comprasData.client.id);
                         } catch (weeklyError) {
                           setError(weeklyError instanceof Error ? weeklyError.message : "No se pudo guardar la lista.");
+                          setWorkStatus("error");
+                        } finally {
+                          setSavingWeekly(false);
+                        }
+                      }}
+                    >
+                      {savingWeekly ? <span className="btn-spinner" /> : <CheckCircle2 size={16} />}
+                      Guardar lista
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {/* Exclusiones: productos que no deben ir en la sugerencia de
+                  este local. Se apagan uno a uno con el botón de la tabla o
+                  se carga la lista completa aquí (pedido del equipo, 10-nov). */}
+              <div className="compras-semanal">
+                <div>
+                  <p className="eyebrow">Productos excluidos</p>
+                  <small>
+                    {(comprasData.excludedItems || []).length
+                      ? <><b>{(comprasData.excludedItems || []).length} producto(s)</b> fuera de la sugerencia y de las descargas. Se ven en la pestaña Excluidos, donde se pueden volver a encender.</>
+                      : "Ninguno. Apaga un producto con el botón de la columna Incluir, o carga la lista completa."}
+                  </small>
+                  {comprasData.exclusionesSinCalce ? (
+                    <small className="compras-semanal-faltan">
+                      {comprasData.exclusionesSinCalce} de la lista no existen en Sculpture para este local: revisa que la lista sea de este local o que los nombres coincidan.
+                    </small>
+                  ) : null}
+                </div>
+                {excludedDraft === null ? (
+                  <button className="secondary-button" type="button" onClick={() => setExcludedDraft((comprasData.excludedItems || []).join("\n"))}>
+                    {(comprasData.excludedItems || []).length ? "Editar lista" : "Cargar lista"}
+                  </button>
+                ) : null}
+              </div>
+              {excludedDraft !== null ? (
+                <div className="compras-semanal-editor">
+                  <label>
+                    Un producto por línea, escrito como en Sculpture. Reemplaza la lista actual de este local.
+                    <textarea rows={10} value={excludedDraft} onChange={(event) => setExcludedDraft(event.target.value)} />
+                  </label>
+                  <div className="action-row">
+                    <small>{excludedDraft.split(/\r?\n/).filter((linea) => linea.trim()).length} producto(s). Deja la lista vacía para no excluir ninguno.</small>
+                    <button className="secondary-button" type="button" disabled={savingWeekly} onClick={() => setExcludedDraft(null)}>Cancelar</button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={savingWeekly}
+                      onClick={async () => {
+                        setSavingWeekly(true);
+                        try {
+                          await readJson(await fetch(`/api/module1/clients/${comprasData.client.id}/excluded-items`, {
+                            method: "PATCH",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ items: excludedDraft.split(/\r?\n/).map((linea) => linea.trim()).filter((linea) => linea && !/^nombre art[ií]culo$/i.test(linea)) }),
+                          }));
+                          setExcludedDraft(null);
+                          await loadComprasSuggestion(comprasData.client.id);
+                        } catch (excludedError) {
+                          setError(excludedError instanceof Error ? excludedError.message : "No se pudo guardar la lista.");
                           setWorkStatus("error");
                         } finally {
                           setSavingWeekly(false);
@@ -4974,6 +5089,7 @@ function App() {
                 <table className="compras-table">
                   <thead>
                     <tr>
+                      <th title="Apágalo para sacar el producto de la sugerencia y de las descargas">Incluir</th>
                       <th>Proveedor</th><th>Producto</th><th>Tamaño</th><th className="num">Stock</th>
                       <th className="num">PAR</th><th className="num">Sugerido</th><th className="num">Costo pedido</th>
                       <th className="num">Días inv.</th><th className="num">Exceso</th>
@@ -4981,7 +5097,21 @@ function App() {
                   </thead>
                   <tbody>
                     {visibleItems.map((item, index) => (
-                      <tr key={`${item.provider}-${item.name}-${index}`}>
+                      <tr key={`${item.provider}-${item.name}-${index}`} className={comprasFilter === "excluidos" ? "is-excluido" : ""}>
+                        <td>
+                          {/* Botón on/off (pedido del equipo, 10-nov): apagado,
+                              el producto sale de la sugerencia y de las
+                              descargas, y queda en la pestaña Excluidos. */}
+                          <label className="switch-incluir" title={comprasFilter === "excluidos" ? "Volver a incluirlo" : "Sacarlo de la sugerencia"}>
+                            <input
+                              type="checkbox"
+                              checked={comprasFilter !== "excluidos"}
+                              disabled={Boolean(togglingItems[item.name])}
+                              onChange={(event) => toggleProductoSugerencia(item, event.target.checked)}
+                            />
+                            <span />
+                          </label>
+                        </td>
                         <td>{index > 0 && visibleItems[index - 1].provider === item.provider ? "" : item.provider}</td>
                         <td><strong>{item.name}</strong>{item.enNivel ? <small className="compras-en-nivel"> ✓ En nivel</small> : null}{item.alerta ? <small className="compras-alerta"> ⚠ {item.alerta}</small> : null}</td>
                         <td>{item.size}</td>
@@ -4995,24 +5125,34 @@ function App() {
                             const guardado = item.par ? String(Math.round(item.par)) : "";
                             const enEdicion = parItemDrafts[item.name] !== undefined;
                             const sinGuardar = enEdicion && parItemDrafts[item.name].trim() !== guardado;
-                            // En barra el PAR lo entrega Sculpture y manda el
-                            // suyo: fijarlo aquí no haría nada, así que no se
-                            // ofrece para no prometer algo que no ocurre.
-                            if (!/food/i.test(comprasData.client.area || "Food")) {
-                              return <span title="En barra el PAR lo calcula Sculpture; no se puede fijar desde el CMS.">{item.par ? Math.round(item.par) : "-"}</span>;
-                            }
+                            // Desde el 10-nov el PAR fijo vale para barra y
+                            // cocina. Sin fijo, manda el de Sculpture; la
+                            // fórmula del CMS es solo respaldo y se marca.
+                            const origen = item.parFijo ? "fijo" : item.parFuente === "cms" ? "cms" : "sculpture";
+                            const ayuda = origen === "fijo"
+                              ? "PAR fijo cargado en el CMS: manda sobre Sculpture. Bórralo para volver al de Sculpture."
+                              : origen === "cms"
+                                ? "Sculpture no trae PAR para este producto: lo calcula la fórmula del CMS como respaldo. Escribe un número para fijarlo."
+                                : "PAR de Sculpture, del mismo período. Escribe un número para fijarlo en el CMS.";
                             return (
+                              <>
                               <input
                                 className={`par-input${sinGuardar ? " is-editado" : item.parFijo ? " is-fijo" : ""}`}
                                 type="number"
                                 min={0}
-                                title={item.parFijo ? "PAR fijo: ignora la fórmula. Bórralo para volver a calcularlo." : "PAR calculado con la regla. Escribe un número para fijarlo."}
+                                title={ayuda}
                                 value={enEdicion ? parItemDrafts[item.name] : guardado}
                                 onChange={(event) => {
                                   const valor = event.target.value;
                                   setParItemDrafts((current) => ({ ...current, [item.name]: valor }));
                                 }}
                               />
+                              {/* De dónde salió el PAR, a la vista: SH = Sculpture,
+                                  CMS = fórmula de respaldo, FIJO = cargado a mano. */}
+                              <small className={`par-origen par-origen-${origen}`} title={ayuda}>
+                                {origen === "fijo" ? "FIJO" : origen === "cms" ? "CMS" : "SH"}
+                              </small>
+                              </>
                             );
                           })()}
                         </td>

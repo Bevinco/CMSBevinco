@@ -3748,6 +3748,25 @@ function clavePar(nombre) {
     .replace(/\s+/g, " ");
 }
 
+// Barra con PAR fijo: Sculpture entrega PAR/Orden/Costo; para los productos
+// con PAR cargado a mano se rehace la orden como PAR - existencia, y el costo.
+function aplicaParFijoSobreSculpture(rows, parFijo) {
+  for (const row of rows) {
+    const record = row.record || {};
+    const name = pickRecordValue(record, ["itemName", "item"], "") || pickRecordValueFuzzy(record, /nombreArt/i) || row.values?.[0] || "";
+    if (!name || isTotalRow(name) || /:\s*$/.test(name)) continue;
+    const fijo = Number(parFijo[clavePar(name)]);
+    if (!Number.isFinite(fijo) || fijo < 0) continue;
+    const onHand = parseNumber(record.existencia);
+    const unitCost = parseNumber(pickRecordValueFuzzy(record, /costoUnit/i));
+    const sugerido = Math.max(Math.ceil(fijo - onHand - 1e-9), 0);
+    record.par = String(fijo);
+    record.orden = sugerido ? String(sugerido) : "";
+    record.costoPedido = sugerido && unitCost ? `$${Math.round(sugerido * unitCost)}` : "";
+    record.parFuente = "fijo";
+  }
+}
+
 function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = false, parFijo = null } = {}) {
   const { suggestionDays, extraDays, coverage } = { ...KITCHEN_PURCHASE_DEFAULTS, ...params };
   const hasNativeSuggestion = (rows || []).some((row) => {
@@ -3758,7 +3777,18 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
   // Intelipar de cocina (22-ago), el CMS dejaba de calcular y pasaba el
   // numero ingenuo del sistema (PAR completo ignorando stock). En cocina la
   // formula del CMS SIEMPRE sobreescribe la nativa.
-  if ((hasNativeSuggestion && !force) || !rows?.length) return false;
+  if (!rows?.length) return false;
+  if (hasNativeSuggestion && !force) {
+    // Barra: el PAR, la orden y el costo vienen de Sculpture y se respetan.
+    // Solo los productos con PAR FIJO cargado en el CMS se recalculan con ese
+    // valor (pedido del equipo, 10-nov: PAR fijo para todos los clientes).
+    if (parFijo && Object.keys(parFijo).length) aplicaParFijoSobreSculpture(rows, parFijo);
+    for (const row of rows) {
+      const record = row.record || {};
+      if (!record.parFuente && String(record.par ?? "").trim()) record.parFuente = "sculpture";
+    }
+    return false;
+  }
 
   // Mediana de costos unitarios de ESTA tabla (solo filas de producto). Se usa
   // la mediana y no el promedio porque el outlier que buscamos arrastraria el
@@ -3803,20 +3833,36 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
     const consumption = parseNumber(pickRecordValueFuzzy(record, /consumoHist/i) || record.consumo || "");
     const onHand = parseNumber(record.existencia);
     const unitCost = parseNumber(pickRecordValueFuzzy(record, /costoUnit/i));
-    if (!consumption && !onHand) continue;
+
+    // De donde sale el PAR, en este orden (pedido del equipo, 10-nov):
+    //  1. fijo: cargado a mano en el CMS para ese producto (client.parFijo);
+    //  2. Sculpture: el PAR que trae el Intelipar del MISMO periodo, porque las
+    //     reglas de calculo se configuran alla;
+    //  3. formula del CMS, SOLO como respaldo: a nov-2026 la mayoria de las
+    //     cocinas (El Muelle, El Bajo, De la Ostia, Tambo, San Lucas...) aun no
+    //     tienen el PAR configurado en Sculpture y sin esto quedarian sin
+    //     sugerencia. Cuando el equipo lo configure, pasan solas a usarlo.
+    // La sugerencia la calcula siempre el CMS como PAR - existencia: la columna
+    // Orden de Sculpture en cocina era el PAR completo ignorando el stock.
+    const parCargado = parFijo ? Number(parFijo[clavePar(name)]) : NaN;
+    const usaParFijo = Number.isFinite(parCargado) && parCargado >= 0;
+    const parSculptureTexto = String(record.par ?? "").trim();
+    const parSculpture = parSculptureTexto ? parseNumber(parSculptureTexto) : NaN;
+    const usaParSculpture = !usaParFijo && Number.isFinite(parSculpture) && parSculpture >= 0;
+    // Sin consumo ni stock solo se omite si tampoco hay un PAR definido: con
+    // PAR de Sculpture o fijo, existencia 0 significa comprar hasta el PAR.
+    if (!consumption && !onHand && !usaParFijo && !usaParSculpture) continue;
 
     const daily = consumption / Math.max(daysInPeriod, 1);
     // El epsilon evita que el redondeo hacia arriba infle valores exactos por
     // ruido de punto flotante (ej. 92.0000000001 -> 93 en vez de 92).
     const roundUp = (value) => Math.ceil(value - 1e-9);
-    // PAR fijo por producto: algunos equipos no calculan el PAR con la regla,
-    // lo tienen definido a mano para cada item (Bar Valdivia cocina, 23-sep).
-    // Si hay un valor cargado para este producto, manda sobre la formula.
-    const parCargado = parFijo ? Number(parFijo[clavePar(name)]) : NaN;
-    const usaParFijo = Number.isFinite(parCargado) && parCargado >= 0;
     const par = usaParFijo
       ? parCargado
-      : roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
+      : usaParSculpture
+        ? parSculpture
+        : roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
+    record.parFuente = usaParFijo ? "fijo" : usaParSculpture ? "sculpture" : "cms";
     const suggested = Math.max(roundUp(par - onHand), 0);
     // Si el costo unitario es un outlier de la propia tabla, el dato viene mal
     // desde Sculpture: se conservan las CANTIDADES (par, orden, dias), que no
@@ -8124,6 +8170,43 @@ app.patch("/api/module1/clients/:clientId/weekly-items", requireAuth, async (req
   response.json({ weeklyItems: lista, total: lista.length });
 });
 
+// Productos excluidos de la sugerencia de compra (boton on/off, pedido del
+// equipo 10-nov). Dos formas:
+//   {item: "Hielo Cubo (KG)", excluded: true|false}  -> enciende/apaga uno
+//   {items: ["...", "..."]}                          -> reemplaza la lista
+app.patch("/api/module1/clients/:clientId/excluded-items", requireAuth, async (request, response) => {
+  const store = await readStore();
+  const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
+  if (!client) { response.status(404).json({ error: "No se encontró el restaurante." }); return; }
+  const limpia = (valores) => {
+    const vistos = new Set();
+    const lista = [];
+    for (const valor of valores) {
+      const nombre = String(valor ?? "").trim();
+      const clave = clavePar(nombre);
+      if (!nombre || nombre.length > 200 || vistos.has(clave)) continue;
+      vistos.add(clave);
+      lista.push(nombre);
+    }
+    return lista;
+  };
+  let lista;
+  if (Array.isArray(request.body?.items)) {
+    lista = limpia(request.body.items);
+  } else if (typeof request.body?.item === "string" && typeof request.body?.excluded === "boolean") {
+    const clave = clavePar(request.body.item);
+    const sinEse = (client.excludedItems || []).filter((nombre) => clavePar(nombre) !== clave);
+    lista = limpia(request.body.excluded ? [...sinEse, request.body.item] : sinEse);
+  } else {
+    response.status(400).json({ error: "Indica {item, excluded} o {items: [...]}." });
+    return;
+  }
+  if (lista.length > 3000) { response.status(400).json({ error: "La lista es demasiado larga." }); return; }
+  client.excludedItems = lista;
+  await writeStore(store);
+  response.json({ excludedItems: lista, total: lista.length });
+});
+
 app.patch("/api/module1/clients/:clientId/purchase-params", requireAuth, async (request, response) => {
   const store = await readStore();
   const client = store.clients.find((candidate) => candidate.id === request.params.clientId);
@@ -10767,6 +10850,19 @@ function listaSemanalDe(client) {
   return new Map(lista.map((nombre) => [clavePar(repara(nombre)), repara(nombre).trim()]));
 }
 
+// Productos excluidos de la sugerencia por el equipo (boton on/off). Mismo
+// tratamiento de nombres que la lista semanal.
+function listaExcluidosDe(client) {
+  const lista = Array.isArray(client?.excludedItems) ? client.excludedItems : [];
+  if (!lista.length) return null;
+  const repara = (texto) => {
+    const t = String(texto || "");
+    if (!/[ÃÂ�]/.test(t)) return t;
+    try { return Buffer.from(t, "latin1").toString("utf8"); } catch { return t; }
+  };
+  return new Set(lista.map((nombre) => clavePar(repara(nombre))));
+}
+
 // soloSemanal: el modulo Compras y su descarga muestran SOLO la lista semanal
 // cuando el local la tiene. Los reportes no lo pasan: sus cifras no cambian.
 async function computeSuggestionItems({ client, period, mixStock, soloSemanal = false }) {
@@ -10851,16 +10947,42 @@ async function computeSuggestionItems({ client, period, mixStock, soloSemanal = 
         // El PAR de este producto esta fijado a mano (no sale de la regla):
         // la tabla lo marca para que se note cual manda.
         parFijo: Number.isFinite(Number(client?.parFijo?.[clavePar(name)])),
+        // De donde sale el PAR: "fijo" (CMS, a mano), "sculpture" o "cms"
+        // (formula de respaldo cuando Sculpture no lo trae).
+        parFuente: record.parFuente || (String(record.par ?? "").trim() ? "sculpture" : ""),
       };
     })
     .filter(Boolean);
+  // Proveedor vacio: la tabla de Sculpture solo lo trae en la primera fila
+  // del grupo; se hereda hacia abajo para que ninguna celda quede en blanco
+  // (pedido de Pedro, reunion 28-ago: camaron/corvina/pulpo son de Bondai).
+  // Se hace sobre la secuencia COMPLETA, antes de filtrar: despues de quitar
+  // filas (lista semanal, exclusiones) un producto heredaba el proveedor de
+  // otro grupo.
+  let carryProvider = "";
+  for (const item of todosLosItems) {
+    if (item.provider && item.provider !== "Por validar") carryProvider = item.provider;
+    else if (carryProvider) item.provider = carryProvider;
+  }
   // Con lista semanal: TODOS los productos de la lista, tengan o no sugerencia,
   // porque el cliente necesita ver el stock de cada uno (pedido del equipo,
   // 21-oct). Sin lista: lo accionable, como siempre.
   const semanal = soloSemanal ? listaSemanalDe(client) : null;
-  const items = semanal
+  const candidatos = semanal
     ? todosLosItems.filter((item) => semanal.has(clavePar(item.name)))
     : todosLosItems.filter((item) => item.suggested > 0 || item.excessCost > 0 || (isKitchenTable && item.onHand > 0));
+  // Productos que el equipo saco de la sugerencia con el boton on/off
+  // (client.excludedItems, pedido 10-nov). No salen en la tabla ni en las
+  // descargas; se devuelven aparte para poder volver a activarlos.
+  const excluidosSet = soloSemanal ? listaExcluidosDe(client) : null;
+  const items = excluidosSet ? candidatos.filter((item) => !excluidosSet.has(clavePar(item.name))) : candidatos;
+  const excluidos = excluidosSet ? candidatos.filter((item) => excluidosSet.has(clavePar(item.name))) : [];
+  // Nombres de la lista de exclusion que no existen en Sculpture para este
+  // local: con listas cargadas desde Excel es la forma de saber si se aplico
+  // al local correcto (las de Tio Tomate calzan con las unidades AFM, no con
+  // las de la cuenta principal).
+  const nombresDelLocal = new Set(todosLosItems.map((item) => clavePar(item.name)));
+  const exclusionesSinCalce = excluidosSet ? [...excluidosSet].filter((k) => !nombresDelLocal.has(k)).length : 0;
   // Productos de la lista que Sculpture no trae esta semana: casi siempre el
   // nombre cambio en Sculpture. Se informan para que no se pierdan en silencio.
   const nombresSculpture = new Set(todosLosItems.map((item) => clavePar(item.name)));
@@ -10869,18 +10991,12 @@ async function computeSuggestionItems({ client, period, mixStock, soloSemanal = 
     : { activa: false, total: 0, faltantes: [] };
   // "En nivel": ni compra ni exceso — visible con su PAR y dias de
   // inventario para que la sugerida 0 sea explicable, no un misterio.
-  for (const item of items) item.enNivel = !(item.suggested > 0 || item.excessCost > 0);
-  // Proveedor vacio: la tabla de Sculpture solo lo trae en la primera fila
-  // del grupo; se hereda hacia abajo para que ninguna celda quede en blanco
-  // (pedido de Pedro, reunion 28-ago: camaron/corvina/pulpo son de Bondai).
-  let carryProvider = "";
-  for (const item of items) {
-    if (item.provider && item.provider !== "Por validar") carryProvider = item.provider;
-    else if (carryProvider) item.provider = carryProvider;
-  }
-  items.sort((left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es"));
+  for (const item of candidatos) item.enNivel = !(item.suggested > 0 || item.excessCost > 0);
+  const porProveedor = (left, right) => left.provider.localeCompare(right.provider, "es") || left.name.localeCompare(right.name, "es");
+  items.sort(porProveedor);
+  excluidos.sort(porProveedor);
   const paramsVigentes = { ...KITCHEN_PURCHASE_DEFAULTS, ...(client?.purchaseParams || {}) };
-  return { items, purchaseParams: paramsVigentes, parFijo: client?.parFijo || {}, listaSemanal };
+  return { items, excluidos, exclusionesSinCalce, purchaseParams: paramsVigentes, parFijo: client?.parFijo || {}, listaSemanal };
 }
 
 // Modulo Sugerencias de Compra: la sugerencia VIGENTE de un local (ultima
@@ -10950,6 +11066,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
     let period = null;
     let items = null;
     let listaSemanal = null;
+    let excluidos = [];
+    let exclusionesSinCalce = 0;
     let firstResult = null;
     for (const rawPeriod of closedPeriods) {
       const candidate = ensurePeriod(store, rawPeriod);
@@ -10961,12 +11079,14 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
         if (firstResult) break;
         continue;
       }
-      if (!firstResult) firstResult = { period: candidate, items: result.items, listaSemanal: result.listaSemanal };
+      if (!firstResult) firstResult = { period: candidate, items: result.items, listaSemanal: result.listaSemanal, excluidos: result.excluidos, exclusionesSinCalce: result.exclusionesSinCalce };
       const audited = result.items.some((item) => item.onHand > 0);
       if (audited || !result.items.length) {
         period = candidate;
         items = result.items;
         listaSemanal = result.listaSemanal;
+        excluidos = result.excluidos || [];
+        exclusionesSinCalce = result.exclusionesSinCalce || 0;
         break;
       }
     }
@@ -10980,6 +11100,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       period = firstResult.period;
       items = firstResult.items;
       listaSemanal = firstResult.listaSemanal;
+      excluidos = firstResult.excluidos || [];
+      exclusionesSinCalce = firstResult.exclusionesSinCalce || 0;
     }
     const exportFormat = String(request.query.format || "");
     // scope (reunion 28-ago): descargar solo "por comprar", solo "con
@@ -11125,6 +11247,104 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       response.send(Buffer.from(buffer));
       return;
     }
+    if (exportFormat === "pdf") {
+      // PDF con el MISMO formato de tabla que el equipo ya envia a los
+      // clientes ("Sugerencia de compra ... al <fecha>"): una fila por
+      // producto, proveedor una vez por grupo, y Total general (pedido 10-nov).
+      // Respeta el filtro elegido y deja fuera los productos excluidos.
+      const filas = exportScope === "comprar"
+        ? items.filter((item) => item.suggested > 0)
+        : exportScope === "exceso"
+          ? items.filter((item) => item.excessCost > 0)
+          : items;
+      const pesos = (valor) => `$${Math.round(valor || 0).toLocaleString("es-CL")}`;
+      const cantidad = (valor) => (Number.isFinite(valor) ? Number(valor.toFixed(2)).toLocaleString("es-CL") : "0");
+      let proveedorAnterior = "";
+      const cuerpo = filas.map((item) => {
+        const proveedor = item.provider === proveedorAnterior ? "" : item.provider;
+        proveedorAnterior = item.provider;
+        const sugerido = item.suggested > 0;
+        return `<tr class="${proveedor ? "grupo" : ""}">
+          <td class="prov">${escapeHtml(proveedor)}</td>
+          <td class="prod">${escapeHtml(item.name)}${item.alerta ? `<span class="alerta">${escapeHtml(item.alerta)}</span>` : ""}</td>
+          <td>${escapeHtml(item.size || "")}</td>
+          <td class="n">${pesos(item.unitCost)}</td>
+          <td class="n">${cantidad(item.onHand)}</td>
+          <td class="n">${pesos(item.onHandCost)}</td>
+          <td class="n">${cantidad(item.par)}</td>
+          <td class="n ${sugerido ? "fuerte" : ""}">${cantidad(item.suggested)}</td>
+          <td class="n ${sugerido ? "fuerte" : ""}">${pesos(item.orderCost)}</td>
+          <td class="n">${item.inventoryDays ? cantidad(item.inventoryDays) : "-"}</td>
+          <td class="n ${item.excessCost > 0 ? "exceso" : ""}">${pesos(item.excessCost)}</td>
+        </tr>`;
+      }).join("");
+      const suma = (campo) => filas.reduce((total, item) => total + (item[campo] || 0), 0);
+      const fecha = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Santiago" }).format(new Date());
+      const alcance = exportScope === "comprar" ? "Por comprar" : exportScope === "exceso" ? "Con exceso de inventario" : "Todos los productos";
+      const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>
+        @page { size: A4 landscape; margin: 10mm; }
+        body { color: #1f2a37; font: 9.5px Calibri, Arial, sans-serif; margin: 0; }
+        header { align-items: flex-end; border-bottom: 3px solid #90BF4F; display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 6px; }
+        h1 { color: #001E43; font-size: 18px; margin: 0; }
+        header p { color: #5b6573; font-size: 10px; margin: 2px 0 0; }
+        table { border-collapse: collapse; width: 100%; }
+        thead th { background: #001E43; color: #fff; font-size: 8.5px; padding: 5px 4px; text-align: left; }
+        thead th.n { text-align: right; }
+        thead { display: table-header-group; }
+        tbody tr { break-inside: avoid; }
+        td { border-bottom: 1px solid #e6e2d8; padding: 3.5px 4px; vertical-align: top; }
+        tr.grupo td { border-top: 1px solid #b9b2a2; }
+        td.n { text-align: right; white-space: nowrap; }
+        td.prov { color: #5b6573; font-weight: 700; width: 17%; }
+        td.prod { font-weight: 600; }
+        td.fuerte { color: #001E43; font-weight: 800; }
+        td.exceso { color: #c2371f; font-weight: 700; }
+        .alerta { color: #c2371f; display: block; font-size: 8px; font-weight: 400; }
+        tfoot td { background: #f7f4ea; border-top: 2px solid #001E43; font-weight: 800; }
+        .vacio { color: #5b6573; padding: 20px; text-align: center; }
+      </style></head><body>
+        <header>
+          <div><h1>${escapeHtml(client.name || client.id)}</h1><p>Sugerencia de compra · ${escapeHtml(alcance)} · Período ${escapeHtml(period.label || period.id)}</p></div>
+          <p>Envío de sugerencia · ${escapeHtml(fecha)}</p>
+        </header>
+        ${filas.length ? `<table>
+          <thead><tr>
+            <th>Proveedor</th><th>Nombre Artículo</th><th>Tamaño</th><th class="n">Costo unit.</th><th class="n">Inventario</th>
+            <th class="n">Inventario al costo</th><th class="n">PAR</th><th class="n">Compra sugerida</th><th class="n">Costo de la compra</th>
+            <th class="n">Inventario en días</th><th class="n">Exceso de inventario</th>
+          </tr></thead>
+          <tbody>${cuerpo}</tbody>
+          <tfoot><tr>
+            <td>Total general</td><td>${filas.length} productos</td><td></td><td></td><td></td>
+            <td class="n">${pesos(suma("onHandCost"))}</td><td></td><td></td>
+            <td class="n">${pesos(suma("orderCost"))}</td><td></td><td class="n">${pesos(suma("excessCost"))}</td>
+          </tr></tfoot>
+        </table>` : `<p class="vacio">No hay productos para este filtro.</p>`}
+      </body></html>`;
+      clearTimeout(pdfBrowserIdleTimer);
+      let pagina;
+      try {
+        const browser = await getPdfBrowser();
+        pagina = await browser.newPage();
+        await pagina.setContent(html, { waitUntil: "load", timeout: 60000 });
+        const pdf = await pagina.pdf({ format: "A4", landscape: true, printBackground: true, preferCSSPageSize: true });
+        const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
+        const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}${scopeName}`
+          .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 110);
+        response.setHeader("content-type", "application/pdf");
+        response.setHeader("content-disposition", `attachment; filename="${fileName}.pdf"`);
+        response.send(Buffer.from(pdf));
+      } catch (error) {
+        pdfBrowserPromise = null;
+        console.error("[pdf-sugerencia]", error.message);
+        response.status(502).json({ error: "No se pudo generar el PDF; intenta de nuevo en unos segundos." });
+      } finally {
+        if (pagina) await pagina.close().catch(() => {});
+        // Cerrar Chrome si queda ocioso: en Render la memoria es justa.
+        schedulePdfBrowserClose();
+      }
+      return;
+    }
     if (exportFormat === "csv") {
       const escapeCsv = (value) => {
         const text = String(value ?? "");
@@ -11197,6 +11417,11 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
       // muestran y los de la lista que Sculpture no trajo esta semana.
       listaSemanal: listaSemanal || { activa: false, total: 0, faltantes: [] },
       weeklyItems: client.weeklyItems || [],
+      // Productos sacados con el boton on/off: no van en la tabla ni en las
+      // descargas, pero se muestran aparte para poder reactivarlos.
+      excluidos,
+      exclusionesSinCalce,
+      excludedItems: client.excludedItems || [],
       items,
     });
   } catch (error) {
