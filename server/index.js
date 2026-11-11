@@ -238,6 +238,33 @@ function schedulePdfBrowserClose() {
   }, PDF_BROWSER_IDLE_MS);
 }
 
+// Descarta el navegador CERRANDOLO. Antes, ante un error, solo se soltaba la
+// referencia: el Chromium seguia vivo (~300MB) sin que nadie lo cerrara y el
+// siguiente PDF lanzaba otro encima (auditoria de memoria, 11-nov).
+async function descartaPdfBrowser() {
+  const anterior = pdfBrowserPromise;
+  pdfBrowserPromise = null;
+  if (!anterior) return;
+  try {
+    const browser = await anterior;
+    const proceso = browser?.process?.();
+    await Promise.race([browser?.close(), new Promise((resolve) => setTimeout(resolve, 5000))]);
+    if (proceso && proceso.exitCode === null) proceso.kill("SIGKILL");
+  } catch {
+    // No llego a arrancar: nada que cerrar.
+  }
+}
+
+// Trabajo pesado contra Sculpture (sugerencia de compra): de a uno. Cada
+// calculo baja y parsea varias tablas HTML grandes; tres pantallas de Compras
+// a la vez sumaban ~110MB de pico (medido el 11-nov).
+let sugerenciaJobChain = Promise.resolve();
+function enqueueSugerenciaJob(job) {
+  const run = sugerenciaJobChain.then(job, job);
+  sugerenciaJobChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 async function getPdfBrowser() {
   if (!pdfBrowserPromise) {
     pdfBrowserPromise = (async () => {
@@ -277,8 +304,8 @@ async function renderReportPdf(store, report, attempt = 0, forceDynamic = false)
     browser = await getPdfBrowser();
     if (!browser.connected) throw new Error("browser desconectado");
   } catch (error) {
-    // El navegador pudo morir (memoria/reinicio): resetear y reintentar una vez.
-    pdfBrowserPromise = null;
+    // El navegador pudo morir (memoria/reinicio): cerrarlo y reintentar una vez.
+    await descartaPdfBrowser();
     if (attempt < 1) return renderReportPdf(store, report, attempt + 1, forceDynamic);
     console.error("[pdf] launch fallo:", error.stack || error.message);
     throw error;
@@ -10718,7 +10745,9 @@ app.get("/r/:token/pdf", async (request, response) => {
     return;
   }
   try {
-    const pdf = await renderReportPdf(store, report, 0, true);
+    // En fila con el resto de los PDF: este enlace es publico y sin la fila
+    // tres descargas a la vez abrian tres paginas de Chromium juntas.
+    const pdf = await enqueuePdfJob(() => renderReportPdf(store, report, 0, true));
     const client = store.clients.find((candidate) => candidate.id === report.clientId);
     const period = store.periods.find((candidate) => candidate.id === report.periodId);
     const fileName = `Reporte ${client?.name || report.clientId} - ${period?.label || report.periodLabel || report.periodId}`
@@ -10865,7 +10894,11 @@ function listaExcluidosDe(client) {
 
 // soloSemanal: el modulo Compras y su descarga muestran SOLO la lista semanal
 // cuando el local la tiene. Los reportes no lo pasan: sus cifras no cambian.
-async function computeSuggestionItems({ client, period, mixStock, soloSemanal = false }) {
+function computeSuggestionItems(opciones) {
+  return enqueueSugerenciaJob(() => computeSuggestionItemsSinFila(opciones));
+}
+
+async function computeSuggestionItemsSinFila({ client, period, mixStock, soloSemanal = false }) {
   const cid = configuredIdentifier(client?.sculptureCid, client?.cid);
   const pid = configuredIdentifier(period?.sculpturePid, period?.pid);
   if (!cid || !pid) {
@@ -11321,13 +11354,25 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
           </tr></tfoot>
         </table>` : `<p class="vacio">No hay productos para este filtro.</p>`}
       </body></html>`;
-      clearTimeout(pdfBrowserIdleTimer);
-      let pagina;
       try {
-        const browser = await getPdfBrowser();
-        pagina = await browser.newPage();
-        await pagina.setContent(html, { waitUntil: "load", timeout: 60000 });
-        const pdf = await pagina.pdf({ format: "A4", landscape: true, printBackground: true, preferCSSPageSize: true });
+        // En la misma fila que los PDF de reportes: un solo render a la vez.
+        const pdf = await enqueuePdfJob(async () => {
+          clearTimeout(pdfBrowserIdleTimer);
+          let pagina;
+          try {
+            const browser = await getPdfBrowser();
+            pagina = await browser.newPage();
+            await pagina.setContent(html, { waitUntil: "load", timeout: 60000 });
+            return await pagina.pdf({ format: "A4", landscape: true, printBackground: true, preferCSSPageSize: true });
+          } catch (error) {
+            await descartaPdfBrowser();
+            throw error;
+          } finally {
+            if (pagina) await pagina.close().catch(() => {});
+            // Cerrar Chrome si queda ocioso: en Render la memoria es justa.
+            schedulePdfBrowserClose();
+          }
+        });
         const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
         const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}${scopeName}`
           .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 110);
@@ -11335,13 +11380,8 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
         response.setHeader("content-disposition", `attachment; filename="${fileName}.pdf"`);
         response.send(Buffer.from(pdf));
       } catch (error) {
-        pdfBrowserPromise = null;
         console.error("[pdf-sugerencia]", error.message);
         response.status(502).json({ error: "No se pudo generar el PDF; intenta de nuevo en unos segundos." });
-      } finally {
-        if (pagina) await pagina.close().catch(() => {});
-        // Cerrar Chrome si queda ocioso: en Render la memoria es justa.
-        schedulePdfBrowserClose();
       }
       return;
     }
