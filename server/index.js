@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import v8 from "node:v8";
+import vm from "node:vm";
 import * as cheerio from "cheerio";
 import express from "express";
 import { invoiceRouter } from "./invoicing/router.js";
@@ -125,7 +127,7 @@ async function fsPromisesMkdir() {
   await fs.mkdir(dataDir, { recursive: true });
 }
 
-async function persistStoreToSupabase(store) {
+async function persistStoreToSupabase(store, json = "") {
   if (!supabaseConfigured) return;
   // CANDADO DE SEGURIDAD: si la restauracion desde Supabase nunca se logro en
   // este arranque, el proceso puede estar sirviendo el store de MUESTRAS.
@@ -139,7 +141,7 @@ async function persistStoreToSupabase(store) {
     const response = await fetch(`${supabaseUrl}/rest/v1/cms_store?on_conflict=id`, {
       method: "POST",
       headers: { ...supabaseHeaders(), prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify([{ id: 1, data: store, updated_at: new Date().toISOString() }]),
+      body: `[{"id":1,"data":${json || JSON.stringify(store)},"updated_at":${JSON.stringify(new Date().toISOString())}}]`,
       signal: AbortSignal.timeout(20000),
     });
     if (!response.ok) {
@@ -267,6 +269,8 @@ function enqueueSugerenciaJob(job) {
 
 async function getPdfBrowser() {
   if (!pdfBrowserPromise) {
+    // Chromium necesita ~300MB: se le hace lugar antes de lanzarlo.
+    liberaMemoria("antes de lanzar Chromium");
     pdfBrowserPromise = (async () => {
       const puppeteer = (await import("puppeteer-core")).default;
       if (process.platform === "win32") {
@@ -432,6 +436,56 @@ function logoDataUri() {
   }
   return "";
 }
+
+// --- Memoria (auditoria 12-nov) -------------------------------------------
+// Node no devuelve memoria al sistema por su cuenta: tras abrir el panel o
+// Compras quedaba con 150-180MB retenidos aunque lo vivo fueran ~60MB, y
+// al sumar Chromium (~300MB) para un PDF la instancia de 512MB moria. Se
+// fuerza la recoleccion cuando el servidor queda quieto y justo antes de
+// lanzar Chromium. Se habilita en tiempo de ejecucion para no depender del
+// comando de arranque configurado en Render.
+let recolectaBasura = null;
+try {
+  v8.setFlagsFromString("--expose-gc");
+  recolectaBasura = vm.runInNewContext("gc");
+} catch {
+  recolectaBasura = null;
+}
+const megas = (bytes) => Math.round(bytes / 1048576);
+function liberaMemoria(motivo = "") {
+  if (typeof recolectaBasura !== "function") return;
+  const antes = process.memoryUsage().rss;
+  try { recolectaBasura(); } catch { return; }
+  const despues = process.memoryUsage().rss;
+  if (antes - despues > 15 * 1048576) console.log(`[mem] liberados ${megas(antes - despues)}MB (${motivo}); rss ${megas(despues)}MB`);
+}
+let pedidosEnCurso = 0;
+let limpiezaPendiente = null;
+let ultimoRegistroMem = 0;
+app.use((request, response, next) => {
+  pedidosEnCurso += 1;
+  const inicioRss = process.memoryUsage().rss;
+  let cerrado = false;
+  const alCerrar = () => {
+    if (cerrado) return;
+    cerrado = true;
+    pedidosEnCurso -= 1;
+    const uso = process.memoryUsage();
+    // Rastro en los logs de Render: que pedido hizo crecer la memoria y
+    // cuanto hay ocupado, para saber que corria antes de un "out of memory".
+    if (uso.rss - inicioRss > 25 * 1048576 || (uso.rss > 300 * 1048576 && Date.now() - ultimoRegistroMem > 30000)) {
+      ultimoRegistroMem = Date.now();
+      console.log(`[mem] ${request.method} ${request.path} +${megas(uso.rss - inicioRss)}MB -> rss ${megas(uso.rss)}MB heap ${megas(uso.heapUsed)}MB`);
+    }
+    clearTimeout(limpiezaPendiente);
+    limpiezaPendiente = setTimeout(() => {
+      if (pedidosEnCurso === 0 && process.memoryUsage().rss > 110 * 1048576) liberaMemoria("servidor en reposo");
+    }, 1500);
+  };
+  response.on("finish", alCerrar);
+  response.on("close", alCerrar);
+  next();
+});
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -1473,17 +1527,37 @@ function readStore() {
   return storeLoadPromise;
 }
 
-async function writeStore(store) {
+// Escrituras en fila y fusionadas (auditoria de memoria, 12-nov). Antes, dos
+// guardados a la vez serializaban el store completo cada uno (archivo +
+// respaldo = 4 copias en memoria) y chocaban en el mismo archivo temporal
+// (rename ENOENT -> error 500). Ahora hay una sola escritura en curso; las
+// que llegan mientras tanto se juntan en UNA que guarda el estado mas nuevo.
+let escrituraEnCurso = Promise.resolve();
+let escrituraEnEspera = null;
+function writeStore(store) {
   cachedStore = store;
+  if (escrituraEnEspera) return escrituraEnEspera;
+  const turno = escrituraEnCurso.then(() => {
+    escrituraEnEspera = null;
+    return escribeStoreAhora(cachedStore);
+  });
+  escrituraEnEspera = turno;
+  escrituraEnCurso = turno.then(() => undefined, () => undefined);
+  return turno;
+}
+
+async function escribeStoreAhora(store) {
   await fs.mkdir(dataDir, { recursive: true });
   // Escritura atomica: evita que una lectura concurrente (o un reinicio a
   // mitad de escritura) vea el JSON truncado.
   // Sin pretty-print: el archivo es de la maquina y el sangrado duplicaba
   // su tamaño en disco y en memoria al serializar.
   const tempPath = `${moduleStorePath}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(store));
+  // Una sola serializacion: el mismo texto va al archivo y al respaldo.
+  const json = JSON.stringify(store);
+  await fs.writeFile(tempPath, json);
   await fs.rename(tempPath, moduleStorePath);
-  await persistStoreToSupabase(store);
+  await persistStoreToSupabase(store, json);
 }
 
 function findReport(store, reportId) {
