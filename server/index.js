@@ -10968,6 +10968,122 @@ function listaExcluidosDe(client) {
 
 // soloSemanal: el modulo Compras y su descarga muestran SOLO la lista semanal
 // cuando el local la tiene. Los reportes no lo pasan: sus cifras no cambian.
+// PDF de la sugerencia de compra dibujado con pdf-lib (sin navegador): A4
+// horizontal, encabezado de tabla repetido en cada hoja, proveedor una vez
+// por grupo y Total general al final. Mismo contenido y columnas que el PDF
+// anterior hecho con Chromium.
+async function renderSugerenciaPdf({ titulo, subtitulo, fecha, filas, totales, pesos, cantidad }) {
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+  const doc = await PDFDocument.create();
+  const normal = await doc.embedFont(StandardFonts.Helvetica);
+  const negrita = await doc.embedFont(StandardFonts.HelveticaBold);
+  const ANCHO = 841.89;
+  const ALTO = 595.28;
+  const MARGEN = 28;
+  const navy = rgb(0, 0.118, 0.263);
+  const verde = rgb(0.565, 0.749, 0.31);
+  const gris = rgb(0.357, 0.396, 0.451);
+  const tinta = rgb(0.122, 0.165, 0.216);
+  const rojo = rgb(0.761, 0.216, 0.122);
+  const linea = rgb(0.902, 0.886, 0.847);
+  const crema = rgb(0.969, 0.957, 0.918);
+  // Las fuentes estandar solo cubren WinAnsi (incluye tildes y ñ): cualquier
+  // otro caracter se reemplaza para que un nombre raro no rompa la descarga.
+  const limpio = (texto) => String(texto ?? "")
+    .replace(/[‐-―]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7e\xa1-\xff]/g, "?")
+    .trim();
+  const recorta = (texto, fuente, tam, ancho) => {
+    let t = limpio(texto);
+    if (fuente.widthOfTextAtSize(t, tam) <= ancho) return t;
+    while (t.length > 1 && fuente.widthOfTextAtSize(`${t}...`, tam) > ancho) t = t.slice(0, -1);
+    return `${t.trimEnd()}...`;
+  };
+  const columnas = [
+    { t: "Proveedor", w: 132 }, { t: "Nombre Artículo", w: 170 }, { t: "Tamaño", w: 54 },
+    { t: "Costo unit.", w: 50, n: true }, { t: "Inventario", w: 44, n: true }, { t: "Inventario al costo", w: 70, n: true },
+    { t: "PAR", w: 34, n: true }, { t: "Compra sugerida", w: 62, n: true }, { t: "Costo de la compra", w: 68, n: true },
+    { t: "Inv. en días", w: 46, n: true }, { t: "Exceso inv.", w: 56, n: true },
+  ];
+  let x0 = MARGEN;
+  for (const columna of columnas) { columna.x = x0; x0 += columna.w; }
+  const TAM = 7.5;
+  let pagina = null;
+  let y = 0;
+  let primeraFilaDeHoja = true;
+  const celda = (columna, texto, fuente, color, yBase, tam = TAM) => {
+    const t = recorta(texto, fuente, tam, columna.w - 6);
+    const x = columna.n ? columna.x + columna.w - 3 - fuente.widthOfTextAtSize(t, tam) : columna.x + 3;
+    pagina.drawText(t, { x, y: yBase, size: tam, font: fuente, color });
+  };
+  const nuevaPagina = () => {
+    pagina = doc.addPage([ANCHO, ALTO]);
+    y = ALTO - MARGEN;
+    if (doc.getPageCount() === 1) {
+      pagina.drawText(recorta(titulo, negrita, 15, 520), { x: MARGEN, y: y - 13, size: 15, font: negrita, color: navy });
+      pagina.drawText(recorta(subtitulo, normal, 8.5, 560), { x: MARGEN, y: y - 26, size: 8.5, font: normal, color: gris });
+      const f = limpio(fecha);
+      pagina.drawText(f, { x: ANCHO - MARGEN - normal.widthOfTextAtSize(f, 8.5), y: y - 26, size: 8.5, font: normal, color: gris });
+      pagina.drawRectangle({ x: MARGEN, y: y - 33, width: ANCHO - MARGEN * 2, height: 2.2, color: verde });
+      y -= 42;
+    }
+    pagina.drawRectangle({ x: MARGEN, y: y - 16, width: ANCHO - MARGEN * 2, height: 16, color: navy });
+    for (const columna of columnas) celda(columna, columna.t, negrita, rgb(1, 1, 1), y - 11, 6.6);
+    y -= 16;
+    primeraFilaDeHoja = true;
+  };
+  nuevaPagina();
+  if (!filas.length) {
+    pagina.drawText("No hay productos para este filtro.", { x: MARGEN, y: y - 30, size: 10, font: normal, color: gris });
+  }
+  let proveedorAnterior = null;
+  for (const item of filas) {
+    const alto = item.alerta ? 20 : 13;
+    if (y - alto < MARGEN + 30) nuevaPagina();
+    const cambiaGrupo = item.provider !== proveedorAnterior;
+    // El proveedor se escribe al cambiar de grupo y al empezar cada hoja.
+    const proveedor = cambiaGrupo || primeraFilaDeHoja ? item.provider : "";
+    proveedorAnterior = item.provider;
+    if (cambiaGrupo && !primeraFilaDeHoja) pagina.drawLine({ start: { x: MARGEN, y }, end: { x: ANCHO - MARGEN, y }, thickness: 0.7, color: rgb(0.725, 0.698, 0.635) });
+    primeraFilaDeHoja = false;
+    const base = y - 9;
+    const sugerido = item.suggested > 0;
+    celda(columnas[0], proveedor, negrita, gris, base);
+    celda(columnas[1], item.name, negrita, tinta, base);
+    if (item.alerta) celda(columnas[1], item.alerta, normal, rojo, base - 8, 6.2);
+    celda(columnas[2], item.size || "", normal, tinta, base);
+    celda(columnas[3], pesos(item.unitCost), normal, tinta, base);
+    celda(columnas[4], cantidad(item.onHand), normal, tinta, base);
+    celda(columnas[5], pesos(item.onHandCost), normal, tinta, base);
+    celda(columnas[6], cantidad(item.par), normal, tinta, base);
+    celda(columnas[7], cantidad(item.suggested), sugerido ? negrita : normal, sugerido ? navy : tinta, base);
+    celda(columnas[8], pesos(item.orderCost), sugerido ? negrita : normal, sugerido ? navy : tinta, base);
+    celda(columnas[9], item.inventoryDays ? cantidad(item.inventoryDays) : "-", normal, tinta, base);
+    celda(columnas[10], pesos(item.excessCost), item.excessCost > 0 ? negrita : normal, item.excessCost > 0 ? rojo : tinta, base);
+    y -= alto;
+    pagina.drawLine({ start: { x: MARGEN, y }, end: { x: ANCHO - MARGEN, y }, thickness: 0.4, color: linea });
+  }
+  if (filas.length) {
+    if (y - 16 < MARGEN + 14) nuevaPagina();
+    pagina.drawRectangle({ x: MARGEN, y: y - 16, width: ANCHO - MARGEN * 2, height: 16, color: crema });
+    pagina.drawLine({ start: { x: MARGEN, y }, end: { x: ANCHO - MARGEN, y }, thickness: 1.4, color: navy });
+    celda(columnas[0], "Total general", negrita, tinta, y - 11);
+    celda(columnas[1], `${filas.length} productos`, negrita, tinta, y - 11);
+    celda(columnas[5], pesos(totales.onHandCost), negrita, tinta, y - 11);
+    celda(columnas[8], pesos(totales.orderCost), negrita, navy, y - 11);
+    celda(columnas[10], pesos(totales.excessCost), negrita, tinta, y - 11);
+  }
+  const paginas = doc.getPages();
+  paginas.forEach((p, i) => {
+    const t = `Página ${i + 1} de ${paginas.length}`;
+    p.drawText(t, { x: ANCHO - MARGEN - normal.widthOfTextAtSize(t, 7), y: 14, size: 7, font: normal, color: gris });
+  });
+  return doc.save();
+}
+
 function computeSuggestionItems(opciones) {
   return enqueueSugerenciaJob(() => computeSuggestionItemsSinFila(opciones));
 }
@@ -11366,86 +11482,21 @@ app.get("/api/module1/clients/:clientId/purchase-suggestion", requireAuth, async
           : items;
       const pesos = (valor) => `$${Math.round(valor || 0).toLocaleString("es-CL")}`;
       const cantidad = (valor) => (Number.isFinite(valor) ? Number(valor.toFixed(2)).toLocaleString("es-CL") : "0");
-      let proveedorAnterior = "";
-      const cuerpo = filas.map((item) => {
-        const proveedor = item.provider === proveedorAnterior ? "" : item.provider;
-        proveedorAnterior = item.provider;
-        const sugerido = item.suggested > 0;
-        return `<tr class="${proveedor ? "grupo" : ""}">
-          <td class="prov">${escapeHtml(proveedor)}</td>
-          <td class="prod">${escapeHtml(item.name)}${item.alerta ? `<span class="alerta">${escapeHtml(item.alerta)}</span>` : ""}</td>
-          <td>${escapeHtml(item.size || "")}</td>
-          <td class="n">${pesos(item.unitCost)}</td>
-          <td class="n">${cantidad(item.onHand)}</td>
-          <td class="n">${pesos(item.onHandCost)}</td>
-          <td class="n">${cantidad(item.par)}</td>
-          <td class="n ${sugerido ? "fuerte" : ""}">${cantidad(item.suggested)}</td>
-          <td class="n ${sugerido ? "fuerte" : ""}">${pesos(item.orderCost)}</td>
-          <td class="n">${item.inventoryDays ? cantidad(item.inventoryDays) : "-"}</td>
-          <td class="n ${item.excessCost > 0 ? "exceso" : ""}">${pesos(item.excessCost)}</td>
-        </tr>`;
-      }).join("");
       const suma = (campo) => filas.reduce((total, item) => total + (item[campo] || 0), 0);
       const fecha = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Santiago" }).format(new Date());
       const alcance = exportScope === "comprar" ? "Por comprar" : exportScope === "exceso" ? "Con exceso de inventario" : "Todos los productos";
-      const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>
-        @page { size: A4 landscape; margin: 10mm; }
-        body { color: #1f2a37; font: 9.5px Calibri, Arial, sans-serif; margin: 0; }
-        header { align-items: flex-end; border-bottom: 3px solid #90BF4F; display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 6px; }
-        h1 { color: #001E43; font-size: 18px; margin: 0; }
-        header p { color: #5b6573; font-size: 10px; margin: 2px 0 0; }
-        table { border-collapse: collapse; width: 100%; }
-        thead th { background: #001E43; color: #fff; font-size: 8.5px; padding: 5px 4px; text-align: left; }
-        thead th.n { text-align: right; }
-        thead { display: table-header-group; }
-        tbody tr { break-inside: avoid; }
-        td { border-bottom: 1px solid #e6e2d8; padding: 3.5px 4px; vertical-align: top; }
-        tr.grupo td { border-top: 1px solid #b9b2a2; }
-        td.n { text-align: right; white-space: nowrap; }
-        td.prov { color: #5b6573; font-weight: 700; width: 17%; }
-        td.prod { font-weight: 600; }
-        td.fuerte { color: #001E43; font-weight: 800; }
-        td.exceso { color: #c2371f; font-weight: 700; }
-        .alerta { color: #c2371f; display: block; font-size: 8px; font-weight: 400; }
-        tfoot td { background: #f7f4ea; border-top: 2px solid #001E43; font-weight: 800; }
-        .vacio { color: #5b6573; padding: 20px; text-align: center; }
-      </style></head><body>
-        <header>
-          <div><h1>${escapeHtml(client.name || client.id)}</h1><p>Sugerencia de compra · ${escapeHtml(alcance)} · Período ${escapeHtml(period.label || period.id)}</p></div>
-          <p>Envío de sugerencia · ${escapeHtml(fecha)}</p>
-        </header>
-        ${filas.length ? `<table>
-          <thead><tr>
-            <th>Proveedor</th><th>Nombre Artículo</th><th>Tamaño</th><th class="n">Costo unit.</th><th class="n">Inventario</th>
-            <th class="n">Inventario al costo</th><th class="n">PAR</th><th class="n">Compra sugerida</th><th class="n">Costo de la compra</th>
-            <th class="n">Inventario en días</th><th class="n">Exceso de inventario</th>
-          </tr></thead>
-          <tbody>${cuerpo}</tbody>
-          <tfoot><tr>
-            <td>Total general</td><td>${filas.length} productos</td><td></td><td></td><td></td>
-            <td class="n">${pesos(suma("onHandCost"))}</td><td></td><td></td>
-            <td class="n">${pesos(suma("orderCost"))}</td><td></td><td class="n">${pesos(suma("excessCost"))}</td>
-          </tr></tfoot>
-        </table>` : `<p class="vacio">No hay productos para este filtro.</p>`}
-      </body></html>`;
       try {
-        // En la misma fila que los PDF de reportes: un solo render a la vez.
-        const pdf = await enqueuePdfJob(async () => {
-          clearTimeout(pdfBrowserIdleTimer);
-          let pagina;
-          try {
-            const browser = await getPdfBrowser();
-            pagina = await browser.newPage();
-            await pagina.setContent(html, { waitUntil: "load", timeout: 60000 });
-            return await pagina.pdf({ format: "A4", landscape: true, printBackground: true, preferCSSPageSize: true });
-          } catch (error) {
-            await descartaPdfBrowser();
-            throw error;
-          } finally {
-            if (pagina) await pagina.close().catch(() => {});
-            // Cerrar Chrome si queda ocioso: en Render la memoria es justa.
-            schedulePdfBrowserClose();
-          }
+        // Sin Chromium (13-nov): es una tabla sin graficos, asi que se dibuja
+        // directo con pdf-lib. Antes cada descarga lanzaba el navegador
+        // (~300MB) y en la instancia de 512MB eso era un riesgo de OOM.
+        const pdf = await renderSugerenciaPdf({
+          titulo: client.name || client.id,
+          subtitulo: `Sugerencia de compra · ${alcance} · Período ${period.label || period.id}`,
+          fecha: `Envío de sugerencia · ${fecha}`,
+          filas,
+          totales: { onHandCost: suma("onHandCost"), orderCost: suma("orderCost"), excessCost: suma("excessCost") },
+          pesos,
+          cantidad,
         });
         const scopeName = exportScope === "comprar" ? " - por comprar" : exportScope === "exceso" ? " - con exceso" : "";
         const fileName = `Sugerencia de compra - ${client.name || client.id} - ${period.label || period.id}${scopeName}`
