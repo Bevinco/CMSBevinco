@@ -3851,6 +3851,118 @@ function clavePar(nombre) {
 
 // Barra con PAR fijo: Sculpture entrega PAR/Orden/Costo; para los productos
 // con PAR cargado a mano se rehace la orden como PAR - existencia, y el costo.
+// --- Ultimo costo conocido (pedido de Paulina, 17-nov) ---------------------
+// Cuando un producto no tiene stock, Sculpture lo lista SIN costo unitario
+// en el Intelipar de ese periodo, y la sugerencia salia "comprar 5" con costo
+// $0 (galletitas de avena en Cafe Diario; Reineta y Salsa Di Tanno en El
+// Muelle). El CMS guarda por local el ultimo costo que vio de cada producto
+// (client.ultimosCostos) y lo usa cuando el periodo viene sin costo. Si nunca
+// lo vio, lo busca una vez en los periodos anteriores de Sculpture.
+const PERIODOS_ATRAS_PARA_COSTO = 6;
+
+function filasDeProductoConCosto(rows) {
+  const salida = [];
+  for (const row of rows || []) {
+    const record = row.record || (row.record = {});
+    const name = pickRecordValue(record, ["itemName", "item"], "") || pickRecordValueFuzzy(record, /nombreArt/i) || row.values?.[0] || "";
+    if (!name || isTotalRow(name) || /:\s*$/.test(name) || /^grand\s+total$/i.test(String(name).trim())) continue;
+    // Encabezado de familia: fila sin ningun dato.
+    if ((row.values || []).slice(1).every((valor) => String(valor ?? "").trim() === "")) continue;
+    const claveCosto = Object.keys(record).find((key) => /costoUnit/i.test(key)) || "costoUnitario";
+    salida.push({ record, clave: clavePar(name), claveCosto, costo: parseNumber(record[claveCosto]) });
+  }
+  return salida;
+}
+
+let guardadoDeCostosPendiente = null;
+function guardaCostosPronto() {
+  clearTimeout(guardadoDeCostosPendiente);
+  guardadoDeCostosPendiente = setTimeout(async () => {
+    try {
+      await writeStore(await readStore());
+    } catch (error) {
+      console.error("[costos] no se pudo guardar el ultimo costo:", error.message);
+    }
+  }, 4000);
+}
+
+// Anota los costos que trae la tabla. Devuelve true si aprendio algo nuevo.
+function registraCostos(client, filas, period) {
+  if (!client) return false;
+  client.ultimosCostos ||= {};
+  const fin = String(period?.endsAt || "");
+  const etiqueta = String(period?.label || period?.id || "");
+  let cambio = false;
+  for (const fila of filas) {
+    if (!(fila.costo > 0) || !fila.clave) continue;
+    const previo = client.ultimosCostos[fila.clave];
+    // Un periodo mas viejo no pisa el costo de uno mas nuevo.
+    if (previo && fin && previo.fin && fin < previo.fin) continue;
+    if (previo && previo.costo === fila.costo && previo.fin === fin) continue;
+    client.ultimosCostos[fila.clave] = { costo: fila.costo, fin, periodo: etiqueta };
+    cambio = true;
+  }
+  return cambio;
+}
+
+async function completaCostosFaltantes({ client, period, rows, area, baseUrl, cid }) {
+  if (!client || !rows?.length) return;
+  const filas = filasDeProductoConCosto(rows);
+  // El outlier de costo (9.500.000 por unidad) no se aprende como "ultimo
+  // costo": mismo criterio de mediana que usa la sugerencia de cocina.
+  const muestras = filas.map((fila) => fila.costo).filter((valor) => valor > 0).sort((a, b) => a - b);
+  const mediana = muestras.length ? muestras[Math.floor(muestras.length / 2)] : 0;
+  const techo = muestras.length >= UNIT_COST_SAMPLE_MIN && mediana > 0 ? mediana * UNIT_COST_OUTLIER_FACTOR : Infinity;
+  let cambio = registraCostos(client, filas.filter((fila) => fila.costo <= techo), period);
+
+  const sinCosto = filas.filter((fila) => !(fila.costo > 0) && fila.clave);
+  client.costosBuscados ||= {};
+  const pidActual = String(period?.sculpturePid || period?.pid || period?.id || "");
+  const porBuscar = new Set(sinCosto
+    .filter((fila) => !client.ultimosCostos[fila.clave] && client.costosBuscados[fila.clave] !== pidActual)
+    .map((fila) => fila.clave));
+  if (porBuscar.size) {
+    try {
+      const periodos = await fetchSculpturePeriodsForClient({ baseUrl, cid, accountId: client.sculptureAccountId || "" });
+      const finActual = String(period?.endsAt || "");
+      const anteriores = periodos
+        .filter((candidato) => candidato.endsAt && (!finActual || candidato.endsAt < finActual) && String(candidato.pid) !== pidActual)
+        .sort((a, b) => String(b.endsAt).localeCompare(String(a.endsAt)))
+        .slice(0, PERIODOS_ATRAS_PARA_COSTO);
+      for (const anterior of anteriores) {
+        if (!porBuscar.size) break;
+        let previo;
+        try {
+          previo = await fetchSculptureInternalReport({ type: "intelipar", cid, pid: String(anterior.pid), area, baseUrl, accountId: client.sculptureAccountId || "" });
+        } catch {
+          continue;
+        }
+        const filasPrevias = filasDeProductoConCosto(previo.rows).filter((fila) => fila.costo > 0 && fila.costo <= techo && porBuscar.has(fila.clave));
+        if (registraCostos(client, filasPrevias, anterior)) cambio = true;
+        for (const fila of filasPrevias) porBuscar.delete(fila.clave);
+      }
+    } catch (error) {
+      console.error("[costos] no se pudieron revisar periodos anteriores:", error.message);
+    }
+    // Lo que no aparecio en ningun periodo reciente no se vuelve a buscar en
+    // cada apertura del mismo periodo (son varias tablas de Sculpture).
+    for (const clave of porBuscar) { client.costosBuscados[clave] = pidActual; cambio = true; }
+  }
+
+  for (const fila of sinCosto) {
+    const conocido = client.ultimosCostos[fila.clave];
+    if (!conocido?.costo) continue;
+    const { record } = fila;
+    record[fila.claveCosto] = `$${conocido.costo}`;
+    record.avisoUltimoPrecio = `Sin costo en Sculpture este período: se usa el último costo conocido ($${Math.round(conocido.costo).toLocaleString("es-CL")}${conocido.periodo ? `, ${conocido.periodo}` : ""})`;
+    record.alertaCosto = record.avisoUltimoPrecio;
+    // Barra: la orden viene de Sculpture; solo falta valorizarla.
+    const orden = parseNumber(record.orden);
+    if (orden > 0 && !parseNumber(record.costoPedido)) record.costoPedido = `$${Math.round(orden * conocido.costo)}`;
+  }
+  if (cambio) guardaCostosPronto();
+}
+
 function aplicaParFijoSobreSculpture(rows, parFijo) {
   for (const row of rows) {
     const record = row.record || {};
@@ -3991,7 +4103,7 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
     // ni /nombreArt/i.
     record.alertaCosto = suspectUnitCost
       ? `Costo unitario atípico en Sculpture (${Math.round(unitCost)}): no se valoriza el pedido`
-      : "";
+      : (record.avisoUltimoPrecio || "");
     pendingOrderCost += orderCost;
   }
   return true;
@@ -4232,6 +4344,7 @@ async function syncSculptureSources(store, report, requestBody = {}) {
         // Por AREA, no por columnas (Sculpture agrego Par/Orden a cocina).
         const isKitchenTable = /food/i.test(area);
         if (isKitchenTable) applyEffectiveInventory(data.rows, detailedStockUnits, client);
+        await completaCostosFaltantes({ client, period: periodForDays, rows: data.rows, area, baseUrl, cid });
         enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable, parFijo: client?.parFijo });
 
         // Lo que hay que comprar primero: mayor costo de pedido o exceso.
@@ -11133,6 +11246,14 @@ async function computeSuggestionItemsSinFila({ client, period, mixStock, soloSem
   } else {
     applyBarMixInventory(data.rows, client, mixStock);
   }
+  await completaCostosFaltantes({
+    client,
+    period,
+    rows: data.rows,
+    area: client?.area || "Food",
+    baseUrl: client?.sculptureBaseUrl || client?.baseUrl || baseUrlForSculptureArea(client?.area || "Food"),
+    cid,
+  });
   enrichKitchenIntelipar(data.rows, { daysInPeriod, params: client?.purchaseParams, force: isKitchenTable, parFijo: client?.parFijo });
 
   const todosLosItems = data.rows
