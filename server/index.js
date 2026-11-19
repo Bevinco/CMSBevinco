@@ -3998,7 +3998,13 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
     if (parFijo && Object.keys(parFijo).length) aplicaParFijoSobreSculpture(rows, parFijo);
     for (const row of rows) {
       const record = row.record || {};
-      if (!record.parFuente && String(record.par ?? "").trim()) record.parFuente = "sculpture";
+      if (!record.parFuente && String(record.par ?? "").trim()) {
+        record.parFuente = "sculpture";
+        // PAR de Sculpture siempre hacia arriba (24,4 -> 25; pedido 19-nov).
+        // La orden de barra se respeta tal como la entrega Sculpture.
+        const parNativo = parseNumber(record.par);
+        if (Number.isFinite(parNativo) && parNativo > 0) record.par = String(Math.ceil(parNativo - 1e-9));
+      }
     }
     return false;
   }
@@ -4073,7 +4079,9 @@ function enrichKitchenIntelipar(rows, { daysInPeriod = 7, params = {}, force = f
     const par = usaParFijo
       ? parCargado
       : usaParSculpture
-        ? parSculpture
+        // El PAR de Sculpture siempre hacia arriba: 24,4 es 25, no 24
+        // (pedido del equipo, 19-nov).
+        ? roundUp(parSculpture)
         : roundUp(daily * (suggestionDays + extraDays) * (1 + coverage));
     record.parFuente = usaParFijo ? "fijo" : usaParSculpture ? "sculpture" : "cms";
     const suggested = Math.max(roundUp(par - onHand), 0);
