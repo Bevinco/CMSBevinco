@@ -3281,7 +3281,7 @@ function App() {
     module1: ["Operación semanal", "Reportes semanales"],
     monthly: ["Operación mensual", "Reportes mensuales"],
     compras: ["Operación de compras", "Sugerencias de compra"],
-    recipes: ["Cocina", "Recetario y costos"],
+    recipes: ["Cocina", "Recetario, costos y márgenes"],
     clientes: ["Directorio", "Clientes y correos"],
     tasks: ["Gestión operativa", "Pendientes del equipo"],
     reports: ["Historial", "Reportes generados"],

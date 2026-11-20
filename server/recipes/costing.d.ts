@@ -1,7 +1,10 @@
+import type { ActualSales } from "./sales.js";
+
 export type Scope = { clientId: string; account: string; area: "Food" };
 export type RecipeLine = { itemId: string; quantity: number; unit: string };
 export type RecipeBundle = {
   schemaVersion: 1; scope: Scope; clientName?: string; sourceReadAt: string; salesPeriod?: string;
+  actualSales?: ActualSales;
   items: Array<{ id: string; name: string; unit: string; scope: Scope; kind: "material" | "preparation" | "yield"; conversion?: { gramsPerMl: number; authority: string }; prices?: Array<{ unitCost: number; enteredAt: string; source: string; origin: "invoice" | "recorded" | "manual" | "estimate"; scope: Scope }>; lines?: RecipeLine[]; outputQuantity?: number; rawId?: string; yieldRatio?: number }>;
   recipes: Array<{ id: string; name: string; portions: number; lines: RecipeLine[]; notes?: string[]; sides: Array<{ itemId: string; count: number }>; options: Array<{ name: string; lines: RecipeLine[] }>; saleNet?: number | null; saleSource?: string }>;
 };

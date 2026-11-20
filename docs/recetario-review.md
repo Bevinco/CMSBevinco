@@ -12,6 +12,14 @@ Cuando falta un precio o una equivalencia, la receta afectada conserva el subtot
 
 Los archivos reales, nombres, fotos, identificadores y costos de clientes son privados. No se incluyen en este repositorio público, fixtures, assets ni bundle del cliente. Las pruebas usan datos sintéticos.
 
+## Ventas y margen por plato
+
+El JSON puede incluir `actualSales` con `source: "Toteat"`, `startDate`, `endDate` en formato ISO y `rows`. Cada fila lleva `recipeId`, `productCodes`, `units` y `netRevenue` del período. Homologar los códigos antes de cargar y usar el monto pagado del producto, sin IVA ni propina. Los códigos se asignan a una sola ficha por corte. Para un producto identificado sin venta, registrar unidades e ingreso en cero. Si el código no está confirmado, omitir la fila. Las fichas de versiones anteriores siguen abriendo.
+
+Cuando el plato tiene recetas alternativas, `options` contiene `name` y `units` por elección. Solo adjuntar el desglose si todas las unidades están respaldadas por el POS. Con este detalle, el costo usa la mezcla efectivamente vendida. Las guarniciones siguen el ponderado indicado en la ficha. Las opciones o costos incompletos conservan el ingreso y dejan el margen pendiente.
+
+El módulo muestra unidades, ingreso neto, precio neto promedio, costo de ingredientes, contribución y margen porcentual. Fórmula del período: contribución ÷ ingreso neto, con contribución igual a ingreso neto menos costo de ingredientes. La fuente se incorpora como corte privado conciliado mediante la importación del recetario.
+
 ## Verificación local
 
 ```sh

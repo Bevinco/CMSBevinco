@@ -1,4 +1,5 @@
 // Pure costing: no database, network, writes, or cross-client price fallback.
+import { validateActualSales } from "./sales.js";
 const UNITS = { g: ["mass", 1], kg: ["mass", 1000], ml: ["volume", 1], L: ["volume", 1000], un: ["count", 1] };
 const validNumber = (value, positive = false) => typeof value === "number" && Number.isFinite(value) && (positive ? value > 0 : value >= 0);
 const scopeKey = (scope) => JSON.stringify([scope?.clientId, scope?.account, scope?.area]);
@@ -53,6 +54,7 @@ export function validateBundle(bundle) {
     if (recipe.saleNet != null && !recipe.saleSource?.trim()) throw new Error("Precio de venta sin fuente.");
     for (const option of recipe.options) if (!option.name?.trim() || !Array.isArray(option.lines) || !option.lines.length) throw new Error("Opción sin composición.");
   }
+  validateActualSales(bundle.actualSales, bundle.recipes);
   const lineGroups = [...bundle.items.filter(x => x.kind === "preparation").map(x => x.lines), ...bundle.recipes.flatMap(x => [x.lines, ...x.options.map(o => o.lines)])];
   if (lineGroups.some(lines => lines.some(line => !line?.itemId?.trim() || !validNumber(line.quantity) || !UNITS[line.unit]))) throw new Error("Ingrediente con cantidad o unidad inválida.");
   return bundle;

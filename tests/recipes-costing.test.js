@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { convertQuantity, evaluateRecipes } from "../server/recipes/costing.js";
+import { evaluateActualSale } from "../server/recipes/sales.js";
 const scope = { clientId: "synthetic-food", account: "account-a", area: "Food" };
 const price = (unitCost, enteredAt = "2026-01-01T10:00:00Z", other = {}) => ({ unitCost, enteredAt, scope, source: "Factura de prueba", origin: "invoice", ...other });
 const material = (id = "raw", other = {}) => ({ id, name: id, kind: "material", unit: "g", scope, prices: [price(10)], ...other });
@@ -90,4 +91,51 @@ test("margins need a sourced net sales price and complete cost", () => {
 test("same-time contradictory costs require reconciliation instead of arbitrary selection", () => {
   assert.equal(first(bundle({ items: [material("raw", { prices: [price(10), price(12)] })] })).totalCost, null);
   assert.equal(first(bundle({ items: [material("raw", { prices: [price(10), price(12, "2026-01-01T07:00:00-03:00")] })] })).totalCost, null);
+});
+
+const toteat = (rows) => ({ source: "Toteat", startDate: "2026-01-11", endDate: "2026-01-17", rows });
+const actualRow = (other = {}) => ({ recipeId: "plate", units: 5, netRevenue: 30000, productCodes: ["sku-1"], ...other });
+
+test("actual margin uses period net revenue and complete ingredient cost", () => {
+  const row = actualRow();
+  const dish = first(bundle({ actualSales: toteat([row]) }));
+  const sale = evaluateActualSale(row, dish);
+  assert.equal(sale.netPerUnit, 6000);
+  assert.equal(sale.ingredientCost, 10000);
+  assert.equal(sale.contribution, 20000);
+  assert.ok(Math.abs(sale.marginPercent - 200 / 3) < 1e-10);
+
+  const incomplete = first(bundle({ items: [material("raw", { prices: [] })] }));
+  assert.equal(evaluateActualSale(row, incomplete).contribution, null);
+  assert.equal(evaluateActualSale(row, incomplete).netRevenue, 30000);
+  assert.equal(evaluateActualSale(undefined, dish), null);
+
+  const free = evaluateActualSale(actualRow({ netRevenue: 0 }), dish);
+  assert.equal(free.contribution, -10000);
+  assert.equal(free.marginPercent, null);
+  const inactive = evaluateActualSale(actualRow({ units: 0, netRevenue: 0 }), dish);
+  assert.equal(inactive.hasSales, false);
+});
+
+test("actual margin requires a complete mix of sold options and counts included sides once", () => {
+  const variable = recipe("plate", {
+    sides: [{ itemId: "side", count: 5 }],
+    options: [{ name: "Option A", lines: [line("raw", 10)] }, { name: "Option B", lines: [line("raw", 20)] }],
+  });
+  const items = [material(), material("side", { unit: "un", prices: [price(500)] })];
+  const row = actualRow({ options: [{ name: "Option A", units: 2 }, { name: "Option B", units: 3 }] });
+  const data = bundle({ items, recipes: [variable], actualSales: toteat([row]) });
+  const dish = first(data);
+  assert.equal(evaluateActualSale(row, dish).ingredientCost, 13300);
+  assert.equal(evaluateActualSale(actualRow(), dish).ingredientCost, null);
+  assert.throws(() => first({ ...data, actualSales: toteat([actualRow({ options: [{ name: "Option A", units: 4 }] })]) }), /todas las unidades/);
+});
+
+test("actual sales reject dates that roll over, orphan recipes and double-counted codes", () => {
+  assert.throws(() => first(bundle({ actualSales: { ...toteat([]), startDate: "2025-02-29" } })), /período/);
+  assert.throws(() => first(bundle({ actualSales: toteat([actualRow({ recipeId: "wrong" })]) })), /sin receta/);
+  assert.throws(() => first(bundle({
+    recipes: [recipe(), recipe("other")],
+    actualSales: toteat([actualRow(), actualRow({ recipeId: "other" })]),
+  })), /más de una receta/);
 });
