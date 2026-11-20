@@ -9,7 +9,8 @@ const number = (value: number) => new Intl.NumberFormat("es-CL", { maximumFracti
 const date = (value: string) => new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Santiago" }).format(new Date(value));
 const salesDay = (value: string) => new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
 const salesPeriod = (sales: ActualSales) => `${salesDay(sales.startDate)} – ${salesDay(sales.endDate)}`;
-const formatMargin = (value: number | null) => value === null ? "—" : `${number(value)} %`;
+const marginNumber = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+const formatMargin = (value: number | null) => value === null ? "—" : `${marginNumber.format(value)} %`;
 function salesStatus(sale: EvaluatedSale | null | undefined) {
   if (sale?.marginPercent != null) return `${formatMargin(sale.marginPercent)} de margen`;
   return sale?.hasSales === false ? "Sin ventas" : "Margen pendiente";
